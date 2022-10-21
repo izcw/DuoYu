@@ -1,0 +1,341 @@
+* {
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+}
+
+:root {
+  --main_bg_color1: #17181a;
+  --main_bg_color2: #1f2022;
+  --main_bg_color3: #16161a;
+  --main_bg_color4: #191919;
+  --main_text_color1: #FFF;
+
+}
+
+
+
+
+.homepage_box {
+  width: 100%;
+  height: 100%;
+  background-image: url(/images/006.jpg);
+  /* 背景图垂直、水平均居中 */
+  background-position: center center;
+  /* 背景图不平铺 */
+  background-repeat: no-repeat;
+  /* 当内容高度大于图片高度时，背景图像的位置相对于viewport固定 */
+  background-attachment: fixed;
+  /* 让背景图基于容器大小伸缩 */
+  background-size: cover;
+  /* 设置背景颜色，背景图加载过程中会显示背景色 */
+  background-color: var(--main_bg_color1);
+  /* overflow: hidden; */
+}
+
+
+.mask_div {
+  width: 100%;
+  height: 100%;
+  /* transition: all 0.5s ease; */
+  -webkit-transform: translateZ(0);
+  -moz-transform: translateZ(0);
+  -ms-transform: translateZ(0);
+  -o-transform: translateZ(0);
+  transform: translateZ(0);
+  transition: color 1s linear;
+
+}
+
+
+
+
+
+
+.search_div {
+  height: 100%;
+  height: 320px;
+  /* background-color: var(--main_bg_color1); */
+
+}
+
+.mask_div {
+  backdrop-filter: blur(42px) !important;
+}
+
+
+
+.glass {
+  width: 100%;
+  height: 100%;
+  z-index: 999;
+  display: flex;
+  transition: 0.3s;
+}
+
+/* 输入框 */
+.time_date {
+  font-size: 20px;
+  color: var(--main_text_color1);
+  opacity: 0.7;
+  line-height: 60px;
+
+}
+
+.input_box {
+  margin: auto;
+  width: 580px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+}
+
+.search_input {
+  width: 100%;
+  padding: 0 52px;
+  height: 52px;
+  border: none;
+  outline: none;
+  box-sizing: border-box;
+  border-radius: 26px;
+  font-size: 16px;
+  color: var(--main_text_color1);
+  background: var(--main_bg_color2);
+  box-shadow: inset -1px -2px 5px #131219;
+
+}
+
+
+/* 2输入框 */
+.substance_center_inpu {
+  width: 100%;
+  box-shadow: 0px 2px 5px #131219;
+}
+
+.search_input2_div {
+  width: 1400px;
+  display: flex;
+  align-items: center;
+  margin: 0 auto;
+
+}
+
+.search_input2 {
+  width: 450px;
+  margin: 0 10px;
+  padding: 0 42px;
+  height: 42px;
+  border: none;
+  outline: none;
+  box-sizing: border-box;
+  border-radius: 26px;
+  font-size: 16px;
+  color: var(--main_text_color1);
+  background: var(--main_bg_color1);
+  box-shadow: inset -1px -2px 5px #131219;
+}
+
+/* .search_input:focus .input_box {
+  width: 700px;
+} */
+
+
+
+/* 输入框 */
+
+
+/* 内容盒子 */
+.substance_box {
+  width: 100%;
+  height: 100%;
+  background-color: rgba(31, 32, 34, 1);
+  /* background-color: var(--main_bg_color2); */
+  /* display: none; */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.substance_center {
+  width: 1400px;
+  height: 100%;
+  margin: 30px;
+  display: flex;
+
+}
+
+.substance_centers2 {
+  width: 1400px;
+  height: 100%;
+  margin: 30px;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+/* 看板 */
+.container_board_box {
+  width: 700px;
+}
+
+
+.board_box {
+  width: calc(100% - 40px);
+  border-top: 0.2px solid rgba(94, 94, 94, 0.3);
+  border-bottom: 0.2px solid rgba(94, 94, 94, 0.3);
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin: 0 10px;
+}
+
+
+.gradient_name {
+  font-size: 20px;
+  color: #9b8fe6;
+  padding: 6px 0;
+
+}
+
+/* 看板 */
+
+
+/* 常用 */
+
+.common_tab {
+  width: 190px;
+  height: 60px;
+  /* background-color: #17181a; */
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  margin-right: 10px;
+  border-bottom: 0.2px solid rgba(94, 94, 94, 0.1);
+
+
+}
+
+.log_search {
+  width: 50px;
+  height: 50px;
+  border-radius: 16px;
+}
+
+.tab_title {
+  font-size: 14px;
+  color: var(--main_text_color1);
+  padding: 3px 10px;
+  margin: 0;
+  transition: all 0.5s ease;
+  opacity: 0.7;
+
+  display: block;
+}
+
+.tab_link {
+  font-size: 14px;
+  color: #9b8fe6;
+  opacity: 0.5;
+  text-decoration: none;
+  transition: all 0.5s ease;
+  display: block;
+  padding: 3px 10px;
+  word-wrap: break-word;
+  word-break: break-all;
+}
+
+.common_tab:hover {
+  background: linear-gradient(to right, var(--main_bg_color4), transparent);
+
+}
+
+.common_tab:hover .tab_title {
+  opacity: 1;
+
+}
+
+.common_tab:hover .tab_link {
+  opacity: 1;
+  display: block;
+
+}
+
+/* 切换点 */
+.switch_spot {
+  display: flex;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.5s ease;
+
+}
+
+.switch_spot .switch_spot_item {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+  background-color: var(--main_text_color1);
+  opacity: 0.4;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  margin: 10px 4px;
+}
+
+.switch_spot:hover {
+  opacity: 1;
+
+}
+
+.switch_spot .switch_spot_item:hover {
+  opacity: 1;
+
+}
+
+/* 常用 */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* 一键打开 */
+.onekey_open {
+  width: 280px;
+  padding: 1rem;
+  border: 0.2px solid rgba(94, 94, 94, 0.3);
+  border-radius: 10px;
+  background-color: var(--main_bg_color3);
+}
+
+
+
+/* 一键打开 */
+@media (max-width: 1460px) {
+  .substance_center {
+    width: 100%;
+  }
+
+  .substance_centers2 {
+    width: 100%;
+  }
+}
+
+
+@media (max-width: 575.98px) {}
+
+@media (min-width:991px) and (max-width: 1460px) {}
