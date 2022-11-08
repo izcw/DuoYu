@@ -5,7 +5,7 @@ Start page of R&D personnel
 
 #### 演示
 
-1.  demonstration [blog.gitee.com](https://blog.gitee.com)
+1.  demonstration [https://03-yoko.github.io/RD_HomePage/](https://03-yoko.github.io/RD_HomePage/)
 
 #### 软件架构
 软件架构说明
