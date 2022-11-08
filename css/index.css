@@ -24,7 +24,7 @@ body {
 .homepage_box {
   width: 100%;
   height: 100%;
-  background-image: url(/images/006.jpg);
+  background-image: url(https://03-yoko.github.io/RD_HomePage/images/006.jpg);
   /* 背景图垂直、水平均居中 */
   background-position: center center;
   /* 背景图不平铺 */
