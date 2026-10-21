@@ -1,0 +1,47 @@
+{
+  "name": "duoyu-extension",
+  "description": "多鱼新标签页",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.18.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "wxt -b chrome",
+    "build": "wxt build -b chrome",
+    "zip": "wxt zip -b chrome",
+    "typecheck": "vue-tsc --noEmit",
+    "test:smoke": "node scripts/smoke.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "pnpm typecheck && pnpm format:check",
+    "postinstall": "wxt prepare",
+    "test:search": "node scripts/search-regression.mjs",
+    "test:engines": "node scripts/engine-wheel.mjs",
+    "test:wallpaper": "node scripts/wallpaper-cache.mjs",
+    "test:workspace": "node scripts/workspace.mjs",
+    "test:workspace-collections": "node scripts/workspace-collections.mjs",
+    "test:library": "node scripts/library.mjs",
+    "test:widgets": "node scripts/widgets.mjs",
+    "test:shortcuts": "node scripts/shortcuts.mjs",
+    "test:radial": "node scripts/radial-wheel.mjs",
+    "test:widget-links": "node scripts/widget-links.mjs",
+    "test:glass": "node scripts/glass.mjs"
+  },
+  "dependencies": {
+    "dexie": "^4.4.6",
+    "gridstack": "^14.0.0",
+    "vue": "^3.5.44"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^24.19.2",
+    "@wxt-dev/module-vue": "^1.0.3",
+    "prettier": "^3.9.10",
+    "typescript": "^5.9.3",
+    "vue-tsc": "^3.3.13",
+    "wxt": "^0.21.4"
+  }
+}

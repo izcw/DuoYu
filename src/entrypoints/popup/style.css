@@ -1,0 +1,46 @@
+@import url('../../styles/tokens.css');
+
+:root {
+  color-scheme: light dark;
+  font-family: var(--font-sans);
+  color: #252529;
+  background: #f5f5f7;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  width: 340px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.popup-panel {
+  min-height: 240px;
+  padding: 20px;
+  overflow: hidden;
+  background: #f5f5f7;
+}
+.popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.popup-header img {
+  display: block;
+}
+.popup-version {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #efefed;
+    background: #18181b;
+  }
+  .popup-panel {
+    background: #18181b;
+  }
+}

@@ -1,0 +1,68 @@
+/* Material only: components own size, radius, position and motion. */
+.glass-surface,
+.liquid-glass {
+  border: 0;
+  background: var(--glass-control-fill);
+  -webkit-backdrop-filter: var(--glass-control-filter);
+  backdrop-filter: var(--glass-control-filter);
+  box-shadow: var(--glass-control-edge), var(--glass-control-shadow);
+}
+.glass-control {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+}
+.glass-interactive {
+  cursor: pointer;
+}
+/* The engine trigger is the common hover/press/selection treatment. */
+.glass-interactive:not(:disabled):not([aria-disabled='true']):is(
+    :hover,
+    :active,
+    :focus-visible,
+    [aria-expanded='true'],
+    [aria-pressed='true'],
+    [aria-selected='true'],
+    [aria-checked='true'],
+    .is-marked
+  ),
+.glass-interaction-owner:not(:disabled):not([aria-disabled='true']):is(
+    :hover,
+    :active,
+    :focus-visible
+  )
+  > .glass-interaction-target {
+  background: var(--glass-interaction-fill);
+  /* Keep the surface filter; nested controls must not blur the panel again. */
+}
+.glass-interactive:disabled,
+.glass-interactive[aria-disabled='true'] {
+  opacity: 0.4;
+  cursor: default;
+}
+.glass-field {
+  color: #fff;
+  caret-color: #fff;
+}
+.glass-field::placeholder {
+  color: rgb(255 255 255 / 70%);
+}
+.liquid-glass > * {
+  position: relative;
+  z-index: 1;
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .glass-surface,
+  .liquid-glass {
+    background-color: rgb(40 55 70 / 45%);
+  }
+}
+/* WebGL supplies the same material plus refraction. Never stack a CSS fill on it. */
+.webgl-glass-ready .liquid-glass[data-liquid-card] {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-color: transparent;
+  box-shadow: var(--glass-control-shadow);
+}

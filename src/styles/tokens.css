@@ -1,0 +1,37 @@
+:root {
+  --glass-tint-start: 250 249 255;
+  --glass-tint-end: 184 181 196;
+  --glass-alpha-start: 0.3;
+  --glass-alpha-end: 0.2;
+  --glass-angle: 145;
+  --glass-saturation: 1.1;
+  --glass-rim-alpha: 0.3;
+  --glass-top-alpha: 0.32;
+  --glass-blur-real: 3;
+  --glass-blur-natural: 10;
+  --glass-blur-soft: 20;
+  --glass-control-fill: linear-gradient(
+    calc(var(--glass-angle) * 1deg),
+    rgb(var(--glass-tint-start) / var(--glass-alpha-start)),
+    rgb(var(--glass-tint-end) / var(--glass-alpha-end))
+  );
+  --glass-blur: var(--glass-blur-natural);
+  --glass-control-filter: blur(calc(var(--glass-blur) * 1px))
+    saturate(var(--glass-saturation));
+  --glass-control-edge:
+    inset 0 0 0 1px rgb(255 255 255 / var(--glass-rim-alpha)),
+    inset 0 1px 0 rgb(255 255 255 / var(--glass-top-alpha));
+  --glass-control-shadow: 0 4px 14px rgb(12 14 24 / 10%);
+  --glass-interaction-fill: rgb(239 239 237 / 16%);
+  --font-sans: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+:root[data-glass-mode='real'] {
+  --glass-blur: var(--glass-blur-real);
+}
+:root[data-glass-mode='natural'] {
+  --glass-blur: var(--glass-blur-natural);
+}
+:root[data-glass-mode='soft'] {
+  --glass-blur: var(--glass-blur-soft);
+}
