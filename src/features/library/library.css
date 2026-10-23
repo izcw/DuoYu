@@ -77,9 +77,8 @@
 .library-scroll {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 20px 8px;
-  scrollbar-width: thin;
 }
 .library-grid {
   display: grid;
@@ -229,9 +228,14 @@
   grid-column: 1/-1;
   justify-content: flex-end;
 }
-.library-confirm {
-  padding: 12px 20px;
-  border-radius: 14px;
+.library-confirm > p {
+  margin: 0 0 20px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.library-confirm .library-form-actions {
+  display: flex;
+  gap: 8px;
 }
 .library-error {
   color: #ffe0d6;
@@ -288,4 +292,24 @@
   .library-tile-move {
     transition: none;
   }
+}
+
+.library-context-menu {
+  position: fixed;
+  z-index: 2147483647;
+  width: 180px;
+  padding: 6px;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: white;
+}
+.library-context-menu button {
+  padding: 10px 12px;
+  border-radius: 10px;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
 }

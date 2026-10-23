@@ -66,3 +66,52 @@
   border-color: transparent;
   box-shadow: var(--glass-control-shadow);
 }
+
+/* Shared full-screen focus material for collections and the tab workspace. */
+.glass-focus-layer {
+  --glass-focus-duration: 320ms;
+  -webkit-backdrop-filter: blur(52px);
+  backdrop-filter: blur(52px);
+  background: rgb(255 255 255 / 14%);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Home, collection folders and widgets share one wallpaper-backed material.
+   Sampling the wallpaper directly avoids re-blurring the collection focus sheet. */
+:root[data-desktop-wallpaper='ready'] .desktop-card-glass {
+  isolation: isolate;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+:root[data-desktop-wallpaper='ready'] .desktop-card-glass::before {
+  content: '';
+  position: absolute;
+  inset: -40px;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    var(--glass-control-fill),
+    linear-gradient(
+      180deg,
+      rgb(9 21 30 / 20%),
+      rgb(9 21 30 / 8%) 55%,
+      rgb(9 21 30 / 30%)
+    ),
+    var(--desktop-wallpaper-image);
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+  filter: var(--glass-control-filter);
+}
+:root[data-desktop-wallpaper='ready'] .desktop-card-glass::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: var(--glass-control-edge);
+}

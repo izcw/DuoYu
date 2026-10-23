@@ -2,7 +2,11 @@ const PREVIEW_KEY = 'duoyu:wallpaper-preview';
 const MAX_PREVIEW_LENGTH = 180_000;
 
 /** Best-effort startup thumbnail; the original image stays in Dexie. */
-export function saveWallpaperPreview(image: HTMLImageElement, version: string) {
+export function saveWallpaperPreview(
+  image: HTMLImageElement,
+  version: string,
+  sourceUrl: string,
+) {
   try {
     const stored = localStorage.getItem(PREVIEW_KEY);
     if (stored) {
@@ -29,11 +33,21 @@ export function saveWallpaperPreview(image: HTMLImageElement, version: string) {
     const context = canvas.getContext('2d');
     if (!context) return;
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const data = canvas.toDataURL('image/jpeg', 0.65);
-    const preview = JSON.stringify({ version, data });
-    if (preview.length <= MAX_PREVIEW_LENGTH)
-      localStorage.setItem(PREVIEW_KEY, preview);
+    for (const quality of [0.65, 0.45, 0.25]) {
+      const data = canvas.toDataURL('image/jpeg', quality);
+      const preview = JSON.stringify({ version, sourceUrl, data });
+      if (preview.length <= MAX_PREVIEW_LENGTH) {
+        localStorage.setItem(PREVIEW_KEY, preview);
+        return;
+      }
+    }
+    localStorage.removeItem(PREVIEW_KEY);
   } catch {
+    try {
+      localStorage.removeItem(PREVIEW_KEY);
+    } catch {
+      /* Storage unavailable. */
+    }
     // Quota, decode and privacy restrictions do not affect the 4K wallpaper.
   }
 }

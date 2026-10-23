@@ -1,0 +1,179 @@
+:root {
+  --icon-drag-lift-scale: 1.1;
+}
+.bottom-widget-grid {
+  margin: 0 auto;
+}
+.bottom-widget-grid > .grid-stack-item > .widget-card {
+  overflow: hidden;
+  border-radius: 22px;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease;
+}
+.hold-pending .widget-card {
+  background-color: rgb(255 255 255 / 8%);
+}
+.ui-draggable-armed .widget-card,
+.ui-draggable-dragging .widget-card {
+  cursor: grabbing;
+  transform: scale(1.025);
+}
+.bottom-widget-grid .grid-stack-placeholder > .placeholder-content {
+  border: 1px dashed rgb(255 255 255 / 65%);
+  border-radius: 22px;
+  background: rgb(255 255 255 / 12%);
+}
+.bottom-widget-grid.grid-stack-animate
+  > .grid-stack-item:not(.ui-draggable-dragging) {
+  transition:
+    left 220ms ease,
+    top 220ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bottom-widget-grid.grid-stack-animate > .grid-stack-item,
+  .bottom-widget-grid > .grid-stack-item > .widget-card {
+    transition: none;
+  }
+}
+
+/* The same lifted, opaque preview treatment used by widget-link dragging. */
+.icon-like-grid > .ui-draggable-dragging {
+  opacity: 1 !important;
+  z-index: 2147482999 !important;
+}
+.icon-like-grid > .ui-draggable-dragging > .widget-card {
+  transform: scale(var(--icon-drag-lift-scale));
+  cursor: grabbing;
+}
+.icon-like-grid .grid-stack-placeholder > .placeholder-content {
+  border: 0;
+  background: transparent;
+}
+
+/* Individual cell targets appear only while moving or resizing items. */
+.grid-guide-cells {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--grid-guide-columns), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--grid-guide-rows), minmax(0, 1fr));
+  place-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+.grid-guide-cells > span {
+  align-self: start;
+  margin-top: var(--gs-item-margin-top, 8px);
+  width: var(--desktop-icon-size, 56px);
+  height: var(--desktop-icon-size, 56px);
+  border-radius: 12px;
+  background: rgb(239 239 237 / 12%);
+}
+.grid-guides-visible > .grid-guide-cells {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .grid-guide-cells {
+    transition: none;
+  }
+}
+
+.bottom-widget-grid > .grid-stack-item > .ui-resizable-se {
+  right: calc(var(--gs-item-margin-right, 8px) + 4px);
+  bottom: calc(
+    var(--gs-item-margin-bottom, 8px) + var(--grid-caption-space, 0px) + 4px
+  );
+  opacity: 0;
+  transition: opacity 160ms ease;
+  background-image: url('/images/resize-corner.png');
+  background-size: 12px 12px;
+  background-position: center;
+  background-repeat: no-repeat;
+  transform: rotate(90deg);
+}
+
+.bottom-widget-grid > .grid-stack-item:hover > .ui-resizable-se {
+  opacity: 0.45;
+}
+.bottom-widget-grid > .grid-stack-item > .ui-resizable-se:hover,
+.bottom-widget-grid > .ui-resizable-resizing > .ui-resizable-se {
+  opacity: 1;
+}
+.bottom-widget-grid > .ui-resizable-resizing > .widget-card {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bottom-widget-grid > .grid-stack-item > .ui-resizable-se {
+    transition: none;
+  }
+}
+
+.grid-selection-box {
+  position: fixed;
+  z-index: 2147483000;
+  pointer-events: none;
+  border: 1px solid rgb(239 239 237 / 80%);
+  border-radius: 8px;
+  background: rgb(239 239 237 / 15%);
+}
+.bottom-widget-grid.grid-stack-animate > .grid-selection-dragging {
+  transition: none;
+  z-index: 2147482999 !important;
+  cursor: grabbing;
+}
+.grid-selection-dragging > .widget-card {
+  transform: scale(1.025);
+  opacity: 1;
+}
+.bottom-widget-grid > .ui-draggable-dragging > .widget-card,
+.bottom-widget-grid > .grid-selection-dragging > .widget-card {
+  outline: none;
+}
+
+.bottom-widget-grid.grid-stack-animate > .grid-selection-pushed {
+  transition: transform 180ms ease;
+}
+
+/* Anchor link handles to the visible icon instead of the larger grid cell. */
+.library-cell-grid > [data-kind='link'] > .ui-resizable-se {
+  width: 18px;
+  height: 18px;
+  right: max(8px, calc((100% - var(--cell-icon-size)) / 2));
+  top: calc(
+    var(--gs-item-margin-top, 8px) + var(--link-content-offset, 0px) +
+      min(
+        var(--cell-icon-size),
+        100% - var(--gs-item-margin-top, 8px) -
+          var(--gs-item-margin-bottom, 8px) - var(--grid-caption-space)
+      ) -
+      18px
+  );
+  bottom: auto;
+}
+
+/* Dragged tiles keep their glass fill without a rim or cast shadow. */
+.bottom-widget-grid > :is(.ui-draggable-dragging, .grid-selection-dragging) {
+  --glass-control-edge: 0 0 transparent;
+  --glass-control-shadow: 0 0 transparent;
+}
+.bottom-widget-grid > :is(.ui-draggable-dragging, .grid-selection-dragging),
+.bottom-widget-grid
+  > :is(.ui-draggable-dragging, .grid-selection-dragging)
+  > .widget-card,
+.bottom-widget-grid
+  > :is(.ui-draggable-dragging, .grid-selection-dragging)
+  > .widget-card::after,
+.bottom-widget-grid
+  > :is(.ui-draggable-dragging, .grid-selection-dragging)
+  .cell-icon {
+  box-shadow: none !important;
+  border: 0 !important;
+  outline: none !important;
+}

@@ -1,4 +1,46 @@
 import { database, type WallpaperRecord } from '../../shared/storage/database';
+import { saveWallpaperPreview } from './wallpaper-preview';
+
+async function syncPreview(record: WallpaperRecord) {
+  const url = URL.createObjectURL(record.blob);
+  try {
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    saveWallpaperPreview(
+      image,
+      record.contentHash || `${record.sourceUrl}:${record.savedAt}`,
+      record.sourceUrl,
+    );
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Share the writer's lock: an old tab must never restore an older preview. */
+export async function readWallpaperForDisplay() {
+  return navigator.locks.request('duoyu:daily-wallpaper', async () => {
+    const record = await readWallpaper();
+    if (record) {
+      try {
+        await syncPreview(record);
+      } catch {
+        /* Refresh will repair corrupt originals. */
+      }
+    }
+    return record;
+  });
+}
+
+async function fingerprint(blob: Blob) {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    await blob.arrayBuffer(),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+}
 
 export async function readWallpaper() {
   try {
@@ -63,14 +105,40 @@ export async function refreshWallpaper(
         sourceUrl,
         blob,
         savedAt: Date.now(),
+        contentHash: await fingerprint(blob),
       };
+      if (cached && record.contentHash === (await fingerprint(cached.blob))) {
+        record.blob = cached.blob;
+        record.savedAt = cached.savedAt;
+      }
       try {
         // Keep one last-good image; a failed request never deletes it.
         await database.wallpapers.put(record);
+        await syncPreview(record);
       } catch {
         // Even when the disk is full, the downloaded image can still be displayed.
       }
       return record;
     },
   );
+}
+
+export async function importWallpaper(blob: Blob) {
+  if (!blob.type.startsWith('image/') || blob.size > 20 * 1024 * 1024)
+    throw new Error('请选择不超过 20 MB 的图片');
+  const decoded = await decodeWallpaper(blob);
+  URL.revokeObjectURL(decoded);
+  await navigator.locks.request('duoyu:daily-wallpaper', async () => {
+    const record: WallpaperRecord = {
+      id: 'daily',
+      sourceUrl: 'local:' + (await fingerprint(blob)),
+      blob,
+      savedAt: Date.now(),
+      contentHash: await fingerprint(blob),
+    };
+    await database.wallpapers.put(record);
+    await syncPreview(record);
+    localStorage.setItem('duoyu-wallpaper-mode', 'custom');
+  });
+  window.dispatchEvent(new Event('duoyu-wallpaper-change'));
 }

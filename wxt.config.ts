@@ -10,8 +10,9 @@ export default defineConfig({
       'https://api.bing.com/*',
       'https://api.bimg.cc/*',
       'https://bing.com/*',
+      'https://www.bing.com/*',
     ],
-    permissions: ['storage', 'tabs', 'favicon'],
+    permissions: ['storage', 'tabs', 'tabGroups', 'favicon'],
     action: {
       default_title: '多鱼',
       default_state: 'enabled',

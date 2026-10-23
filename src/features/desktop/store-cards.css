@@ -1,0 +1,85 @@
+.store-card-grid {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  flex-shrink: 0;
+}
+.widget-card-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.wallpaper-card-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.store-card {
+  min-width: 0;
+  position: relative;
+  border: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  color: inherit;
+  cursor: pointer;
+}
+.store-card:focus-visible {
+  outline: 2px solid white;
+  outline-offset: 2px;
+}
+.store-card:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+.store-widget-card {
+  aspect-ratio: 4 / 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+}
+.store-widget-card .tool-symbol {
+  font-size: 32px;
+}
+.store-widget-card strong {
+  font-size: 13px;
+}
+.wallpaper-card {
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.wallpaper-card > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.wallpaper-caption {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 18px 10px 8px;
+  background: linear-gradient(transparent, #0009);
+  text-align: left;
+  color: white;
+}
+.wallpaper-caption strong,
+.wallpaper-caption small {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.wallpaper-caption strong {
+  font-size: 12px;
+}
+.wallpaper-caption small {
+  font-size: 10px;
+  opacity: 0.8;
+  margin-top: 3px;
+}

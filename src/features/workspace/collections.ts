@@ -19,19 +19,42 @@ export function hostname(value: string) {
     return value;
   }
 }
-export async function createCollection(name: string, tabs: SavedTab[] = []) {
-  return database.transaction('rw', database.tabCollections, async () => {
-    const last = await database.tabCollections.orderBy('order').last();
-    const collection: TabCollection = {
-      id: crypto.randomUUID(),
-      name: name.trim().slice(0, 80) || '未命名集合',
-      order: (last?.order ?? -1) + 1,
-      updatedAt: Date.now(),
-      tabs,
-    };
-    await database.tabCollections.add(collection);
-    return collection.id;
-  });
+export async function createCollection(
+  name: string,
+  tabs: SavedTab[] = [],
+  spaceId = 'default',
+) {
+  return database.transaction(
+    'rw',
+    database.tabCollections,
+    database.workspaceSpaces,
+    async () => {
+      if (!(await database.workspaceSpaces.get(spaceId)))
+        throw new Error('空间已不存在，请重新选择');
+      const last = await database.tabCollections.orderBy('order').last();
+      const existing = await database.tabCollections.toArray();
+      const nextNumber =
+        existing
+          .filter((c) => (c.spaceId || 'default') === spaceId)
+          .reduce(
+            (max, c) =>
+              Math.max(max, Number(/^集合(\d+)$/.exec(c.name)?.[1] || 0)),
+            0,
+          ) + 1;
+      const collection: TabCollection = {
+        id: crypto.randomUUID(),
+        name:
+          name.trim().slice(0, 80) ||
+          `集合${String(nextNumber).padStart(2, '0')}`,
+        order: (last?.order ?? -1) + 1,
+        updatedAt: Date.now(),
+        tabs,
+        spaceId,
+      };
+      await database.tabCollections.add(collection);
+      return collection.id;
+    },
+  );
 }
 export async function renameCollection(id: string, name: string) {
   const trimmed = name.trim().slice(0, 80);
@@ -95,5 +118,30 @@ export async function reorderCollection(id: string, before: string) {
     await database.tabCollections.bulkPut(
       rest.map((c, order) => ({ ...c, order })),
     );
+  });
+}
+
+export async function updateSavedTab(
+  groupId: string,
+  id: string,
+  changes: { title?: string; url?: string; starred?: boolean },
+) {
+  await database.transaction('rw', database.tabCollections, async () => {
+    const group = await database.tabCollections.get(groupId);
+    const tab = group?.tabs.find((t) => t.id === id);
+    if (!group || !tab) throw new Error('标签页已被移除，请刷新后重试');
+    if (changes.title !== undefined) {
+      if (!changes.title.trim()) throw new Error('请输入名称');
+      tab.title = changes.title.trim().slice(0, 200);
+    }
+    if (changes.url !== undefined) {
+      const url = webUrl(changes.url.trim());
+      if (!url) throw new Error('请输入完整的 http:// 或 https:// 网址');
+      if (url !== tab.url) tab.icon = '';
+      tab.url = url;
+    }
+    if (changes.starred !== undefined) tab.starred = changes.starred;
+    group.updatedAt = Date.now();
+    await database.tabCollections.put(group);
   });
 }

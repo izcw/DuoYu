@@ -1,6 +1,12 @@
 <script setup lang="ts">
-import { nextTick, onUnmounted, ref, useId, watch } from 'vue';
-const props = defineProps<{ open: boolean; title: string }>();
+import { nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
+const props = defineProps<{
+  open: boolean;
+  title: string;
+  folder?: boolean;
+  width?: number;
+  aspectRatio?: number;
+}>();
 const emit = defineEmits<{ 'update:open': [value: boolean] }>();
 const panel = ref<HTMLElement>();
 const titleId = useId();
@@ -53,7 +59,18 @@ watch(
   },
   { immediate: true },
 );
+function escapeOutside(event: KeyboardEvent) {
+  if (
+    props.open &&
+    event.key === 'Escape' &&
+    !panel.value?.contains(event.target as Node) &&
+    [...document.querySelectorAll('.base-dialog')].at(-1) === panel.value
+  )
+    key(event);
+}
+onMounted(() => document.addEventListener('keydown', escapeOutside, true));
 onUnmounted(() => {
+  document.removeEventListener('keydown', escapeOutside, true);
   if (props.open && previous?.isConnected) previous.focus();
 });
 </script>
@@ -67,14 +84,36 @@ onUnmounted(() => {
     >
       <section
         ref="panel"
-        class="base-dialog glass-surface"
+        class="base-dialog"
+        :style="
+          aspectRatio
+            ? {
+                width: `min(${width || 1160}px, calc(100vw - 32px), calc((100svh - 32px) * ${aspectRatio}))`,
+                aspectRatio: String(aspectRatio),
+              }
+            : width
+              ? { width: `min(${width}px, calc(100vw - 32px))` }
+              : undefined
+        "
+        :class="[
+          folder ? 'folder-dialog' : 'glass-surface',
+          { 'fixed-ratio-dialog': aspectRatio },
+        ]"
         role="dialog"
         aria-modal="true"
         :aria-labelledby="titleId"
         tabindex="-1"
       >
-        <h2 :id="titleId">{{ title }}</h2>
-        <slot :close="close" />
+        <h2 :id="titleId">
+          <slot name="title">{{ title }}</slot>
+        </h2>
+        <div
+          v-if="folder"
+          class="folder-dialog-content glass-surface desktop-card-glass"
+        >
+          <slot :close="close" />
+        </div>
+        <slot v-else :close="close" />
       </section></div
   ></Teleport>
 </template>
@@ -98,8 +137,33 @@ onUnmounted(() => {
   color: #fff;
   outline: none;
 }
+.fixed-ratio-dialog {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.fixed-ratio-dialog > h2 {
+  flex-shrink: 0;
+}
 h2 {
   margin: 0 0 20px;
   font-size: 20px;
+}
+
+.folder-dialog {
+  width: min(848px, calc(100vw - 32px));
+  padding: 0;
+  background: none;
+}
+.folder-dialog h2 {
+  text-align: center;
+  margin: 0 0 20px;
+}
+.folder-dialog-content {
+  position: relative;
+  overflow: hidden;
+  padding: 24px;
+  border-radius: 28px;
 }
 </style>

@@ -56,6 +56,20 @@ try {
     assert.equal(new Set(boxes.map((b) => b.x)).size, 4);
     assert.equal(new Set(boxes.map((b) => b.y)).size, 2);
   }
+  const desktop = page.locator('.desktop-pages');
+  const homeY = (await page.locator('.bottom-widgets').boundingBox()).y;
+  await page.mouse.move(1200, 450);
+  await page.mouse.wheel(0, 160);
+  await expect(desktop).toHaveAttribute('data-desktop-page', '1');
+  await page.waitForTimeout(700);
+  assert((await page.locator('.bottom-widgets').boundingBox()).y < homeY - 80);
+  await expect(
+    page.getByRole('navigation', { name: '收藏页面' }),
+  ).toHaveAttribute('aria-hidden', 'false');
+  await page.screenshot({ path: 'work/desktop-second-page.png' });
+  await page.mouse.wheel(0, -160);
+  await expect(desktop).toHaveAttribute('data-desktop-page', '0');
+  await page.waitForTimeout(700);
   const pageCount = context.pages().length;
   await move('chatgpt', 'widget-1', 2);
   assert.deepEqual(await links('widget-1'), ['deepseek', 'claude', 'chatgpt']);

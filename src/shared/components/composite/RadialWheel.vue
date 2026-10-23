@@ -260,7 +260,7 @@ onMounted(() => {
   document.addEventListener('pointerup', up);
   document.addEventListener('pointercancel', cancel);
   window.addEventListener('blur', windowBlur);
-  document.addEventListener('focusin', lostFocus);
+  document.addEventListener('focusin', lostFocus, true);
   document.addEventListener('visibilitychange', visibilityChanged);
 });
 onUnmounted(() => {
@@ -268,7 +268,7 @@ onUnmounted(() => {
   document.removeEventListener('pointerup', up);
   document.removeEventListener('pointercancel', cancel);
   window.removeEventListener('blur', windowBlur);
-  document.removeEventListener('focusin', lostFocus);
+  document.removeEventListener('focusin', lostFocus, true);
   document.removeEventListener('visibilitychange', visibilityChanged);
 });
 </script>

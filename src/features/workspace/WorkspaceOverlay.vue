@@ -1,59 +1,12 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { isWallpaperBlank } from '../wallpaper/blank-area';
+import { nextTick, onUnmounted, ref, watch } from 'vue';
 import WorkspaceBoard from './WorkspaceBoard.vue';
 
 const active = defineModel<boolean>({ default: false });
-const props = withDefaults(
-  defineProps<{ label?: string; blankEntry?: boolean }>(),
-  { label: '工作区', blankEntry: true },
-);
+withDefaults(defineProps<{ label?: string }>(), { label: '工作区' });
 const workspace = ref<HTMLElement>();
-let press: { x: number; y: number; id: number } | undefined;
 let previous: HTMLElement | null = null;
 
-function cancel() {
-  press = undefined;
-}
-function down(event: PointerEvent) {
-  cancel();
-  if (
-    !props.blankEntry ||
-    document.documentElement.classList.contains('workspace-active') ||
-    active.value ||
-    event.button !== 0 ||
-    !event.isPrimary ||
-    // Capture this before wheel handlers close it on the same pointerdown.
-    document.querySelector('.radial-wheel[aria-hidden="false"]') !== null ||
-    !isWallpaperBlank(event.target)
-  )
-    return;
-  previous =
-    document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-  press = { x: event.clientX, y: event.clientY, id: event.pointerId };
-}
-function move(event: PointerEvent) {
-  if (
-    press?.id === event.pointerId &&
-    Math.hypot(event.clientX - press.x, event.clientY - press.y) > 6
-  )
-    cancel();
-}
-function click(event: MouseEvent) {
-  const start = press;
-  cancel();
-  if (
-    !start ||
-    event.button !== 0 ||
-    active.value ||
-    !isWallpaperBlank(event.target) ||
-    Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6
-  )
-    return;
-  active.value = true;
-}
 function key(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     event.preventDefault();
@@ -84,6 +37,12 @@ function key(event: KeyboardEvent) {
   }
 }
 watch(active, async (value) => {
+  if (value) {
+    previous =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+  }
   document.documentElement.classList.toggle('workspace-active', value);
   await nextTick();
   if (value && active.value) workspace.value?.focus({ preventScroll: true });
@@ -92,19 +51,7 @@ function restoreFocus() {
   if (!active.value && previous?.isConnected)
     previous.focus({ preventScroll: true });
 }
-onMounted(() => {
-  document.addEventListener('pointerdown', down, true);
-  document.addEventListener('pointermove', move, true);
-  document.addEventListener('pointercancel', cancel);
-  document.addEventListener('click', click);
-  window.addEventListener('blur', cancel);
-});
 onUnmounted(() => {
-  document.removeEventListener('pointerdown', down, true);
-  document.removeEventListener('pointermove', move, true);
-  document.removeEventListener('pointercancel', cancel);
-  document.removeEventListener('click', click);
-  window.removeEventListener('blur', cancel);
   document.documentElement.classList.remove('workspace-active');
 });
 </script>
@@ -115,7 +62,7 @@ onUnmounted(() => {
       <div
         v-if="active"
         ref="workspace"
-        class="workspace-overlay glass-surface"
+        class="workspace-overlay glass-focus-layer"
         role="dialog"
         aria-modal="true"
         :aria-label="label"
@@ -124,9 +71,7 @@ onUnmounted(() => {
         @contextmenu.prevent.stop
         @keydown="key"
       >
-        <slot :close="() => (active = false)"
-          ><WorkspaceBoard @close="active = false"
-        /></slot>
+        <slot :close="() => (active = false)"><WorkspaceBoard /></slot>
       </div>
     </Transition>
   </Teleport>
@@ -135,14 +80,21 @@ onUnmounted(() => {
 <style>
 .newtab,
 .wallpaper-status,
-body > :not(#app):not(.workspace-overlay) {
+body
+  > :not(#app):not(.desktop-dock):not(.workspace-overlay):not(
+    .base-dialog-backdrop
+  ):not(.library-context-menu) {
   transition:
     opacity 320ms ease,
     visibility 0s;
 }
 .workspace-active .newtab,
 .workspace-active .wallpaper-status,
-.workspace-active body > :not(#app):not(.workspace-overlay) {
+.workspace-active
+  body
+  > :not(#app):not(.desktop-dock):not(.workspace-overlay):not(
+    .base-dialog-backdrop
+  ):not(.library-context-menu) {
   visibility: hidden !important;
   opacity: 0 !important;
   pointer-events: none !important;
@@ -153,7 +105,7 @@ body > :not(#app):not(.workspace-overlay) {
 .workspace-overlay {
   position: fixed;
   inset: 0;
-  z-index: 2147483647;
+  z-index: 2147483000;
   width: 100%;
   height: 100%;
   margin: 0;
@@ -170,7 +122,7 @@ body > :not(#app):not(.workspace-overlay) {
 }
 .workspace-fade-enter-active,
 .workspace-fade-leave-active {
-  transition: opacity 320ms ease;
+  transition: opacity var(--glass-focus-duration, 320ms) ease;
 }
 .workspace-fade-enter-from,
 .workspace-fade-leave-to {

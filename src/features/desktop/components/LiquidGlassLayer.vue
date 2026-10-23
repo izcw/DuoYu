@@ -18,12 +18,15 @@ function draw() {
   if (disposed || document.hidden || !renderer || !lastSource) return;
   try {
     const painted = renderer.render(
-      [...document.querySelectorAll<HTMLElement>('[data-liquid-card]')].map(
-        (card) =>
+      [...document.querySelectorAll<HTMLElement>('[data-liquid-card]')]
+        // Search and widgets share one GPU layer. Exclude hidden surfaces,
+        // never hide the entire layer when only the widgets leave the page.
+        .filter((card) => !card.closest('[aria-hidden="true"]'))
+        .map((card) =>
           Object.assign(card.getBoundingClientRect(), {
             radius: parseFloat(getComputedStyle(card).borderTopLeftRadius),
           }),
-      ),
+        ),
       props.mode,
     );
     if (painted && canvas.value) {
@@ -42,6 +45,9 @@ function schedule(duration = 0) {
   until = Math.max(until, performance.now() + duration);
   if (!frame && !document.hidden && renderer && lastSource)
     frame = requestAnimationFrame(draw);
+}
+function pageChanged() {
+  schedule(650);
 }
 function changed() {
   schedule(280);
@@ -132,6 +138,7 @@ onMounted(() => {
       attributes: true,
       attributeFilter: ['src', 'class'],
     });
+  document.addEventListener('desktop-page-change', pageChanged);
   document.addEventListener('pointermove', pointer, { passive: true });
   document.addEventListener('pointerup', changed);
   document.addEventListener('scroll', changed, true);
@@ -148,6 +155,7 @@ onUnmounted(() => {
   mutation?.disconnect();
   wallpaper?.disconnect();
   wallpaperElement?.removeEventListener('load', imageChanged, true);
+  document.removeEventListener('desktop-page-change', pageChanged);
   document.removeEventListener('pointermove', pointer);
   document.removeEventListener('pointerup', changed);
   document.removeEventListener('scroll', changed, true);

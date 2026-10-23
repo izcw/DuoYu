@@ -6,8 +6,10 @@ await mkdir('work', { recursive: true });
 const profile = await mkdtemp(path.resolve('work/wallpaper-tests-'));
 const extension = path.resolve('.output/chrome-mv3');
 const image = await readFile('public/images/duoyu.png');
+let payload = image;
 let requests = 0;
 let mode = 'image';
+let releaseDownload;
 let context;
 async function launch() {
   context = await chromium.launchPersistentContext(profile, {
@@ -25,7 +27,11 @@ async function launch() {
     if (mode === 'offline') return r.abort();
     if (mode === 'corrupt')
       return r.fulfill({ contentType: 'image/png', body: 'broken' });
-    return r.fulfill({ contentType: 'image/png', body: image });
+    if (mode === 'delayed')
+      await new Promise((resolve) => {
+        releaseDownload = resolve;
+      });
+    return r.fulfill({ contentType: 'image/png', body: payload });
   });
 }
 async function record(page, action = 'read') {
@@ -73,11 +79,11 @@ async function record(page, action = 'read') {
     action,
   );
 }
-async function loaded(page) {
+async function loaded(page, width = 700) {
   await expect(page.locator('.wallpaper img.loaded')).toBeVisible();
   assert.equal(
     await page.locator('.wallpaper img').evaluate((el) => el.naturalWidth),
-    700,
+    width,
   );
   await expect(page.locator('.wallpaper-status')).toHaveCount(0);
 }
@@ -238,6 +244,53 @@ try {
   await loaded(page);
   assert.equal((await record(page)).size, image.length);
   console.log('PASS corrupt stored image recovers');
+  await record(page, 'stale');
+  await page.evaluate(() => {
+    const key = 'duoyu:wallpaper-preview';
+    const preview = JSON.parse(localStorage.getItem(key));
+    preview.sourceUrl =
+      'https://api.bimg.cc/today?uhd=true&mkt=zh-CN&date=2000-1-1';
+    preview.version = `${preview.sourceUrl}:1`;
+    localStorage.setItem(key, JSON.stringify(preview));
+  });
+  mode = 'delayed';
+  payload = await readFile('public/images/google.png');
+  const newWidth = 128;
+  await page.reload();
+  await expect.poll(() => typeof releaseDownload).toBe('function');
+  await expect(page.locator('.clock-time')).toBeVisible();
+  await loaded(page);
+  await expect(page.locator('html')).toHaveAttribute(
+    'data-wallpaper-preview',
+    'ready',
+  );
+  releaseDownload();
+  await expect
+    .poll(() =>
+      page.locator('.wallpaper img').evaluate((img) => img.naturalWidth),
+    )
+    .toBe(newWidth);
+  await loaded(page, newWidth);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          JSON.parse(localStorage.getItem('duoyu:wallpaper-preview')).sourceUrl,
+      ),
+    )
+    .not.toContain('2000-1-1');
+  mode = 'image';
+  const count = requests;
+  await page.reload();
+  await loaded(page, newWidth);
+  assert.equal(requests, count);
+  await expect(page.locator('html')).toHaveAttribute(
+    'data-wallpaper-preview',
+    'ready',
+  );
+  console.log(
+    'PASS startup uses cached wallpaper regardless of date; changed image updates original and preview before reload',
+  );
 } finally {
   await context?.close();
 }

@@ -3,28 +3,9 @@ import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 import AddShortcutDialog from './components/AddShortcutDialog.vue';
 import RadialWheel from '../../shared/components/composite/RadialWheel.vue';
 import { database, type ShortcutItem } from '../../shared/storage/database';
+import { shortcutActions as actions } from './actions';
 import { isWallpaperBlank as blank } from '../wallpaper/blank-area';
-const emit = defineEmits<{ workspace: []; library: [] }>();
-const actions: ShortcutItem[] = [
-  { id: 'duoyu-canvas', name: '画布', icon: '/images/shortcuts/canvas.png' },
-  { id: 'duoyu-memo', name: '便签', icon: '/images/shortcuts/memo.png' },
-  {
-    id: 'duoyu-translate',
-    name: '翻译',
-    icon: '/images/shortcuts/translate.png',
-    url: 'https://fanyi.baidu.com/',
-  },
-  {
-    id: 'duoyu-workspace',
-    name: '标签工作区',
-    icon: '/images/shortcuts/label.png',
-  },
-  {
-    id: 'duoyu-library',
-    name: '收藏库',
-    icon: '/images/shortcuts/collection.png',
-  },
-];
+const emit = defineEmits<{ workspace: [] }>();
 
 const defaults: ShortcutItem[] = [
   {
@@ -111,10 +92,9 @@ function select(id: string) {
   const item = items.value.find((entry) => entry.id === id);
   if (!item) return;
   close();
-  if (id === 'duoyu-workspace' || id === 'duoyu-library') {
+  if (id === 'duoyu-workspace') {
     setTimeout(() => {
-      if (id === 'duoyu-workspace') emit('workspace');
-      else emit('library');
+      emit('workspace');
     }, 220);
   } else if (id === 'add') {
     dialog.value = true;
@@ -123,11 +103,12 @@ function select(id: string) {
   }
 }
 function contextMenu(event: MouseEvent) {
+  if (event.defaultPrevented) return;
   if (ignoreContext) {
     event.preventDefault();
     return;
   }
-  if (!blank(event.target) || dialog.value) return;
+  if (!blank(event.target, event) || dialog.value) return;
   event.preventDefault();
   if (visible.value) {
     close();
@@ -146,7 +127,7 @@ function down(event: PointerEvent) {
       close();
       return;
     }
-    if (!blank(target)) return;
+    if (!blank(target, event)) return;
     event.preventDefault();
     ignoreContext = true;
     gesture = {
@@ -168,6 +149,14 @@ function down(event: PointerEvent) {
     close();
   }
 }
+function outsidePointer(event: PointerEvent) {
+  if (
+    visible.value &&
+    event.target instanceof Element &&
+    !event.target.closest('.wallpaper-wheel')
+  )
+    close();
+}
 function move(event: PointerEvent) {
   if (gesture?.id === event.pointerId && gesture.holding)
     wheel.value?.preview(event.clientX, event.clientY);
@@ -179,6 +168,7 @@ function up(event: PointerEvent) {
   gesture = undefined;
   if (finished.holding) {
     if (
+      Math.hypot(event.clientX - finished.x, event.clientY - finished.y) > 8 &&
       Math.hypot(
         event.clientX - center.value.x,
         event.clientY - center.value.y,
@@ -221,6 +211,7 @@ onMounted(async () => {
       items.value = items.value.filter(
         (item) =>
           ![
+            'duoyu-library',
             'bilibili',
             'xiaohongshu',
             'deepseek',
@@ -254,6 +245,7 @@ onMounted(async () => {
   ready = true;
   document.addEventListener('contextmenu', contextMenu);
   document.addEventListener('pointerdown', down);
+  document.addEventListener('pointerdown', outsidePointer, true);
   document.addEventListener('pointermove', move);
   document.addEventListener('pointerup', up);
   document.addEventListener('pointercancel', cancel);
@@ -266,6 +258,7 @@ onUnmounted(() => {
   clearTimeout(closeTimer);
   document.removeEventListener('contextmenu', contextMenu);
   document.removeEventListener('pointerdown', down);
+  document.removeEventListener('pointerdown', outsidePointer, true);
   document.removeEventListener('pointermove', move);
   document.removeEventListener('pointerup', up);
   document.removeEventListener('pointercancel', cancel);

@@ -8,7 +8,7 @@ const source = computed(() => {
   const value = props.src || '';
   if (
     !customFailed.value &&
-    /^(https?:\/\/|data:image\/)/i.test(value) &&
+    /^(https?:\/\/|data:image\/|\/images\/)/i.test(value) &&
     value.length < 65536
   )
     return value;
@@ -42,6 +42,7 @@ function onError() {
       v-if="source && !failed"
       :src="source"
       alt=""
+      draggable="false"
       loading="lazy"
       referrerpolicy="no-referrer"
       @error="onError"

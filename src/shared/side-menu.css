@@ -1,0 +1,126 @@
+.side-menu {
+  width: 90px;
+  padding: 8px;
+  border-radius: 22px;
+  max-height: calc(100svh - 40px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  color: white;
+}
+
+.side-menu .side-menu-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 3px;
+  width: 100%;
+  border-radius: 14px;
+  color: inherit;
+}
+
+.side-menu-icon {
+  width: 28px;
+  height: 28px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.side-menu-letter {
+  fill: currentColor;
+  stroke: none;
+  font-size: 13px;
+}
+
+.side-menu-choice[aria-pressed='true'] .side-menu-shape {
+  fill: currentColor;
+}
+
+.side-menu-choice[aria-pressed='true'] .side-menu-letter {
+  fill: #454545;
+}
+
+.side-menu-choice,
+.side-menu .side-menu-add {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.side-menu-choice:hover .side-menu-icon,
+.side-menu-add:hover img {
+  transform: scale(1.08);
+}
+
+.side-menu-icon,
+.side-menu-add img {
+  transition: transform 160ms ease;
+}
+
+.side-menu-choice:focus-visible,
+.side-menu-add:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: -2px;
+}
+
+.side-menu-add img {
+  display: block;
+  margin: auto;
+  object-fit: contain;
+}
+
+.side-menu-choice small {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.side-menu-context {
+  position: fixed;
+  z-index: 2147483001;
+  width: 180px;
+  padding: 8px;
+  box-sizing: border-box;
+  border-radius: 16px;
+  color: #efefed;
+  outline: none;
+}
+
+.side-menu-context button {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  border-radius: 10px;
+  color: inherit;
+  text-align: left;
+}
+
+.side-menu-form {
+  display: flex;
+  gap: 12px;
+}
+
+.side-menu-form input {
+  min-width: 0;
+  padding: 10px;
+}
+
+.side-menu-form button {
+  flex-shrink: 0;
+  padding: 10px 16px;
+  border-radius: 10px;
+  color: inherit;
+}
+
+.side-menu .side-menu-add {
+  width: 100%;
+  padding: 8px;
+  border-radius: 12px;
+  color: inherit;
+  font-size: 24px;
+}

@@ -30,6 +30,15 @@ try {
     r.fulfill({ contentType: 'image/png', body: icon }),
   );
   const page = await context.newPage();
+  await page.addInitScript(() => {
+    window.pageSlides = [];
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (frames, options) {
+      if (this.matches('.bottom-widgets, .desktop-library > .library-board'))
+        window.pageSlides.push(frames[0].transform);
+      return animate.call(this, frames, options);
+    };
+  });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('chrome://newtab');
@@ -96,6 +105,7 @@ try {
   await page.locator('.clock-time').waitFor();
   const wheel = page.locator('.wallpaper-wheel');
   const showWheel = async () => {
+    await page.waitForTimeout(400);
     await page.mouse.click(800, 450, { button: 'right' });
     await expect(wheel).toHaveAttribute('aria-hidden', 'false');
   };
@@ -147,7 +157,18 @@ try {
     .getByRole('menuitem', { name: '标签工作区', exact: true })
     .click();
   await expect(page.locator('.workspace-board')).toBeVisible();
-  await expect(page.locator('.workspace-board h1')).toHaveText('标签工作区');
+  await expect(page.locator('.workspace-board h1')).toHaveText('个人空间');
+  const focusMaterial = (element) => {
+    const css = getComputedStyle(element);
+    return {
+      blur: css.backdropFilter,
+      fill: css.backgroundColor,
+      shadow: css.boxShadow,
+    };
+  };
+  const workspaceMaterial = await page
+    .locator('.workspace-overlay')
+    .evaluate(focusMaterial);
   await page.getByRole('button', { name: '关闭工作区', exact: true }).click();
   await expect(page.locator('.workspace-overlay')).toHaveCount(0);
   await showWheel();
@@ -157,10 +178,17 @@ try {
   await expect(page.locator('.workspace-board')).toHaveCount(0);
   await expect(page.locator('.newtab')).toHaveAttribute('inert', '');
   const form = board.getByRole('form', { name: '编辑收藏' });
-  async function add(name, url) {
+  async function contextAction(name) {
     await board
-      .getByRole('button', { name: '＋ 添加网址', exact: true })
+      .locator('.library-scroll')
+      .click({ button: 'right', position: { x: 8, y: 8 } });
+    await page
+      .getByRole('menu', { name: '收藏页菜单' })
+      .getByRole('menuitem', { name, exact: true })
       .click();
+  }
+  async function add(name, url) {
+    await contextAction('＋ 添加网址');
     await board
       .getByRole('textbox', { name: '收藏名称', exact: true })
       .fill(name);
@@ -172,7 +200,7 @@ try {
   }
   await add('DeepSeek', 'https://example.com/deepseek');
   await add('Research', 'https://example.com/research');
-  await board.getByRole('button', { name: '新建文件夹', exact: true }).click();
+  await contextAction('新建文件夹');
   await board
     .getByRole('textbox', { name: '收藏名称', exact: true })
     .fill('AI 工具');
@@ -205,7 +233,7 @@ try {
   await expect(tile('DeepSeek')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(folder).toBeVisible();
-  await board.getByRole('button', { name: '整理', exact: true }).click();
+  await contextAction('整理');
   await board
     .getByRole('button', { name: '编辑 Research', exact: true })
     .click();
@@ -216,7 +244,7 @@ try {
     .getByRole('combobox', { name: '收藏文件夹' })
     .selectOption({ label: 'AI 工具' });
   await board.getByRole('button', { name: '保存', exact: true }).click();
-  await board.getByRole('button', { name: '完成', exact: true }).click();
+  await contextAction('完成整理');
   await board
     .getByRole('button', { name: '打开文件夹 AI 工具', exact: true })
     .click();
@@ -251,8 +279,8 @@ try {
     .poll(async () => (await page.evaluate(() => chrome.tabs.query({}))).length)
     .toBe(before.length + 1);
   await page.bringToFront();
-  await board.getByRole('button', { name: '全部收藏', exact: true }).click();
-  await board.getByRole('button', { name: '整理', exact: true }).click();
+  await board.getByRole('button', { name: '返回收藏页', exact: true }).click();
+  await contextAction('整理');
   await board
     .getByRole('button', { name: '删除 AI 工具', exact: true })
     .click();
@@ -278,6 +306,206 @@ try {
   await board.getByRole('button', { name: '关闭收藏库', exact: true }).click();
   await expect(page.locator('.workspace-overlay')).toHaveCount(0);
   assert.equal(await page.locator('.newtab').getAttribute('inert'), null);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page
+    .locator('[data-library-page-id]')
+    .first()
+    .waitFor({ state: 'attached' });
+  await page.mouse.move(1200, 400);
+  await page.mouse.wheel(0, 180);
+  const menu = page.getByRole('navigation', { name: '收藏页面' });
+  const embedded = page.locator('.desktop-library .library-board');
+  await expect(
+    embedded.getByRole('button', { name: '打开收藏 DeepSeek', exact: true }),
+  ).toBeVisible();
+  await menu.getByRole('button', { name: '添加收藏页' }).click();
+  await expect(
+    menu.getByRole('button', { name: '重命名 收藏页 1', exact: true }),
+  ).toBeVisible();
+  await expect(embedded.locator('.library-tile')).toHaveCount(0);
+  await menu.getByRole('button', { name: '重命名 收藏页 1' }).click();
+  await menu.getByRole('textbox', { name: '收藏页名称' }).fill('研究');
+  await menu.getByRole('button', { name: '保存', exact: true }).click();
+  await expect(
+    menu.getByRole('button', { name: '重命名 研究', exact: true }),
+  ).toBeVisible();
+  await menu.getByRole('button', { name: '添加收藏页' }).click();
+  await expect(menu.locator('[data-library-page-id]')).toHaveCount(3);
+  const menuOrder = await menu
+    .locator('[data-library-page-id]')
+    .evaluateAll((es) => es.map((e) => e.dataset.libraryPageId));
+  await menu
+    .locator(`[data-library-page-id="${menuOrder[2]}"]`)
+    .dragTo(menu.locator(`[data-library-page-id="${menuOrder[0]}"]`));
+  await expect
+    .poll(async () =>
+      (await records('libraryPages'))
+        .sort((a, b) => a.order - b.order)
+        .map((p) => p.id),
+    )
+    .toEqual([menuOrder[2], menuOrder[0], menuOrder[1]]);
+  await page.reload();
+  await page
+    .locator('[data-library-page-id]')
+    .first()
+    .waitFor({ state: 'attached' });
+  await page.mouse.move(1200, 400);
+  await page.mouse.wheel(0, 180);
+  await expect(menu.locator('[data-library-page-id]').first()).toHaveAttribute(
+    'data-library-page-id',
+    menuOrder[2],
+  );
+  await menu
+    .getByRole('button', { name: '删除页面 常用收藏', exact: true })
+    .click();
+  await expect(menu.locator('[data-library-page-id]')).toHaveCount(2);
+  await expect(
+    embedded.getByRole('button', { name: '打开收藏 DeepSeek', exact: true }),
+  ).toBeVisible();
+  assert.equal(
+    (await records('libraryItems')).filter((i) => i.kind === 'link').length,
+    2,
+  );
+  await expect(
+    embedded.locator('.library-toolbar, .library-footer'),
+  ).toHaveCount(0);
+  await expect(
+    embedded.getByRole('button', { name: '＋ 添加网址', exact: true }),
+  ).toHaveCount(0);
+  await embedded
+    .locator('.library-scroll')
+    .click({ button: 'right', position: { x: 8, y: 8 } });
+  await expect(page.getByRole('menu', { name: '收藏页菜单' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu', { name: '收藏页菜单' })).toHaveCount(0);
+  await expect(page.locator('.desktop-pages')).toHaveAttribute(
+    'data-desktop-page',
+    '1',
+  );
+  await page.screenshot({ path: 'work/library-pages.png' });
+  await menu.getByRole('button', { name: '首页', exact: true }).click();
+  await expect(page.locator('.desktop-pages')).toHaveAttribute(
+    'data-desktop-page',
+    '0',
+  );
+  await expect(page.locator('.library-page-menu')).toHaveAttribute(
+    'aria-hidden',
+    'true',
+  );
+  await expect(page.locator('.desktop-pagination')).toHaveCount(0);
+  const searchStyle = () =>
+    page.locator('.search-form').evaluate((el) => {
+      const style = getComputedStyle(el),
+        r = el.getBoundingClientRect();
+      return {
+        width: r.width,
+        height: r.height,
+        x: r.x,
+        y: r.y,
+        background: style.background,
+        border: style.border,
+        filter: style.backdropFilter,
+      };
+    });
+  await page.waitForTimeout(700);
+  await expect(page.locator('.clock-time')).toHaveCSS('font-size', '70px');
+  const originalSearch = await searchStyle();
+  const orderedPages = await page
+    .locator('.library-page-menu [data-library-page-id]')
+    .evaluateAll((es) => es.map((el) => el.dataset.libraryPageId));
+  for (const id of orderedPages) {
+    await page.waitForTimeout(700);
+    await page.mouse.move(1300, 400);
+    await page.mouse.wheel(0, 180);
+    await expect(
+      page.locator(`[data-library-page-id="${id}"] .library-page-choice`),
+    ).toHaveAttribute('aria-current', 'page');
+    await expect(
+      page.locator(`[data-library-page-id="${id}"] .library-page-choice`),
+    ).toHaveAttribute('aria-pressed', 'true');
+    await page.waitForTimeout(600);
+    assert.equal(
+      await page.evaluate(() => window.pageSlides.at(-1)),
+      'translateY(40vh)',
+    );
+    const { y: movedY, ...movedStyle } = await searchStyle();
+    const { y: originalY, ...homeStyle } = originalSearch;
+    assert.deepEqual(movedStyle, homeStyle);
+    assert(movedY < originalY - 50);
+    await expect(page.locator('.clock-time')).toHaveCSS('font-size', '42px');
+    const panelBounds = await page.locator('.start-panel').boundingBox();
+    const contentBounds = await page.locator('.desktop-library').boundingBox();
+    assert(
+      Math.abs(contentBounds.y - panelBounds.y - panelBounds.height - 24) < 2,
+    );
+    await expect(page.locator('html')).toHaveClass(/webgl-glass-ready/);
+    const gpu = page.locator('.liquid-glass-canvas');
+    await expect(gpu).toHaveCSS('opacity', '1');
+    await expect(gpu).toHaveCSS('visibility', 'visible');
+    const bounds = await gpu.boundingBox();
+    const search = await page.locator('.search-box').boundingBox();
+    assert(
+      bounds.y <= search.y &&
+        bounds.y + bounds.height >= search.y + search.height,
+    );
+    assert(
+      bounds.height < 160,
+      'Hidden widget cards must not remain in the shared canvas',
+    );
+  }
+  await page.waitForTimeout(700);
+  await page.mouse.wheel(0, 180);
+  await expect(page.locator('.desktop-pages')).toHaveAttribute(
+    'data-desktop-page',
+    '0',
+  );
+  await page.waitForTimeout(700);
+  await page.mouse.wheel(0, -180);
+  await expect(
+    page.locator(
+      `[data-library-page-id="${orderedPages.at(-1)}"] .library-page-choice`,
+    ),
+  ).toHaveAttribute('aria-current', 'page');
+  assert.deepEqual(
+    await page.locator('.desktop-library-backdrop').evaluate(focusMaterial),
+    workspaceMaterial,
+  );
+  await expect(page.locator('.desktop-library-backdrop')).toHaveClass(
+    /visible/,
+  );
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: 'work/library-cycle.png' });
+  await page.getByRole('button', { name: '返回首页', exact: true }).click();
+  await expect(page.locator('.desktop-pages')).toHaveAttribute(
+    'data-desktop-page',
+    '0',
+  );
+  await page.waitForTimeout(600);
+  const beforeQuiet = await page.locator('.start-panel').boundingBox();
+  await page.getByRole('button', { name: '隐藏首页组件', exact: true }).click();
+  await expect(page.locator('.bottom-widgets')).toHaveAttribute(
+    'aria-hidden',
+    'true',
+  );
+  await page.waitForTimeout(600);
+  assert(
+    (await page.locator('.start-panel').boundingBox()).y > beforeQuiet.y + 40,
+  );
+  await expect(page.locator('.liquid-glass-canvas')).toHaveCSS(
+    'visibility',
+    'visible',
+  );
+  await page.getByRole('button', { name: '显示首页组件', exact: true }).click();
+  await expect(page.locator('.bottom-widgets')).toHaveAttribute(
+    'aria-hidden',
+    'false',
+  );
+  await page.waitForTimeout(600);
+  assert(
+    Math.abs(
+      (await page.locator('.start-panel').boundingBox()).y - beforeQuiet.y,
+    ) < 1,
+  );
   assert.deepEqual(errors, []);
   console.log(
     'PASS wheel upgrade/order and both actions, isolated data, add/edit/search/folder drag/reorder, open new tab, safe folder deletion, reload, responsive and close',
