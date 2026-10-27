@@ -10,7 +10,7 @@ export async function ensureLibraryPage() {
       });
   });
 }
-export async function addLibraryPage() {
+export async function addLibraryPage(name?: string, icon = 'Bookmark') {
   return database.transaction('rw', database.libraryPages, async () => {
     const pages = await database.libraryPages.toArray();
     let n = 1;
@@ -18,7 +18,8 @@ export async function addLibraryPage() {
     const id = crypto.randomUUID();
     await database.libraryPages.put({
       id,
-      name: `收藏页 ${n}`,
+      name: name?.trim().slice(0, 30) || `收藏页 ${n}`,
+      icon,
       order: Math.max(-1, ...pages.map((p) => p.order)) + 1,
     });
     return id;

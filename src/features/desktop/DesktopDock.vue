@@ -299,6 +299,7 @@ function drop(event: DragEvent) {
 .dock-tile :deep(.workspace-favicon) {
   background: transparent;
 }
+.dock-tile :deep(.workspace-favicon img),
 .dock-tile img {
   width: 30px;
   height: 30px;

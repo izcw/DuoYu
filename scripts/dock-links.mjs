@@ -69,9 +69,18 @@ try {
   await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
   await page.mouse.down();
   await page.mouse.move(d.x + d.width / 2, d.y + d.height / 2, { steps: 35 });
+  const preview = page.locator('body > .desktop-transfer-preview');
+  await expect(preview).toBeVisible();
+  assert.equal(await preview.evaluate(el => getComputedStyle(el).position), 'fixed');
+  assert.equal(await link.evaluate(el => getComputedStyle(el).visibility), 'hidden');
+  await page.screenshot({path:'work/dock-transfer-preview.png'});
   await page.mouse.up();
+  await expect(preview).toHaveCount(0);
   await expect(dock.locator(`[data-dock-id="${id}"]`)).toBeVisible();
   await expect(page.locator(`[data-library-id="${id}"]`)).toHaveCount(0);
+  const icon = await dock.locator(`[data-dock-id="${id}"] img`).boundingBox();
+  assert.equal(icon.width,30);
+  assert.equal(icon.height,30);
   await page.reload();
   const dockLink = dock.locator(`[data-dock-id="${id}"]`);
   await expect(dockLink).toBeVisible();

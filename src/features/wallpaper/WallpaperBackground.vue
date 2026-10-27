@@ -26,7 +26,7 @@ async function display(record: WallpaperRecord) {
   }
   const previous = source.value;
   source.value = next;
-  // All desktop cards sample the same original wallpaper, even over focus overlays.
+  // Keep the original image available for wallpaper-store previews only.
   document.documentElement.style.setProperty(
     '--desktop-wallpaper-image',
     `url("${next}")`,

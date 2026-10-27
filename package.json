@@ -31,6 +31,7 @@
     "test:glass": "node scripts/glass.mjs"
   },
   "dependencies": {
+    "@icon-park/vue-next": "^1.4.2",
     "dexie": "^4.4.6",
     "gridstack": "^14.0.0",
     "vue": "^3.5.44"

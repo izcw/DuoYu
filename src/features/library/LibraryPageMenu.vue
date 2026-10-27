@@ -5,6 +5,8 @@ import { connectPageDrag, pageDragError } from './page-drag';
 import { seedLibraryDemo } from './library';
 import { database, type LibraryPage } from '../../shared/storage/database';
 import '../../shared/side-menu.css';
+import PageIcon from '../../shared/components/base/PageIcon.vue';
+import PageIconPicker from '../../shared/components/base/PageIconPicker.vue';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
 import ReorderTransition from '../../shared/components/base/ReorderTransition.vue';
 import {
@@ -26,6 +28,7 @@ const pages = ref<LibraryPage[]>([]);
 const error = ref('');
 const editing = ref('');
 const name = ref('');
+const icon = ref('Bookmark');
 const busy = ref(false);
 const context = ref<{ page: LibraryPage; x: number; y: number }>();
 const contextPanel = ref<HTMLElement>();
@@ -49,6 +52,8 @@ function editPage() {
   if (!context.value) return;
   editing.value = context.value.page.id;
   name.value = context.value.page.name;
+  icon.value = context.value.page.icon || 'Bookmark';
+  error.value = '';
   closeContext();
 }
 function deletePage() {
@@ -85,9 +90,13 @@ async function run(action: () => Promise<unknown>) {
   }
 }
 function add() {
-  void run(async () => {
-    active.value = await addLibraryPage();
-  });
+  closeContext();
+  editing.value = '__new';
+  let n = 1;
+  while (pages.value.some((page) => page.name === `收藏页 ${n}`)) n++;
+  name.value = `收藏页 ${n}`;
+  icon.value = 'Bookmark';
+  error.value = '';
 }
 function remove(id: string) {
   void run(async () => {
@@ -96,11 +105,19 @@ function remove(id: string) {
   });
 }
 function rename() {
+  if (!name.value.trim()) return;
   void run(async () => {
-    if (name.value.trim())
+    if (editing.value === '__new') {
+      active.value = await addLibraryPage(name.value, icon.value);
+      emit('title', name.value.trim());
+      emit('navigate');
+    } else {
       await database.libraryPages.update(editing.value, {
         name: name.value.trim().slice(0, 30),
+        icon: icon.value,
       });
+      if (active.value === editing.value) emit('title', name.value.trim());
+    }
     editing.value = '';
   });
 }
@@ -249,19 +266,8 @@ onUnmounted(() => {
       :aria-current="props.homeActive ? 'page' : undefined"
       @click="emit('home')"
     >
-      <svg
-        class="page-nav-icon side-menu-icon"
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-      >
-        <path
-          v-if="props.homeActive"
-          fill="currentColor"
-          stroke="none"
-          d="M12 2 1 11h3v11h6v-8h4v8h6V11h3Z"
-        />
-        <path v-else d="m3 11 9-8 9 8M5 10v11h5v-7h4v7h5V10" /></svg
-      ><small>首页</small>
+      <PageIcon name="Home" :active="props.homeActive" />
+      <small>首页</small>
     </button>
     <ReorderTransition class="library-page-list">
       <div
@@ -289,29 +295,11 @@ onUnmounted(() => {
             emit('navigate');
           "
         >
-          <svg
-            class="page-nav-icon side-menu-icon"
-            viewBox="0 0 28 28"
-            aria-hidden="true"
-          >
-            <rect
-              class="page-icon-shape side-menu-shape"
-              x="3"
-              y="3"
-              width="22"
-              height="22"
-              rx="6"
-            />
-            <text
-              class="page-icon-letter side-menu-letter"
-              x="14"
-              y="14"
-              text-anchor="middle"
-              dominant-baseline="central"
-            >
-              {{ item.name.charAt(0) }}
-            </text></svg
-          ><small>{{ item.name }}</small>
+          <PageIcon
+            :name="item.icon"
+            :active="!props.homeActive && active === item.id"
+          />
+          <small>{{ item.name }}</small>
         </button>
       </div>
     </ReorderTransition>
@@ -321,13 +309,7 @@ onUnmounted(() => {
       aria-label="添加收藏页"
       @click="add"
     >
-      <img
-        src="/images/add.png"
-        width="28"
-        height="28"
-        alt=""
-        draggable="false"
-      />
+      <PageIcon name="Add" />
     </button>
     <p v-if="error" role="alert">{{ error }}</p>
     <Teleport to="body">
@@ -350,7 +332,7 @@ onUnmounted(() => {
           :disabled="busy"
           @click="editPage"
         >
-          重命名
+          修改名称和图标
         </button>
         <button
           role="menuitem"
@@ -365,23 +347,71 @@ onUnmounted(() => {
     </Teleport>
     <BaseDialog
       :open="!!editing"
-      title="重命名收藏页"
+      :title="editing === '__new' ? '添加收藏页' : '编辑收藏页'"
+      :width="460"
       @update:open="editing = ''"
     >
-      <form class="page-rename-form side-menu-form" @submit.prevent="rename">
-        <input v-model="name" maxlength="30" aria-label="收藏页名称" required />
-        <button
-          class="glass-control glass-interactive"
-          :disabled="busy || !name.trim()"
-          type="submit"
-        >
-          保存
-        </button>
+      <form class="page-editor-form" @submit.prevent="rename">
+        <label
+          >页面名称<input
+            v-model="name"
+            maxlength="30"
+            aria-label="收藏页名称"
+            placeholder="输入页面名称"
+            required
+        /></label>
+        <span>页面图标</span>
+        <PageIconPicker v-model="icon" />
+        <p v-if="error" role="alert">{{ error }}</p>
+        <div class="page-editor-actions">
+          <button
+            type="button"
+            class="glass-control glass-interactive"
+            @click="editing = ''"
+          >
+            取消
+          </button>
+          <button
+            class="glass-control glass-interactive"
+            :disabled="busy || !name.trim()"
+            type="submit"
+          >
+            {{ editing === '__new' ? '添加' : '保存' }}
+          </button>
+        </div>
       </form>
     </BaseDialog>
   </nav>
 </template>
 <style scoped>
+.page-editor-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.page-editor-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.page-editor-form input {
+  padding: 10px 12px;
+  border: 1px solid #ffffff30;
+  background: #ffffff12;
+  color: inherit;
+  border-radius: 10px;
+}
+.page-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+.page-editor-actions button {
+  padding: 10px 18px;
+  color: inherit;
+  border-radius: 10px;
+}
 .library-page-list {
   display: flex;
   flex-direction: column;

@@ -58,15 +58,6 @@
     background-color: rgb(40 55 70 / 45%);
   }
 }
-/* WebGL supplies the same material plus refraction. Never stack a CSS fill on it. */
-.webgl-glass-ready .liquid-glass[data-liquid-card] {
-  background: transparent;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-  border-color: transparent;
-  box-shadow: var(--glass-control-shadow);
-}
-
 /* Shared full-screen focus material for collections and the tab workspace. */
 .glass-focus-layer {
   --glass-focus-duration: 320ms;
@@ -78,40 +69,10 @@
   box-shadow: none;
 }
 
-/* Home, collection folders and widgets share one wallpaper-backed material.
-   Sampling the wallpaper directly avoids re-blurring the collection focus sheet. */
-:root[data-desktop-wallpaper='ready'] .desktop-card-glass {
-  isolation: isolate;
-  background: transparent;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-}
-:root[data-desktop-wallpaper='ready'] .desktop-card-glass::before {
-  content: '';
-  position: absolute;
-  inset: -40px;
-  z-index: -1;
-  pointer-events: none;
-  background-image:
-    var(--glass-control-fill),
-    linear-gradient(
-      180deg,
-      rgb(9 21 30 / 20%),
-      rgb(9 21 30 / 8%) 55%,
-      rgb(9 21 30 / 30%)
-    ),
-    var(--desktop-wallpaper-image);
-  background-size: cover;
-  background-position: center;
-  background-attachment: fixed;
-  filter: var(--glass-control-filter);
-}
-:root[data-desktop-wallpaper='ready'] .desktop-card-glass::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  border-radius: inherit;
-  pointer-events: none;
-  box-shadow: var(--glass-control-edge);
+/* Each surface samples the already-composited pixels directly beneath it.
+   Do not repaint the original wallpaper here: that bypasses focus overlays. */
+.desktop-card-glass {
+  background: var(--glass-control-fill);
+  -webkit-backdrop-filter: var(--glass-control-filter);
+  backdrop-filter: var(--glass-control-filter);
 }

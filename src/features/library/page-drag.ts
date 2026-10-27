@@ -11,6 +11,9 @@ let session:
       source: string;
       target: string;
       ghost: HTMLElement;
+      original: HTMLElement;
+      originalVisibility: string;
+      sourceBounds?: DOMRect;
       switched: boolean;
       fromFolder?: boolean;
     }
@@ -25,8 +28,11 @@ export function beginPageDrag(
   element: HTMLElement,
 ) {
   cancelPageDrag();
-  const rect = element.getBoundingClientRect();
-  const ghost = element.cloneNode(true) as HTMLElement;
+  const visual =
+    element.querySelector<HTMLElement>('.cell-icon, .folder-icon') || element;
+  const rect = visual.getBoundingClientRect();
+  const ghost = visual.cloneNode(true) as HTMLElement;
+  const original = element.closest<HTMLElement>('.grid-stack-item') || element;
   ghost.removeAttribute('id');
   ghost.classList.add('desktop-transfer-preview');
   ghost.inert = true;
@@ -39,13 +45,42 @@ export function beginPageDrag(
     height: `${rect.height}px`,
     margin: '0',
     pointerEvents: 'none',
-    zIndex: '2147483000',
+    zIndex: '2147483002',
+    right: 'auto',
+    bottom: 'auto',
+    boxShadow: 'none',
+    outline: 'none',
+    border: '0',
     opacity: '0.8',
     display: 'none',
     transform: 'none',
     transition: 'none',
   });
-  session = { id, source, target: source, ghost, switched: false };
+  if (visual !== element) {
+    ghost.style.background = 'transparent';
+    ghost
+      .querySelectorAll<HTMLElement>('img, .workspace-favicon')
+      .forEach((child) => {
+        Object.assign(child.style, {
+          width: '100%',
+          height: '100%',
+          background: 'transparent',
+          objectFit: 'contain',
+        });
+      });
+  }
+  session = {
+    id,
+    source,
+    target: source,
+    ghost,
+    switched: false,
+    original,
+    originalVisibility: original.style.visibility,
+    sourceBounds: element
+      .closest('.library-cell-grid')
+      ?.getBoundingClientRect(),
+  };
   pageDragError.value = '';
 }
 export function beginFolderDrag(
@@ -82,6 +117,7 @@ export function cancelPageDrag() {
   clearTimeout(timer);
   hover = '';
   session?.ghost.remove();
+  if (session) session.original.style.visibility = session.originalVisibility;
   session = undefined;
 }
 function move(event: MouseEvent | DragEvent) {
@@ -90,6 +126,22 @@ function move(event: MouseEvent | DragEvent) {
   if (event.type === 'dragover') event.preventDefault();
   session.ghost.style.left = `${point.x - 30}px`;
   session.ghost.style.top = `${point.y - 30}px`;
+  if (!session.switched && session.sourceBounds) {
+    const r = session.sourceBounds;
+    const outside =
+      point.x < r.left ||
+      point.x > r.right ||
+      point.y < r.top ||
+      point.y > r.bottom;
+    session.original.style.visibility = outside
+      ? 'hidden'
+      : session.originalVisibility;
+    if (outside) {
+      document.body.append(session.ghost);
+      session.ghost.style.display = 'block';
+      session.ghost.style.opacity = '1';
+    } else session.ghost.remove();
+  }
   const row = [
     ...document.querySelectorAll<HTMLElement>('[data-library-page-id]'),
   ].find((el) => {

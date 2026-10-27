@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { inject, ref, onMounted, onUnmounted } from 'vue';
+import { inject, ref, onMounted, onUnmounted, watch } from 'vue';
 import { browser } from 'wxt/browser';
-import LiquidGlassLayer from './components/LiquidGlassLayer.vue';
 import type { GlassMode } from './glass/renderer';
 import { initialGlassModeKey } from './glass/preferences';
 const notice = ref('');
 const glassMode = ref<GlassMode>(inject(initialGlassModeKey, 'real'));
+watch(
+  glassMode,
+  (mode) => {
+    document.documentElement.dataset.glassMode = mode;
+  },
+  { immediate: true },
+);
 const glassModes = [
   { id: 'real', label: '真实' },
   { id: 'natural', label: '自然' },
@@ -45,7 +51,6 @@ function setGlassMode(mode: GlassMode) {
       {{ mode.label }}
     </button>
   </div>
-  <LiquidGlassLayer :mode="glassMode" />
   <p v-if="notice" class="widget-layout-notice glass-surface" role="status">
     {{ notice }}
   </p>

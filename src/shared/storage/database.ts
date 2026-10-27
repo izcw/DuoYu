@@ -46,6 +46,7 @@ export interface WorkspaceSpace {
   order: number;
 }
 export interface LibraryPage {
+  icon?: string;
   id: string;
   name: string;
   order: number;
