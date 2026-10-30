@@ -1,13 +1,17 @@
 <script setup lang="ts">
+import { tintImage } from '../../shared/image-tint';
+import { limitIconText } from '../../shared/icon-text';
 import { iconForeground } from '../../shared/icon-material';
 import TextIcon from '../../shared/components/base/TextIcon.vue';
-import { computed, ref, watch, watchEffect } from 'vue';
+import { computed, ref, watch, watchEffect, onMounted, onUnmounted } from 'vue';
+import { assetObjectUrl } from '../sync/assets';
 import { browser } from 'wxt/browser';
 const props = defineProps<{
   src?: string;
   title: string;
   pageUrl?: string;
   refreshKey?: number;
+  pictureFilter?: string;
 }>();
 const appearance = computed(() => {
   try {
@@ -19,9 +23,7 @@ const appearance = computed(() => {
   }
 });
 const iconText = computed(() =>
-  Array.from(appearance.value?.text || props.title || '↗')
-    .slice(0, 6)
-    .join(''),
+  limitIconText(appearance.value?.text || props.title || '↗'),
 );
 const root = ref<HTMLElement>();
 watchEffect((cleanup) => {
@@ -39,11 +41,16 @@ watchEffect((cleanup) => {
     appearance.value.material === 'fill' ? 'fill' : 'glass';
   surface.dataset.transparent = String(!appearance.value.color);
   surface.style.setProperty(
+    '--icon-padding',
+    `${Math.max(0, Math.min(8, Number(appearance.value.padding ?? 4) || 0))}px`,
+  );
+  surface.style.setProperty(
     '--icon-foreground',
     iconForeground(appearance.value.material, appearance.value.color),
   );
   cleanup(() => {
     surface.style.removeProperty('--icon-foreground');
+    surface.style.removeProperty('--icon-padding');
     delete surface.dataset.transparent;
     delete surface.dataset.material;
   });
@@ -51,7 +58,36 @@ watchEffect((cleanup) => {
 const customFailed = ref(false);
 const failed = ref(false);
 const hdFailed = ref(false);
+const assetReference = computed(() =>
+  appearance.value?.mode === 'upload' ? appearance.value.image : props.src,
+);
+const assetUrl = ref('');
+let assetRequest = 0,
+  lastAsset = '';
+async function loadAsset() {
+  const reference = assetReference.value;
+  const request = ++assetRequest;
+  if (reference !== lastAsset) {
+    assetUrl.value = '';
+    lastAsset = reference || '';
+  }
+  if (typeof reference !== 'string' || !reference.startsWith('duoyu-asset:'))
+    return;
+  try {
+    const url = await assetObjectUrl(reference);
+    if (request === assetRequest) assetUrl.value = url;
+  } catch {
+    /* Keep the normal fallback; metadata sync must not depend on this image. */
+  }
+}
+watch(assetReference, loadAsset, { immediate: true });
+onMounted(() => window.addEventListener('duoyu-assets-retry', loadAsset));
+onUnmounted(() => {
+  assetRequest++;
+  window.removeEventListener('duoyu-assets-retry', loadAsset);
+});
 const source = computed(() => {
+  if (assetUrl.value) return assetUrl.value;
   const value = appearance.value
     ? appearance.value.mode === 'upload'
       ? appearance.value.image
@@ -90,6 +126,29 @@ watch(
 watch(source, () => {
   failed.value = false;
 });
+const pictureTint = computed(
+  () => props.pictureFilter ?? appearance.value?.pictureFilter ?? '',
+);
+const filteredSource = ref('');
+let filterRequest = 0;
+watch(
+  [source, pictureTint],
+  async ([url, color]) => {
+    const request = ++filterRequest;
+    filteredSource.value = '';
+    if (!url || !color) return;
+    try {
+      const result = await tintImage(url, color);
+      if (request === filterRequest) filteredSource.value = result;
+    } catch {
+      // Unreadable or cross-origin images retain their original appearance.
+    }
+  },
+  { immediate: true },
+);
+onUnmounted(() => {
+  filterRequest++;
+});
 function onError() {
   if (source.value === '/images/douyin-hd.png') {
     hdFailed.value = true;
@@ -105,7 +164,7 @@ function onError() {
     <TextIcon v-if="appearance?.mode === 'text'" :text="iconText" />
     <img
       v-else-if="source && !failed"
-      :src="source"
+      :src="filteredSource || source"
       alt=""
       draggable="false"
       loading="lazy"
@@ -126,6 +185,16 @@ function onError() {
   background: rgb(239 239 237 / 12%);
   font-size: 13px;
   font-weight: 600;
+}
+/* Transparent fill must also clear the favicon's default placeholder tint. */
+.cell-icon[data-material='fill'][data-transparent='true'] > .workspace-favicon,
+.icon-options[data-material='fill'][data-transparent='true']
+  .cell-icon
+  > .workspace-favicon {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
 }
 .workspace-favicon img {
   width: 18px;

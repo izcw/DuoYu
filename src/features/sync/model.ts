@@ -12,6 +12,7 @@ export interface Change {
   base: Row | null;
   value: Row | null;
   revision: string;
+  restore?: boolean;
 }
 export function normalized(table: string, row: Row | null): Row[] {
   if (!row) return [];
@@ -59,6 +60,10 @@ export function normalized(table: string, row: Row | null): Row[] {
 }
 export const same = (a: unknown, b: unknown): boolean =>
   JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
+/** Plain IndexedDB-safe values from view models, preserving immutable Blob resources. */
+export function snapshotValue<T>(value: T): T {
+  return sorted(value);
+}
 function sorted(v: any): any {
   return Array.isArray(v)
     ? v.map(sorted)
@@ -104,12 +109,13 @@ export function overlay(remote: Map<string, Entity>, changes: Change[]) {
       remote.delete(k);
       continue;
     }
-    const payload = { ...(remote.get(k)?.payload ?? {}) };
+    const payload = { ...(remote.get(k)?.payload ?? c.base ?? {}) };
     for (const field of Object.keys({ ...c.base, ...c.value }))
       if (!same(c.base?.[field], c.value[field])) {
         if (field in c.value) payload[field] = c.value[field];
         else delete payload[field];
       }
+    payload.id = c.id;
     remote.set(k, {
       table: c.table,
       id: c.id,

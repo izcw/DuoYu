@@ -1,5 +1,6 @@
 import { browser } from 'wxt/browser';
 import { database } from '../../shared/storage/database';
+import { collectAssets, getAsset, ASSET_PREFIX } from '../sync/assets';
 function blobData(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -29,6 +30,12 @@ export async function backupDesktop() {
       };
     }),
   );
+  const assets = await Promise.all(
+    collectAssets(tables).map(async (reference) => ({
+      id: reference.slice(ASSET_PREFIX.length),
+      data: await blobData(await getAsset(reference)),
+    })),
+  );
   // Explicit preference allowlist: authentication and future secrets must never
   // enter portable backups (or become candidates for cloud synchronization).
   const storage = await browser.storage.local.get([
@@ -46,6 +53,7 @@ export async function backupDesktop() {
           version: 1,
           createdAt: new Date().toISOString(),
           tables,
+          assets,
           storage,
           preferences,
         },

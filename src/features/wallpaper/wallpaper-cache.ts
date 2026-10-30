@@ -143,3 +143,16 @@ export async function importWallpaper(blob: Blob) {
   });
   window.dispatchEvent(new Event('duoyu-wallpaper-change'));
 }
+
+/** Explicit deletion of the selected local upload. The captured row deletion
+ * releases its cloud reference; shared images remain until their final use ends. */
+export async function removeUploadedWallpaper() {
+  await navigator.locks.request('duoyu:daily-wallpaper', async () => {
+    const current = await database.wallpapers.get('daily');
+    if (current?.sourceUrl.startsWith('local:'))
+      await database.wallpapers.delete('daily');
+    accountStorage.removeItem('duoyu:wallpaper-preview');
+    accountStorage.removeItem('duoyu-wallpaper-mode');
+  });
+  window.dispatchEvent(new Event('duoyu-wallpaper-change'));
+}

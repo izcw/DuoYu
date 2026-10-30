@@ -5,13 +5,17 @@ import { computed, ref, watch, onUnmounted } from 'vue';
 import { liveQuery } from 'dexie';
 import { browser } from 'wxt/browser';
 import StoreLayout from '../../shared/components/base/StoreLayout.vue';
+import CloudCatalog from './CloudCatalog.vue';
 import BingWallpaperGallery from '../wallpaper/BingWallpaperGallery.vue';
 import './store-cards.css';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
 import WorkspaceFavicon from '../workspace/WorkspaceFavicon.vue';
 import { database, type LibraryItem } from '../../shared/storage/database';
 import { getDailyWallpaperUrl } from '../wallpaper/wallpaper';
-import { importWallpaper } from '../wallpaper/wallpaper-cache';
+import {
+  importWallpaper,
+  removeUploadedWallpaper,
+} from '../wallpaper/wallpaper-cache';
 import { backupDesktop } from './desktop-backup';
 const props = defineProps<{
   tool: '' | 'widgets' | 'wallpaper' | 'search' | 'settings';
@@ -48,6 +52,13 @@ const wallpaperCategory = ref('daily');
 const todayWallpaper = ref(getDailyWallpaperUrl());
 const todayFailed = ref(false);
 const uploadInput = ref<HTMLInputElement>();
+const hasUploadedWallpaper = ref(false);
+const wallpaperSubscription = liveQuery(() =>
+  database.wallpapers.get('daily'),
+).subscribe((row) => {
+  hasUploadedWallpaper.value = !!row?.sourceUrl.startsWith('local:');
+});
+onUnmounted(() => wallpaperSubscription.unsubscribe());
 const store = computed(
   () => props.tool === 'widgets' || props.tool === 'wallpaper',
 );
@@ -145,9 +156,16 @@ async function open(item: LibraryItem) {
           { id: 'all', name: '全部组件' },
           { id: 'daily', name: '日常生活' },
           { id: 'tools', name: '效率工具' },
+          { id: 'cloud', name: '已发布组件' },
+          { id: 'templates', name: '页面模板' },
         ]"
       >
-        <div class="store-card-grid widget-card-grid">
+        <CloudCatalog
+          v-if="widgetCategory === 'cloud' || widgetCategory === 'templates'"
+          :kind="widgetCategory === 'cloud' ? 'widgets' : 'templates'"
+          @add="(kind) => emit('add', kind)"
+        />
+        <div v-else class="store-card-grid widget-card-grid">
           <button
             v-for="widget in filteredWidgets"
             :key="widget.kind"
@@ -174,9 +192,11 @@ async function open(item: LibraryItem) {
           { id: 'daily', name: '每日壁纸' },
           { id: 'bing', name: '必应壁纸' },
           { id: 'local', name: '本地壁纸' },
+          { id: 'cloud', name: '精选壁纸' },
         ]"
       >
-        <BingWallpaperGallery v-if="wallpaperCategory === 'bing'" />
+        <CloudCatalog v-if="wallpaperCategory === 'cloud'" kind="wallpapers" />
+        <BingWallpaperGallery v-else-if="wallpaperCategory === 'bing'" />
         <div v-else class="store-card-grid wallpaper-card-grid">
           <button
             v-if="wallpaperCategory === 'daily'"
@@ -200,6 +220,20 @@ async function open(item: LibraryItem) {
               class="store-card wallpaper-card wallpaper-preview glass-surface"
             >
               <span class="wallpaper-caption"><strong>当前壁纸</strong></span>
+              <button
+                v-if="hasUploadedWallpaper"
+                type="button"
+                class="wallpaper-remove-upload glass-control glass-interactive"
+                :disabled="busy"
+                @click.stop="
+                  run(async () => {
+                    await removeUploadedWallpaper();
+                    message = '本地壁纸已删除，云端将在同步后释放未使用的图片';
+                  })
+                "
+              >
+                删除上传图片
+              </button>
             </div>
             <button
               class="store-card wallpaper-card wallpaper-upload glass-surface glass-interactive"
@@ -412,5 +446,22 @@ select option {
   background-size: cover;
   background-position: center;
   border-radius: 14px;
+}
+</style>
+
+<style scoped>
+.wallpaper-remove-upload {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  z-index: 2;
+}
+.wallpaper-remove-upload:hover {
+  background: rgba(0, 0, 0, 0.5);
 }
 </style>

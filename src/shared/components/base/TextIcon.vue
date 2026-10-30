@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { hasChinese, limitIconText } from '../../icon-text';
 const props = defineProps<{
   text?: string;
   editing?: boolean;
@@ -39,10 +40,13 @@ function caretClass(row: number, position: number) {
   return '';
 }
 const characters = computed(() =>
-  Array.from(props.text || (props.editing ? '' : '文')).slice(0, 6),
+  Array.from(limitIconText(props.text || (props.editing ? '' : '文'))),
 );
 const rows = computed(() => {
   const chars = characters.value;
+  if (!hasChinese(chars.join(''))) {
+    return chars.length <= 5 ? [chars] : [chars.slice(0, 5), chars.slice(5)];
+  }
   if (chars.length <= 3) return [chars];
   const split = chars.length === 4 ? 2 : 3;
   return [chars.slice(0, split), chars.slice(split)];
@@ -57,9 +61,14 @@ function selected(row: number, position: number) {
     end > (props.selectionStart ?? 0)
   );
 }
-const fontSize = computed(
-  () => [54, 54, 34, 24, 29, 23, 23][characters.value.length] + 'cqw',
-);
+const fontSize = computed(() => {
+  const count = characters.value.length;
+  return (
+    (hasChinese(characters.value.join(''))
+      ? [54, 54, 34, 24, 29, 23, 23][count]
+      : [54, 54, 40, 32, 25, 21][Math.min(count, 5)]) + 'cqw'
+  );
+});
 </script>
 <template>
   <span

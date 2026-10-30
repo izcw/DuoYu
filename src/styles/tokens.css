@@ -16,8 +16,6 @@
     rgb(var(--glass-tint-end) / var(--glass-alpha-end))
   );
   --glass-blur: var(--glass-blur-natural);
-  --glass-control-filter: blur(calc(var(--glass-blur) * 1px))
-    saturate(var(--glass-saturation));
   --glass-control-edge:
     inset 0 0 0 1px rgb(255 255 255 / var(--glass-rim-alpha)),
     inset 0 1px 0 rgb(255 255 255 / var(--glass-top-alpha));
@@ -26,12 +24,20 @@
   --font-sans: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
-:root[data-glass-mode='real'] {
+:root,
+.glass-material-scope {
+  --glass-control-filter: blur(calc(var(--glass-blur) * 1px))
+    saturate(var(--glass-saturation));
+}
+:root[data-glass-mode='real'],
+.glass-material-scope[data-glass-mode='real'] {
   --glass-blur: var(--glass-blur-real);
 }
-:root[data-glass-mode='natural'] {
+:root[data-glass-mode='natural'],
+.glass-material-scope[data-glass-mode='natural'] {
   --glass-blur: var(--glass-blur-natural);
 }
-:root[data-glass-mode='soft'] {
+:root[data-glass-mode='soft'],
+.glass-material-scope[data-glass-mode='soft'] {
   --glass-blur: var(--glass-blur-soft);
 }

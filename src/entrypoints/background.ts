@@ -287,7 +287,7 @@ export default defineBackground(() => {
           }
           const path = String(message.path || '');
           if (
-            !/^\/v1\/(sync\/(snapshot|changes\?after=\d+|operations)|assets\/[0-9a-f]{64})$/.test(
+            !/^\/v1\/(sync\/(snapshot|changes\?after=\d+(?:&epoch=[0-9a-f-]{36})?|operations|conflicts(?:\/[0-9a-f-]{36}\/resolve)?)|assets\/[0-9a-f]{64}|catalog\/(templates|widgets|wallpapers)|templates\/[0-9a-f-]{36}\/apply)$/.test(
               path,
             )
           )

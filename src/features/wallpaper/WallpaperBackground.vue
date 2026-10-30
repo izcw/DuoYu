@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { accountStorage } from '../../shared/storage/account';
+import WallpaperSurface from './WallpaperSurface.vue';
 import { onMounted, onUnmounted, ref } from 'vue';
 import { getDailyWallpaperUrl } from './wallpaper';
 import {
@@ -65,6 +66,13 @@ async function wallpaperChanged() {
   if (accountStorage.getItem('duoyu-wallpaper-mode') === 'custom') {
     const cached = await readWallpaperForDisplay();
     if (cached) await display(cached);
+    else {
+      accountStorage.removeItem('duoyu-wallpaper-mode');
+      accountStorage.removeItem('duoyu:wallpaper-preview');
+      displayedSource = '';
+      retryAfter = 0;
+      await update();
+    }
   } else {
     displayedSource = '';
     retryAfter = 0;
@@ -103,17 +111,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="wallpaper" aria-hidden="true">
-    <img
-      v-if="source"
-      :src="source"
-      :class="{ loaded }"
-      alt=""
-      referrerpolicy="no-referrer"
-      @error="failed = true"
-    />
-    <div class="wallpaper-shade"></div>
-  </div>
+  <WallpaperSurface :source="source" :loaded="loaded" @error="failed = true" />
   <p v-if="failed" class="wallpaper-status" role="status">
     壁纸暂未加载，已使用默认背景
   </p>

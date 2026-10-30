@@ -5,10 +5,20 @@ import { database } from '../../shared/storage/database';
 import {
   ACCOUNT_STORAGE_KEY,
   activeAccountKey,
-  accountStorage,
 } from '../../shared/storage/account';
 import { AUTH_SESSION_KEY, type Account } from '../auth/config';
+import { syncResponse, syncTransportError } from './response';
 import { SYNC_TABLES, type CapturedOperation } from './capture';
+import {
+  pruneAssetCache,
+  collectAssets,
+  uploadAsset,
+  connectAssetTransport,
+  encodeAssets,
+  getAsset,
+  ASSET_PREFIX,
+} from './assets';
+import { fetchRemoteConflicts } from './conflicts';
 import {
   denormalized,
   overlay,
@@ -23,6 +33,9 @@ export const syncState = ref({
   pending: 0,
   conflicts: 0,
   error: '',
+  needsReload: false,
+  lastSyncedAt: 0,
+  assetError: '',
 });
 export function stopCloud() {
   generation++;
@@ -36,12 +49,6 @@ let firstWrite = 0;
 let retryAfter = 0;
 let generation = 0;
 let running: Promise<unknown> | undefined;
-const assetCache = new Map<string, Blob>();
-const native = <T>(r: IDBRequest<T>) =>
-  new Promise<T>((resolve, reject) => {
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = () => reject(r.error);
-  });
 export async function accountKey(a: Account) {
   const bytes = await crypto.subtle.digest(
     'SHA-256',
@@ -64,126 +71,26 @@ export async function rpc(
   const current = account,
     g = generation;
   if (!current) throw Error('请先登录');
-  const r = await browser.runtime.sendMessage({
-    type: 'duoyu-auth',
-    action: 'sync',
-    account: { issuer: current.issuer, sub: current.sub },
-    path,
-    method,
-    body,
-    binary,
-    mediaType,
-  });
+  const r = await browser.runtime
+    .sendMessage({
+      type: 'duoyu-auth',
+      action: 'sync',
+      account: { issuer: current.issuer, sub: current.sub },
+      path,
+      method,
+      body,
+      binary,
+      mediaType,
+    })
+    .catch((error: unknown) => {
+      throw syncTransportError(error);
+    });
   if (g !== generation || account?.sub !== current.sub || switched())
     throw Error('账号已切换');
-  if (!r || r.status >= 400 || r.error) {
-    retryAfter = Math.max(0, Math.min(300, Number(r?.retryAfter) || 0)) * 1000;
-    const e = new Error(
-      r?.data?.error || r?.error || '云同步暂不可用',
-    ) as Error & { status: number };
-    e.status = r?.status ?? 503;
-    throw e;
-  }
-  return r.data;
+  retryAfter = Math.max(0, Math.min(300, Number(r?.retryAfter) || 0)) * 1000;
+  return syncResponse(r);
 }
-async function bytesBase64(blob: Blob) {
-  const a = new Uint8Array(await blob.arrayBuffer());
-  let s = '';
-  for (let i = 0; i < a.length; i += 8192)
-    s += String.fromCharCode(...a.subarray(i, i + 8192));
-  return btoa(s);
-}
-async function upload(blob: Blob) {
-  if (blob.size > 20 * 1024 * 1024)
-    throw Error('云同步图片上限为20MB，请缩小图片后重试');
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    await blob.arrayBuffer(),
-  );
-  const sha = [...new Uint8Array(digest)]
-    .map((x) => x.toString(16).padStart(2, '0'))
-    .join('');
-  await rpc(
-    '/v1/assets/' + sha,
-    'POST',
-    await bytesBase64(blob),
-    true,
-    blob.type,
-  );
-  assetCache.set(sha, blob);
-  return 'duoyu-asset:' + sha;
-}
-async function encode(v: any): Promise<any> {
-  if (v instanceof Blob) return upload(v);
-  if (typeof v === 'string' && v.startsWith('data:image/'))
-    return upload(await (await fetch(v)).blob());
-  if (typeof v === 'string' && v.startsWith('duoyu-icon:')) {
-    let p;
-    try {
-      p = JSON.parse(v.slice(11));
-    } catch {
-      return v;
-    }
-    if (p.image?.startsWith('data:image/')) p.image = await encode(p.image);
-    return 'duoyu-icon:' + JSON.stringify(p);
-  }
-  if (Array.isArray(v)) return Promise.all(v.map(encode));
-  if (v && typeof v === 'object') {
-    const result: Row = {};
-    for (const [k, x] of Object.entries(v))
-      if (x !== undefined) result[k] = await encode(x);
-    return result;
-  }
-  return v;
-}
-async function download(sha: string) {
-  let blob = assetCache.get(sha);
-  if (!blob) {
-    const r = await rpc('/v1/assets/' + sha, 'GET', undefined, true);
-    blob = new Blob([Uint8Array.from(atob(r.base64), (c) => c.charCodeAt(0))], {
-      type: r.mediaType,
-    });
-    const digest = await crypto.subtle.digest(
-      'SHA-256',
-      await blob.arrayBuffer(),
-    );
-    if (
-      [...new Uint8Array(digest)]
-        .map((x) => x.toString(16).padStart(2, '0'))
-        .join('') !== sha
-    )
-      throw Error('云端图片校验失败');
-    assetCache.set(sha, blob);
-  }
-  return blob;
-}
-async function decode(v: any, wallpaper = false): Promise<any> {
-  if (typeof v === 'string' && v.startsWith('duoyu-asset:')) {
-    const blob = await download(v.slice(12));
-    return wallpaper
-      ? blob
-      : `data:${blob.type};base64,${await bytesBase64(blob)}`;
-  }
-  if (typeof v === 'string' && v.startsWith('duoyu-icon:')) {
-    let p;
-    try {
-      p = JSON.parse(v.slice(11));
-    } catch {
-      return v;
-    }
-    if (p.image?.startsWith('duoyu-asset:')) p.image = await decode(p.image);
-    return 'duoyu-icon:' + JSON.stringify(p);
-  }
-  if (Array.isArray(v)) return Promise.all(v.map((x) => decode(x)));
-  if (v && typeof v === 'object' && !(v instanceof Blob)) {
-    const result: Row = {};
-    for (const [k, x] of Object.entries(v))
-      result[k] = await decode(x, wallpaper && k === 'asset');
-    return result;
-  }
-  return v;
-}
-async function remoteTransaction(fn: () => Promise<void>) {
+export async function remoteTransaction(fn: () => Promise<void>) {
   await database.transaction('rw', database.tables, async () => {
     (
       Dexie.currentTransaction!.idbtrans as IDBTransaction & {
@@ -193,16 +100,25 @@ async function remoteTransaction(fn: () => Promise<void>) {
     await fn();
   });
 }
-async function applyRemote(
+async function waitForInteraction() {
+  while (
+    document.querySelector?.(
+      '.ui-draggable-dragging,.ui-resizable-resizing,.grid-selection-dragging,.desktop-transfer-preview',
+    )
+  )
+    await new Promise((r) => setTimeout(r, 50));
+  await new Promise((r) => setTimeout(r, 0));
+}
+export async function applyRemote(
   updates: Entity[],
   revision: string,
   full = false,
   ack?: string,
   conflict?: string,
+  epoch?: string,
 ) {
   if (switched()) throw Error('账号已切换');
-  // Fetch/decode attachments before opening a write transaction. Capture writes
-  // arriving during fetch in the final transaction's pending overlay.
+  await waitForInteraction();
   const existing = full ? [] : await database.syncShadow.toArray();
   const next = new Map<string, Entity>(
     existing.map((r) => [
@@ -217,14 +133,30 @@ async function applyRemote(
     ]),
   );
   for (const e of updates) next.set(e.table + ':' + e.id, e);
-  const decoded = new Map<string, Entity>();
-  for (const [k, e] of next)
-    decoded.set(k, {
-      ...e,
-      payload: await decode(e.payload, e.table === 'wallpapers'),
-    });
-  if (switched()) throw Error('账号已切换');
+  const cached = new Map(
+    (await database.syncAssets.toArray()).map((a) => [
+      ASSET_PREFIX + a.id,
+      a.blob,
+    ]),
+  );
   await remoteTransaction(async () => {
+    const previousEpoch = (await database.syncMeta.get('epoch'))?.value;
+    if (previousEpoch && epoch && previousEpoch !== epoch) {
+      for (const op of await database.syncOutbox.toArray()) {
+        await database.syncConflicts.put({
+          id: op.id,
+          operation: op,
+          reason: 'epoch_changed',
+          state: 'blocked',
+          createdAt: Date.now(),
+        });
+        if (op.resolutionOf)
+          await database.syncConflicts.update(op.resolutionOf, {
+            resolvedAt: Date.now(),
+          });
+      }
+      await database.syncOutbox.clear();
+    }
     if (full) await database.syncShadow.clear();
     for (const e of updates)
       await database.syncShadow.put({
@@ -242,33 +174,117 @@ async function applyRemote(
           id: ack,
           operation: op,
           reason: conflict,
+          state: 'conflict',
+          server: true,
           createdAt: Date.now(),
+        });
+      if (op?.resolutionOf)
+        await database.syncConflicts.update(op.resolutionOf, {
+          resolvedAt: Date.now(),
         });
       await database.syncOutbox.delete(ack);
     }
-    const pending = await database.syncOutbox.orderBy('createdAt').toArray();
-    const view = new Map([...decoded].filter(([, e]) => !e.deleted));
-    for (const op of pending) overlay(view, rowChanges(op.rows));
+    const view = new Map([...next].filter(([, e]) => !e.deleted));
+    for (const op of await database.syncOutbox.orderBy('createdAt').toArray())
+      overlay(view, rowChanges(op.rows));
     const tables = denormalized([...view.values()]);
     for (const table of SYNC_TABLES) {
+      let rows = tables[table] ?? [];
       if (table === 'wallpapers') {
-        const custom = tables[table] ?? [];
-        if (custom.length) await database.wallpapers.bulkPut(custom as any);
+        const expected = new Set(rows.map((row) => row.id));
+        for (const local of await database.wallpapers.toArray())
+          if (local.sourceUrl.startsWith('local:') && !expected.has(local.id))
+            await database.wallpapers.delete(local.id);
+        rows = rows.flatMap((row) => {
+          const blob =
+            row.blob instanceof Blob ? row.blob : cached.get(row.blob);
+          return blob ? [{ ...row, blob }] : [];
+        });
+        if (rows.length) await database.wallpapers.bulkPut(rows as any);
         continue;
       }
-      await database.table(table).clear();
-      if (tables[table]?.length)
-        await database.table(table).bulkPut(tables[table]);
+      const local = await database.table(table).toArray(),
+        incoming = new Map(rows.map((r) => [r.id, r]));
+      const removed = local.filter((r) => !incoming.has(r.id)).map((r) => r.id);
+      if (removed.length) await database.table(table).bulkDelete(removed);
+      const old = new Map(local.map((r) => [r.id, r]));
+      const changed = rows.filter((r) => !same(old.get(r.id), r));
+      if (changed.length) await database.table(table).bulkPut(changed);
     }
     await database.syncMeta.put({ id: 'cursor', value: revision });
     await database.syncMeta.put({ id: 'initialized', value: true });
+    if (epoch) await database.syncMeta.put({ id: 'epoch', value: epoch });
   });
   await projectPreferences();
-  window.dispatchEvent(new Event('duoyu-wallpaper-change'));
+  void hydrateWallpaper();
+  window.dispatchEvent(new Event('duoyu-assets-retry'));
+}
+async function hydrateWallpaper() {
+  try {
+    const shadow = await database.syncShadow.get('wallpapers:daily');
+    const ref = (shadow?.payload as Row)?.asset;
+    if (
+      shadow?.deleted ||
+      typeof ref !== 'string' ||
+      !ref.startsWith(ASSET_PREFIX)
+    )
+      return;
+    const blob = await getAsset(ref);
+    if (switched()) return;
+    await remoteTransaction(async () => {
+      const current = await database.syncShadow.get('wallpapers:daily');
+      const pending = (await database.syncOutbox.toArray()).some(
+        (op) => 'wallpapers:daily' in op.rows,
+      );
+      if (
+        pending ||
+        (current?.payload as Row)?.asset !== ref ||
+        current?.deleted
+      )
+        return;
+      const p = current!.payload as Row;
+      const existing = await database.wallpapers.get('daily');
+      if (existing?.contentHash !== p.contentHash)
+        await database.wallpapers.put({
+          id: 'daily',
+          sourceUrl: p.sourceUrl,
+          contentHash: p.contentHash,
+          blob,
+          savedAt: Date.now(),
+        });
+    });
+    syncState.value.assetError = '';
+    window.dispatchEvent(new Event('duoyu-wallpaper-change'));
+  } catch {
+    syncState.value.assetError = '壁纸下载暂未完成，联网后会自动重试';
+  }
+}
+export async function refreshSnapshot(ack?: string, reason?: string) {
+  const r = await rpc('/v1/sync/snapshot');
+  if (r.schemaVersion !== 1) throw Error('云端同步版本不兼容');
+  await applyRemote(r.entities, r.revision, true, ack, reason, r.epoch);
 }
 async function prepare(op: CapturedOperation) {
-  if (op.prepared) return op.prepared;
-  const changes = (await encode(rowChanges(op.rows))) as Change[];
+  if (op.prepared) {
+    // An unfinished upload can outlive the server's staging lease while offline.
+    // Renew only images explicitly changed by this request, never historical bases.
+    const prepared = op.prepared as { changes: Change[] };
+    if (!Array.isArray(prepared?.changes)) return op.prepared;
+    const epoch = String((await database.syncMeta.get('epoch'))?.value ?? '');
+    const changed = prepared.changes
+      .filter((c) => c && typeof c === 'object')
+      .flatMap((c) =>
+        c.value
+          ? Object.entries(c.value)
+              .filter(([key, value]) => !same(c.base?.[key], value))
+              .map(([, value]) => value)
+          : [],
+      );
+    for (const ref of collectAssets(changed)) await uploadAsset(ref, epoch);
+    return op.prepared;
+  }
+  const epoch = String((await database.syncMeta.get('epoch'))?.value ?? '');
+  const changes = (await encodeAssets(rowChanges(op.rows), epoch)) as Change[];
   for (const c of changes) {
     const shadow = await database.syncShadow.get(c.table + ':' + c.id);
     c.revision = shadow && same(shadow.payload, c.base) ? shadow.revision : '0';
@@ -278,7 +294,13 @@ async function prepare(op: CapturedOperation) {
     device = crypto.randomUUID();
     await database.syncMeta.put({ id: 'device', value: device });
   }
-  const prepared = { id: op.id, deviceId: device, changes };
+  const prepared = {
+    id: op.id,
+    deviceId: device,
+    changes,
+    epoch: epoch || undefined,
+    ...(op.resolutionOf ? { resolutionOf: op.resolutionOf } : {}),
+  };
   await database.syncOutbox.update(op.id, { prepared });
   return prepared;
 }
@@ -287,18 +309,43 @@ async function pull() {
   while (true) {
     let r;
     try {
-      r = await rpc('/v1/sync/changes?after=' + cursor);
+      const epoch = String((await database.syncMeta.get('epoch'))?.value ?? '');
+      r = await rpc(
+        '/v1/sync/changes?after=' + cursor + (epoch ? '&epoch=' + epoch : ''),
+      );
     } catch (e) {
       if ((e as Error & { status: number }).status !== 410) throw e;
-      const snapshot = await rpc('/v1/sync/snapshot');
-      await applyRemote(snapshot.entities, snapshot.revision, true);
+      await refreshSnapshot();
       return;
     }
     const changes = r.operations.flatMap((o: any) => o.changes);
-    await applyRemote(changes, r.revision);
+    await applyRemote(
+      changes,
+      r.revision,
+      false,
+      undefined,
+      undefined,
+      r.epoch,
+    );
     cursor = r.revision;
     if (cursor === r.head) break;
   }
+}
+async function quarantine(op: CapturedOperation, reason: string) {
+  await remoteTransaction(async () => {
+    await database.syncConflicts.put({
+      id: op.id,
+      operation: op,
+      reason,
+      state: 'blocked',
+      createdAt: Date.now(),
+    });
+    await database.syncOutbox.delete(op.id);
+    if (op.resolutionOf)
+      await database.syncConflicts.update(op.resolutionOf, {
+        resolvedAt: Date.now(),
+      });
+  });
 }
 export async function syncNow() {
   if (!account || switched()) return;
@@ -307,47 +354,86 @@ export async function syncNow() {
   running = navigator.locks.request(
     'duoyu:sync:' + activeAccountKey(),
     async () => {
+      let uploadError: unknown, downloadError: unknown;
+      syncState.value.status = '正在同步';
+      syncState.value.error = '';
+      syncState.value.needsReload = false;
       try {
-        syncState.value.status = '正在同步';
-        syncState.value.error = '';
-        if (!(await database.syncMeta.get('initialized'))?.value) {
-          const snapshot = await rpc('/v1/sync/snapshot');
-          if (snapshot.schemaVersion !== 1) throw Error('云端同步版本不兼容');
-          await applyRemote(snapshot.entities, snapshot.revision, true);
-        }
-        // Push before pull so local base revisions retain their meaning. Server does
-        // three-way merge against its latest committed data under the account lock.
-        for (const op of await database.syncOutbox
+        if (!(await database.syncMeta.get('initialized'))?.value)
+          await refreshSnapshot();
+        // Check the dataset generation before replaying any offline operations.
+        await pull();
+        for (const original of await database.syncOutbox
           .orderBy('createdAt')
           .toArray()) {
-          const prepared = (await prepare(op)) as { changes: Change[] };
-          if (!prepared.changes.length) {
-            await database.syncOutbox.delete(op.id);
-            continue;
+          const op = await database.syncOutbox.get(original.id);
+          if (!op) continue;
+          try {
+            const prepared = (await prepare(op)) as { changes: Change[] };
+            if (!prepared.changes.length) {
+              await database.syncOutbox.delete(op.id);
+              continue;
+            }
+            const result = await rpc('/v1/sync/operations', 'POST', prepared);
+            await refreshSnapshot(
+              op.id,
+              result.status === 'conflict' ? result.code : undefined,
+            );
+          } catch (error) {
+            const status = (error as { status?: number }).status,
+              code = error instanceof Error ? error.message : '';
+            if (code === 'epoch_mismatch') {
+              await refreshSnapshot();
+              break;
+            }
+            if (status && [400, 409, 413, 415, 422].includes(status)) {
+              await quarantine(op, code);
+              await refreshSnapshot();
+              continue;
+            }
+            uploadError = error;
+            break;
           }
-          const result = await rpc('/v1/sync/operations', 'POST', prepared);
-          // A push response is not a pull cursor: another device's earlier operations
-          // may precede it. Refresh a consistent snapshot after acknowledged writes.
-          const snapshot = await rpc('/v1/sync/snapshot');
-          await applyRemote(
-            snapshot.entities,
-            snapshot.revision,
-            true,
-            op.id,
-            result.status === 'conflict' ? result.code : undefined,
-          );
         }
-        await pull();
-        retry = 0;
-        syncState.value.status = '已同步';
-      } catch (e) {
-        syncState.value.status = '待同步';
-        syncState.value.error = e instanceof Error ? e.message : '同步失败';
-        retry = Math.min(retry + 1, 7);
-      } finally {
-        syncState.value.pending = await database.syncOutbox.count();
-        syncState.value.conflicts = await database.syncConflicts.count();
+      } catch (error) {
+        uploadError = error;
       }
+      // Upload failures must never prevent downloading other devices' changes.
+      try {
+        await pull();
+        await fetchRemoteConflicts(rpc);
+      } catch (error) {
+        downloadError = error;
+      }
+      await remoteTransaction(async () => {
+        if (!downloadError) {
+          const now = Date.now();
+          await database.syncMeta.put({ id: 'lastSyncedAt', value: now });
+          syncState.value.lastSyncedAt = now;
+        }
+      });
+      await pruneAssetCache().catch(() => {});
+      syncState.value.pending = await database.syncOutbox.count();
+      syncState.value.conflicts = (
+        await database.syncConflicts.toArray()
+      ).filter((c) => !c.resolvedAt).length;
+      const error = downloadError || uploadError;
+      if (error) {
+        syncState.value.error =
+          error instanceof Error ? error.message : '同步失败';
+        syncState.value.needsReload =
+          (error as { status?: number }).status === 426;
+        retry = Math.min(retry + 1, 7);
+      } else retry = 0;
+      syncState.value.status = syncState.value.pending
+        ? '待同步'
+        : syncState.value.conflicts
+          ? '有更改待处理'
+          : error
+            ? '连接异常'
+            : '已同步';
+      void hydrateWallpaper();
+      window.dispatchEvent(new Event('duoyu-assets-retry'));
     },
   );
   try {
@@ -365,13 +451,16 @@ export async function syncNow() {
   }
 }
 function schedule(delay = 800) {
-  if (!account) return;
+  if (!account || syncState.value.needsReload) return;
   if (delay === 800) {
     firstWrite ||= Date.now();
     delay = Math.min(delay, Math.max(0, firstWrite + 5000 - Date.now()));
   }
   clearTimeout(timer);
   timer = setTimeout(() => void syncNow(), delay);
+}
+export function reloadSyncExtension() {
+  browser.runtime.reload();
 }
 async function chooseAccount(next: Account | null) {
   const key = next ? await accountKey(next) : '';
@@ -386,6 +475,10 @@ async function chooseAccount(next: Account | null) {
   return true;
 }
 export async function initializeCloud() {
+  connectAssetTransport(rpc);
+  syncState.value.lastSyncedAt = Number(
+    (await database.syncMeta.get('lastSyncedAt'))?.value || 0,
+  );
   try {
     const response = await browser.runtime.sendMessage({
       type: 'duoyu-auth',
@@ -442,6 +535,9 @@ export async function getSyncPreference(id: string) {
   return (await browser.storage.local.get(id))[id];
 }
 async function projectPreferences() {
+  const oldWallpaperMode = localStorage.getItem(
+    `account:${activeAccountKey()}:duoyu-wallpaper-mode`,
+  );
   for (const p of await database.preferences.toArray()) {
     const key =
       p.id === 'dockOrder'
@@ -464,71 +560,19 @@ async function projectPreferences() {
       document.documentElement.dataset.glassMode = String(p.value);
   }
   window.dispatchEvent(new Event('duoyu-sync-preferences'));
-}
-export async function importGuest() {
-  if (!account) throw Error('请先登录');
-  const guest = new Dexie('duoyu');
-  await guest.open();
-  try {
-    const source: Record<string, Row[]> = {};
-    for (const name of SYNC_TABLES.filter((n) => n !== 'preferences'))
-      if (guest.tables.some((t) => t.name === name))
-        source[name] = await guest.table(name).toArray();
-    source.preferences = [];
-    const saved = await browser.storage.local.get([
-      'glassMode',
-      'searchEngine',
-    ]);
-    for (const [id, value] of Object.entries(saved))
-      source.preferences.push({ id, value });
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i)!;
-      const id =
-        key === 'duoyu-dock-order'
-          ? 'dockOrder'
-          : key === 'duoyu-wallpaper-mode'
-            ? 'wallpaperMode'
-            : key.startsWith('duoyu-layout-')
-              ? 'layout:' + key.slice(13)
-              : '';
-      if (id) source.preferences.push({ id, value: localStorage.getItem(key) });
-    }
-    const imported = Object.fromEntries(
-      Object.entries(source).flatMap(([table, rows]) =>
-        rows.map((value) => [
-          table + ':' + value.id,
-          { table, id: value.id, base: null, value },
-        ]),
-      ),
+  if (
+    oldWallpaperMode !==
+    localStorage.getItem(`account:${activeAccountKey()}:duoyu-wallpaper-mode`)
+  ) {
+    localStorage.removeItem(
+      `account:${activeAccountKey()}:duoyu:wallpaper-preview`,
     );
-    if (rowChanges(imported).length > 2000)
-      throw Error('单次导入最多2000条，请先导出备份并分批整理');
-    // Explicit one-time import into an empty account prevents collisions with
-    // fixed IDs such as home folders, default page and default space.
-    if (
-      (await database.libraryItems.count()) ||
-      (await database.libraryPages.count()) ||
-      (await database.workspaceSpaces.count()) ||
-      (await database.tabCollections.count())
-    )
-      throw Error('账号已有数据，不能覆盖导入；请先导出备份后单独整理');
-    await database.transaction('rw', database.tables, async () => {
-      for (const [name, rows] of Object.entries(source))
-        if (rows.length) await database.table(name).bulkPut(rows);
-    });
-  } finally {
-    guest.close();
+    window.dispatchEvent(new Event('duoyu-wallpaper-change'));
   }
-  await syncNow();
 }
-export async function exportConflicts() {
-  const records = await database.syncConflicts.toArray();
-  const url = URL.createObjectURL(
-    new Blob([JSON.stringify(records, null, 2)], { type: 'application/json' }),
-  );
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'duoyu-sync-conflicts.json';
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
+export function formatSyncTime(time: number) {
+  if (!time) return '';
+  const date = new Date(time),
+    pad = (v: number) => String(v).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }

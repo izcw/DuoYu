@@ -68,7 +68,7 @@ function visibility() {
 }
 function imageChanged() {
   const image = document.querySelector<HTMLImageElement>(
-    '.wallpaper > img.loaded',
+    '.wallpaper:not(.wallpaper-contained) > img.loaded',
   );
   if (image?.complete && image.naturalWidth && image.src !== lastSource) {
     try {
@@ -129,7 +129,9 @@ onMounted(() => {
       }),
     );
   wallpaper = new MutationObserver(imageChanged);
-  wallpaperElement = document.querySelector('.wallpaper');
+  wallpaperElement = document.querySelector(
+    '.wallpaper:not(.wallpaper-contained)',
+  );
   wallpaperElement?.addEventListener('load', imageChanged, true);
   if (wallpaperElement)
     wallpaper.observe(wallpaperElement, {

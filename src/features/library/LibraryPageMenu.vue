@@ -25,6 +25,7 @@ const emit = defineEmits<{
   pages: [value: LibraryPage[]];
 }>();
 const pages = ref<LibraryPage[]>([]);
+const hoveredIcon = ref<string>();
 const error = ref('');
 const editing = ref('');
 const name = ref('');
@@ -264,9 +265,14 @@ onUnmounted(() => {
       aria-label="首页"
       :aria-pressed="!!props.homeActive"
       :aria-current="props.homeActive ? 'page' : undefined"
+      @mouseenter="hoveredIcon = 'home'"
+      @mouseleave="hoveredIcon = undefined"
       @click="emit('home')"
     >
-      <PageIcon name="Home" :active="props.homeActive" />
+      <PageIcon
+        name="Home"
+        :active="props.homeActive || hoveredIcon === 'home'"
+      />
       <small>首页</small>
     </button>
     <ReorderTransition class="library-page-list">
@@ -286,6 +292,8 @@ onUnmounted(() => {
       >
         <button
           class="library-page-choice side-menu-choice"
+          @mouseenter="hoveredIcon = item.id"
+          @mouseleave="hoveredIcon = undefined"
           :aria-pressed="!props.homeActive && active === item.id"
           :aria-current="
             !props.homeActive && active === item.id ? 'page' : undefined
@@ -297,7 +305,10 @@ onUnmounted(() => {
         >
           <PageIcon
             :name="item.icon"
-            :active="!props.homeActive && active === item.id"
+            :active="
+              (!props.homeActive && active === item.id) ||
+              hoveredIcon === item.id
+            "
           />
           <small>{{ item.name }}</small>
         </button>
@@ -307,9 +318,11 @@ onUnmounted(() => {
       class="library-page-add side-menu-add"
       :disabled="busy"
       aria-label="添加收藏页"
+      @mouseenter="hoveredIcon = 'add'"
+      @mouseleave="hoveredIcon = undefined"
       @click="add"
     >
-      <PageIcon name="Add" />
+      <PageIcon name="Add" :active="hoveredIcon === 'add'" />
     </button>
     <p v-if="error" role="alert">{{ error }}</p>
     <Teleport to="body">

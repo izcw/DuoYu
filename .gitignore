@@ -11,3 +11,7 @@ work/
 Thumbs.db
 
 Key.txt
+admin/dist/
+server/backend/duoyu-backend
+server/backend/duoyu-backend.exe
+server/backend/data/

@@ -33,8 +33,14 @@
     "test:auth:integration": "node scripts/auth-integration.mjs",
     "test:cloud:client": "node scripts/cloud-client.mjs",
     "test:cloud:integration": "node scripts/cloud-integration.mjs",
-    "test:cloud:server": "pnpm --dir server/sync test",
-    "test:cloud:ui": "node scripts/cloud-ui.mjs"
+    "test:cloud:server": "corepack pnpm@11.25.0 --dir ../DuoYu-Backend/server/sync test",
+    "test:cloud:ui": "node scripts/cloud-ui.mjs",
+    "test:cloud:account-ui": "node scripts/cloud-account-ui.mjs",
+    "test:conflict-preview": "node scripts/conflict-preview.mjs",
+    "build:admin": "corepack pnpm@11.25.0 --dir ../DuoYu-Backend/admin build",
+    "test:admin:ui": "corepack pnpm@11.25.0 --dir ../DuoYu-Backend test:admin:ui",
+    "test:cloud:assets": "node scripts/asset-lifecycle.mjs",
+    "test:upload:ui": "node scripts/upload-lifecycle-ui.mjs"
   },
   "dependencies": {
     "@icon-park/vue-next": "^1.4.2",

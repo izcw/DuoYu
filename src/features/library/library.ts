@@ -1,5 +1,6 @@
 import { truncateLinkTitle } from './link-title';
-import { itemMaxColumns, itemMaxRows } from './grid-config';
+import { normalizeSize } from './grid-layout';
+export { normalizeSize } from './grid-layout';
 import { database, type LibraryItem } from '../../shared/storage/database';
 import { webUrl } from '../workspace/collections';
 
@@ -145,19 +146,6 @@ export async function deleteLibraryItem(id: string) {
   });
 }
 
-export function normalizeSize(
-  width: number,
-  height: number,
-  kind: LibraryItem['kind'] = 'folder',
-) {
-  let w = Math.max(1, Math.min(itemMaxColumns(kind), Math.round(width)));
-  let h = Math.max(1, Math.min(itemMaxRows(kind), Math.round(height)));
-  if (kind !== 'link' && w * h < 3) {
-    if (h > w) h = 3;
-    else w = 3;
-  }
-  return { width: w, height: h };
-}
 export async function resizeLibraryItem(
   id: string,
   width: number,

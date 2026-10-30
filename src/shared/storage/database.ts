@@ -3,6 +3,7 @@ import { activeAccountKey } from './account';
 import {
   installSyncCapture,
   type CapturedOperation,
+  type SyncConflict,
 } from '../../features/sync/capture';
 
 export interface ShortcutItem {
@@ -92,8 +93,15 @@ export const database = new Dexie(
     'id'
   >;
   syncMeta: EntityTable<{ id: string; value: unknown }, 'id'>;
-  syncConflicts: EntityTable<
-    { id: string; createdAt: number; operation: unknown; reason: string },
+  syncConflicts: EntityTable<SyncConflict, 'id'>;
+  syncAssets: EntityTable<
+    {
+      id: string;
+      blob: Blob;
+      uploadedEpoch?: string;
+      uploadedAt?: number;
+      createdAt?: number;
+    },
     'id'
   >;
   wallpapers: EntityTable<WallpaperRecord, 'id'>;
@@ -151,6 +159,7 @@ database.version(8).stores({
   syncConflicts: 'id,createdAt',
 });
 installSyncCapture(database, !!activeAccountKey());
+database.version(9).stores({ syncAssets: 'id' });
 
 database
   .version(7)

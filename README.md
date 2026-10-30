@@ -2,6 +2,8 @@
 
 基于 Vue 3、TypeScript、WXT 和 GridStack 的 Chrome Manifest V3 新标签页扩展。
 
+业务后端与管理端使用 Go、PostgreSQL、Vue 3、Element Plus 和 ECharts。正式入口：[多鱼管理系统](https://sync.duoyu.link/admin/)，仅 DuoYu-ID 账号8888888888可登录。用户文件、配额、用户数据模板、官方默认模板及部署测试见 [后端与管理说明](../DuoYu-Backend/README.md)。
+
 ## 环境与命令
 
 - Node.js 22+
@@ -138,3 +140,6 @@ wxt.config.ts            扩展构建、权限及 Manifest 配置
 图标加文字的链接使用 `glass-interaction-owner` 包裹 `glass-interaction-target`，交互底色仅绘制在图标底座上，文字保持透明；该规则复用同一个交互材质。
 
 壁纸首屏采用两级缓存：Dexie 保存完整原图；`wallpaper-preview.ts` 额外保存最长边 960px、最多 180 KB 的 JPEG 预览到 localStorage。`public/wallpaper-startup.js` 在应用脚本之前同步读取预览，填补 IndexedDB 与原图解码的等待时间；原图解码后直接显示，不做首次淡入。预览不可用时走原有默认背景，存储限制不会阻止原图显示。
+
+后端与管理端已拆分到同级独立项目 DuoYu-Backend，本仓库仅保留扩展源码。
+

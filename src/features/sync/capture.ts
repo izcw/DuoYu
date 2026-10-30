@@ -16,6 +16,16 @@ export interface CapturedOperation {
     { table: string; id: string; base: unknown; value: unknown }
   >;
   prepared?: unknown;
+  resolutionOf?: string;
+}
+export interface SyncConflict {
+  id: string;
+  createdAt: number;
+  operation: unknown;
+  reason: string;
+  resolvedAt?: number;
+  state?: 'conflict' | 'blocked' | 'resolving';
+  server?: boolean;
 }
 const request = <T>(r: IDBRequest<T>) =>
   new Promise<T>((resolve, reject) => {

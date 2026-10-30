@@ -6,9 +6,13 @@ import { authConfig, AUTH_SESSION_KEY, type AuthView } from './config';
 import {
   syncState,
   syncNow,
-  importGuest,
-  exportConflicts,
+  formatSyncTime,
+  reloadSyncExtension,
 } from '../sync/client';
+import JsonImportDialog from '../sync/JsonImportDialog.vue';
+import ConflictCenter from '../sync/ConflictCenter.vue';
+const importOpen = ref(false),
+  conflictsOpen = ref(false);
 async function cloudAction(task: () => Promise<unknown>) {
   if (busy.value) return;
   busy.value = true;
@@ -114,25 +118,44 @@ function accountCenter() {
             · {{ syncState.pending }} 项待上传</template
           >
         </p>
+        <p v-if="syncState.lastSyncedAt" class="account-message sync-time">
+          最近同步：{{ formatSyncTime(syncState.lastSyncedAt) }}
+        </p>
+        <p v-if="syncState.assetError" class="account-message">
+          {{ syncState.assetError }}
+        </p>
         <p v-if="syncState.error" class="account-message">
           {{ syncState.error }}
         </p>
+        <button
+          v-if="syncState.needsReload"
+          type="button"
+          @click="reloadSyncExtension"
+        >
+          重新加载扩展并恢复同步
+        </button>
         <button type="button" :disabled="busy" @click="cloudAction(syncNow)">
           立即同步
         </button>
         <button
           type="button"
           :disabled="busy"
-          @click="cloudAction(importGuest)"
+          @click="
+            open = false;
+            importOpen = true;
+          "
         >
-          导入本机数据到空账号
+          导入JSON文件
         </button>
         <button
           v-if="syncState.conflicts"
           type="button"
-          @click="cloudAction(exportConflicts)"
+          @click="
+            open = false;
+            conflictsOpen = true;
+          "
         >
-          导出冲突副本（{{ syncState.conflicts }}）
+          处理同步更改（{{ syncState.conflicts }}）
         </button>
         <button type="button" :disabled="busy" @click="action('logout')">
           退出登录
@@ -149,6 +172,8 @@ function accountCenter() {
       </p>
     </div>
   </BaseDialog>
+  <JsonImportDialog v-model:open="importOpen" />
+  <ConflictCenter v-model:open="conflictsOpen" />
 </template>
 <style scoped>
 .account-entry {

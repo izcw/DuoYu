@@ -28,7 +28,7 @@ function key(event: KeyboardEvent) {
     panel.value?.querySelectorAll<HTMLElement>(
       'input:not(:disabled), button:not(:disabled), a[href], textarea:not(:disabled), select:not(:disabled), [tabindex="0"]',
     ) ?? [],
-  );
+  ).filter((element) => !element.closest('[inert]'));
   const first = controls[0],
     last = controls.at(-1);
   if (!first) {
@@ -138,7 +138,7 @@ onUnmounted(() => {
 .base-dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 2147483001;
+  z-index: 2147483002;
   background: #0004;
   display: grid;
   place-items: center;

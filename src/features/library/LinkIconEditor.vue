@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { limitIconText } from '../../shared/icon-text';
 import { iconForeground } from '../../shared/icon-material';
 import { DESKTOP_GRID_CELL_WIDTH } from './grid-config';
 import TextIcon from '../../shared/components/base/TextIcon.vue';
@@ -38,7 +39,17 @@ const mode = ref('auto'),
   text = ref(''),
   upload = ref(''),
   color = ref('');
+const pictureFilter = ref('');
+const hoveredPictureFilter = ref<string | null>(null);
+const previewPictureFilter = computed(
+  () => hoveredPictureFilter.value ?? pictureFilter.value,
+);
+function selectPictureFilter(value: string) {
+  pictureFilter.value = value;
+}
+const iconPadding = ref(4);
 const material = ref<'glass' | 'fill'>('glass');
+const materials = ['glass', 'fill'] as const;
 const hoveredColor = ref<string | null>(null);
 const previewColor = computed(() => hoveredColor.value ?? color.value);
 const editingText = ref(false);
@@ -63,7 +74,13 @@ function placeTextCaret(offset: number, extend: boolean) {
   input.setSelectionRange(Math.min(anchor, offset), Math.max(anchor, offset));
   syncTextSelection();
 }
-async function selectText() {
+async function selectText(rowMaterial: 'glass' | 'fill') {
+  if (material.value !== rowMaterial) {
+    editingText.value = false;
+    material.value = rowMaterial;
+    mode.value = 'text';
+    return;
+  }
   if (mode.value !== 'text') {
     mode.value = 'text';
     return;
@@ -74,7 +91,7 @@ async function selectText() {
   textInput.value?.select();
   syncTextSelection();
 }
-watch(mode, () => {
+watch([mode, material], () => {
   editingText.value = false;
 });
 const error = ref('');
@@ -91,33 +108,60 @@ const colorRows = [
     values: ['', '#ffffff', '#e5e7eb', '#808080', '#000000'],
   },
   {
+    name: '青',
+    values: ['#01a0d8', '#03c7fb', '#54d6fa', '#92e2fb', '#cbeffe'],
+  },
+  {
     name: '蓝',
-    values: ['#004cff', '#2878ff', '#54a0ff', '#91c5ff', '#d5eaff'],
+    values: ['#0062fe', '#3c87fd', '#74a6ff', '#a8c6ff', '#d3e1ff'],
+  },
+  {
+    name: '靛紫',
+    values: ['#4e22b3', '#5e2feb', '#864efd', '#b08dfc', '#d9c7fd'],
   },
   {
     name: '紫',
-    values: ['#6200ee', '#8938ff', '#ab6cff', '#c9a0ff', '#ecdcff'],
+    values: ['#982abb', '#be37f3', '#d257fd', '#e391fd', '#eecaff'],
   },
   {
-    name: '粉',
-    values: ['#e60080', '#ff32a0', '#ff70bd', '#ffa7d6', '#ffdeef'],
+    name: '玫红',
+    values: ['#ba2c5d', '#e63b7b', '#ee719e', '#f4a3c0', '#f8d3de'],
   },
   {
-    name: '红',
-    values: ['#e60024', '#ff334d', '#ff6b7c', '#ffa3ad', '#ffdbdf'],
+    name: '朱红',
+    values: ['#ff4017', '#ff614e', '#fd8c81', '#ffb5ae', '#ffdad8'],
   },
   {
     name: '橙',
-    values: ['#f56b00', '#ff8b20', '#ffac52', '#ffce91', '#ffe9cc'],
+    values: ['#ff6a03', '#ff8647', '#ffa57d', '#fec5ab', '#ffe3d5'],
   },
   {
-    name: '黄',
-    values: ['#efbe00', '#ffd000', '#ffe047', '#ffed8a', '#fff8ce'],
+    name: '琥珀',
+    values: ['#fdaa02', '#feb43f', '#fec776', '#ffd9a8', '#feebd2'],
+  },
+  {
+    name: '金黄',
+    values: ['#fcc800', '#fdcb3f', '#fed976', '#fde3a8', '#fef2d4'],
+  },
+  {
+    name: '明黄',
+    values: ['#fdfb43', '#fef769', '#fff893', '#fdfbb9', '#fdfcdb'],
+  },
+  {
+    name: '黄绿',
+    values: ['#d8ec37', '#e3ee64', '#eaf18f', '#f1f5b5', '#f5f9db'],
   },
   {
     name: '绿',
-    values: ['#00a64c', '#12c96c', '#4ddd91', '#94edbb', '#d4f9e3'],
+    values: ['#75bc3f', '#96d35f', '#b1dc8b', '#cce8b4', '#deedd5'],
   },
+];
+const filterColors = [
+  ['', '无'],
+  ...colorRows.slice(1).map((row) => [row.values[0]!, row.name]),
+  ['#ffffff', '白色'],
+  ['#808080', '灰色'],
+  ['#000000', '黑色'],
 ];
 function swatchName(row: (typeof colorRows)[number], index: number) {
   return (
@@ -140,8 +184,13 @@ try {
     mode.value = data.mode;
     text.value = data.text || '';
     textEdited.value = data.textEdited ?? (!!data.text && data.text !== '文');
-    upload.value = data.image || '';
+    upload.value = data.mode === 'upload' ? data.image || '' : '';
     color.value = data.color || '';
+    pictureFilter.value = data.pictureFilter || '';
+    iconPadding.value = Math.max(
+      0,
+      Math.min(8, Number(data.padding ?? 4) || 0),
+    );
     material.value = data.material === 'fill' ? 'fill' : 'glass';
   } else if (model.value) {
     mode.value = 'upload';
@@ -150,28 +199,39 @@ try {
 } catch {
   /* Fall back to automatic. */
 }
-watch([mode, text, upload, color, textEdited, material], () => {
-  text.value = Array.from(text.value).slice(0, 6).join('');
-  model.value =
-    'duoyu-icon:' +
-    JSON.stringify({
-      mode: mode.value,
-      text: text.value,
-      textEdited: textEdited.value,
-      image: upload.value,
-      color: color.value,
-      material: material.value,
-    });
-});
+watch(
+  [mode, text, upload, color, textEdited, material, pictureFilter, iconPadding],
+  () => {
+    text.value = limitIconText(text.value);
+    model.value =
+      'duoyu-icon:' +
+      JSON.stringify({
+        mode: mode.value,
+        text: text.value,
+        textEdited: textEdited.value,
+        image: mode.value === 'upload' ? upload.value : '',
+        color: color.value,
+        material: material.value,
+        pictureFilter: pictureFilter.value,
+        padding: iconPadding.value,
+      });
+  },
+);
 watch(
   () => [props.url, props.title],
   () => {
     if (!textEdited.value && props.url.trim()) {
-      text.value = Array.from(props.title.trim()).slice(0, 6).join('');
+      text.value = limitIconText(props.title.trim());
     }
   },
   { immediate: true },
 );
+function removeUpload() {
+  upload.value = '';
+  error.value = '';
+  if (fileInput.value) fileInput.value.value = '';
+  if (mode.value === 'upload') mode.value = 'auto';
+}
 async function choose(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0];
   if (!file) return;
@@ -208,159 +268,209 @@ async function choose(event: Event) {
 <template>
   <fieldset>
     <legend>图标</legend>
-    <div
-      ref="previewRegion"
-      class="icon-options"
-      :data-material="material"
-      :data-transparent="!previewColor"
-      role="group"
-      aria-label="图标类型"
-    >
-      <span
-        class="preview-wallpaper"
-        :style="wallpaperPosition"
-        aria-hidden="true"
-      ></span>
-      <button
-        type="button"
-        :aria-pressed="mode === 'auto'"
-        title="自动获取，点击重新获取"
-        @click="automatic"
-      >
-        <span
-          :style="{
-            '--icon-hover-fill': previewColor || undefined,
-            '--icon-foreground': iconForeground(material, previewColor),
-          }"
-          class="cell-icon"
-          ><img
-            v-if="!url.trim()"
-            class="default-site-logo"
-            src="/icons/128.png"
-            alt="默认扩展图标"
-            draggable="false" />
-          <WorkspaceFavicon
-            v-else
-            :key="refresh"
-            :refresh-key="refresh"
-            :title="title || '网址'"
-            :page-url="url"
-            class="preview"
-            :style="{
-              '--icon-hover-fill': previewColor || undefined,
-              '--icon-foreground': iconForeground(material, previewColor),
-            }"
-        /></span>
-        <span
-          class="preview-title desktop-icon-caption"
-          :style="{ width: `${DESKTOP_GRID_CELL_WIDTH - 16}px` }"
-          :title="title"
-          >{{ title || '名称' }}</span
-        >
-      </button>
-      <div
-        class="text-option"
-        role="button"
-        tabindex="0"
-        :aria-pressed="mode === 'text'"
-        aria-label="文字图标，再次点击编辑"
-        @click="selectText"
-        @keydown.enter.self.prevent="selectText"
-        @keydown.space.self.prevent="selectText"
-      >
-        <span
-          class="text-preview cell-icon"
-          :style="{
-            '--icon-hover-fill': previewColor || undefined,
-            '--icon-foreground': iconForeground(material, previewColor),
-          }"
-        >
-          <input
-            v-if="editingText"
-            ref="textInput"
-            v-model="text"
-            @input="textEdited = true"
-            class="inline-icon-editor"
-            @select="syncTextSelection"
-            @keyup="syncTextSelection"
-            @pointerup="syncTextSelection"
-            aria-label="图标文字，最多六个字"
-            placeholder="文"
-            @click.stop
-            @keydown.stop
-            @keydown.enter.prevent="editingText = false"
-            @keydown.esc.prevent="editingText = false"
-            @blur="editingText = false"
-          />
-          <TextIcon
-            :text="text"
-            :editing="editingText"
-            :selection-start="selectionStart"
-            :selection-end="selectionEnd"
-            @caret="placeTextCaret"
-          />
-        </span>
-        <span
-          class="preview-title desktop-icon-caption"
-          :style="{ width: `${DESKTOP_GRID_CELL_WIDTH - 16}px` }"
-          :title="title"
-          >{{ title || '名称' }}</span
-        >
-      </div>
-
-      <button
-        type="button"
-        :aria-pressed="mode === 'upload'"
-        @click="mode === 'upload' ? fileInput?.click() : (mode = 'upload')"
-      >
-        <span
-          v-if="upload"
-          :style="{
-            '--icon-hover-fill': previewColor || undefined,
-            '--icon-foreground': iconForeground(material, previewColor),
-          }"
-          class="cell-icon"
-          ><WorkspaceFavicon
-            :src="upload"
-            title="上传"
-            class="preview"
-            :style="{
-              '--icon-hover-fill': previewColor || undefined,
-              '--icon-foreground': iconForeground(material, previewColor),
-            }"
-        /></span>
-        <span
-          v-else
-          class="text-preview cell-icon"
-          :style="{
-            '--icon-hover-fill': previewColor || undefined,
-            '--icon-foreground': iconForeground(material, previewColor),
-          }"
-          aria-hidden="true"
-          ><img
-            class="upload-placeholder"
-            src="/images/upload-icon.png"
-            alt=""
-            draggable="false"
-        /></span>
-        <span
-          class="preview-title desktop-icon-caption"
-          :style="{ width: `${DESKTOP_GRID_CELL_WIDTH - 16}px` }"
-          :title="title"
-          >{{ title || '名称' }}</span
-        >
-      </button>
-    </div>
     <div class="icon-type-hints" aria-hidden="true">
-      <span :class="{ selected: mode === 'auto' }">{{
-        mode === 'auto' ? '点击重新获取' : '自动获取'
-      }}</span
-      ><span :class="{ selected: mode === 'text' }">{{
-        mode === 'text' ? '点击修改' : '文字图标'
-      }}</span
-      ><span :class="{ selected: mode === 'upload' }">{{
-        mode === 'upload' ? '点击上传' : '自定义上传'
-      }}</span>
+      <span>{{ mode === 'auto' ? '点击重新获取' : '自动获取' }}</span>
+      <span>{{ mode === 'text' ? '点击修改' : '文字图标' }}</span>
+      <span>{{ mode === 'upload' ? '点击上传' : '自定义上传' }}</span>
+    </div>
+    <div ref="previewRegion" class="icon-preview-board">
+      <div class="preview-wallpaper-clip" aria-hidden="true">
+        <span class="preview-wallpaper" :style="wallpaperPosition"></span>
+      </div>
+      <template v-for="rowMaterial in materials" :key="rowMaterial">
+        <div
+          class="icon-options"
+          :data-material="rowMaterial"
+          :style="{ '--icon-padding': `${iconPadding}px` }"
+          :data-transparent="!previewColor"
+          role="group"
+          :aria-label="rowMaterial === 'glass' ? '液态玻璃图标' : '填充图标'"
+        >
+          <span class="material-row-label" aria-hidden="true">{{
+            rowMaterial === 'glass' ? '液态玻璃' : '填充背景'
+          }}</span>
+          <button
+            type="button"
+            :aria-pressed="mode === 'auto' && material === rowMaterial"
+            title="自动获取，点击重新获取"
+            @click="
+              material = rowMaterial;
+              automatic();
+            "
+          >
+            <span
+              :style="{
+                '--icon-hover-fill': previewColor || undefined,
+                '--icon-foreground': iconForeground(rowMaterial, previewColor),
+              }"
+              class="cell-icon"
+              ><img
+                v-if="!url.trim()"
+                class="default-site-logo"
+                src="/icons/128.png"
+                alt="默认扩展图标"
+                draggable="false" />
+              <WorkspaceFavicon
+                :picture-filter="previewPictureFilter"
+                v-else
+                :key="refresh"
+                :refresh-key="refresh"
+                :title="title || '网址'"
+                :page-url="url"
+                class="preview"
+                :style="{
+                  '--icon-hover-fill': previewColor || undefined,
+                  '--icon-foreground': iconForeground(
+                    rowMaterial,
+                    previewColor,
+                  ),
+                }"
+            /></span>
+            <span
+              class="preview-title desktop-icon-caption"
+              :style="{ width: `${DESKTOP_GRID_CELL_WIDTH - 16}px` }"
+              :title="title"
+              >{{ title || '名称' }}</span
+            >
+          </button>
+          <div
+            class="text-option"
+            role="button"
+            tabindex="0"
+            :aria-pressed="mode === 'text' && material === rowMaterial"
+            aria-label="文字图标，再次点击编辑"
+            @click="selectText(rowMaterial)"
+            @keydown.enter.self.prevent="selectText(rowMaterial)"
+            @keydown.space.self.prevent="selectText(rowMaterial)"
+          >
+            <span
+              class="text-preview cell-icon"
+              :style="{
+                '--icon-hover-fill': previewColor || undefined,
+                '--icon-foreground': iconForeground(rowMaterial, previewColor),
+              }"
+            >
+              <input
+                v-if="editingText && material === rowMaterial"
+                :ref="
+                  (el) => {
+                    if (el) textInput = el as HTMLInputElement;
+                  }
+                "
+                v-model="text"
+                @input="textEdited = true"
+                class="inline-icon-editor"
+                @select="syncTextSelection"
+                @keyup="syncTextSelection"
+                @pointerup="syncTextSelection"
+                aria-label="图标文字，中文最多6字，其他字符最多10个"
+                placeholder="文"
+                @click.stop
+                @keydown.stop
+                @keydown.enter.prevent="editingText = false"
+                @keydown.esc.prevent="editingText = false"
+                @blur="editingText = false"
+              />
+              <TextIcon
+                :text="text"
+                :editing="editingText && material === rowMaterial"
+                :selection-start="selectionStart"
+                :selection-end="selectionEnd"
+                @caret="placeTextCaret"
+              />
+            </span>
+            <span
+              class="preview-title desktop-icon-caption"
+              :style="{ width: `${DESKTOP_GRID_CELL_WIDTH - 16}px` }"
+              :title="title"
+              >{{ title || '名称' }}</span
+            >
+          </div>
+
+          <div class="upload-option">
+            <button
+              type="button"
+              :aria-pressed="mode === 'upload' && material === rowMaterial"
+              @click="
+                mode === 'upload' && material === rowMaterial
+                  ? fileInput?.click()
+                  : (mode = 'upload');
+                material = rowMaterial;
+              "
+            >
+              <span
+                v-if="upload"
+                :style="{
+                  '--icon-hover-fill': previewColor || undefined,
+                  '--icon-foreground': iconForeground(
+                    rowMaterial,
+                    previewColor,
+                  ),
+                }"
+                class="cell-icon"
+                ><WorkspaceFavicon
+                  :picture-filter="previewPictureFilter"
+                  :src="upload"
+                  title="上传"
+                  class="preview"
+                  :style="{
+                    '--icon-hover-fill': previewColor || undefined,
+                    '--icon-foreground': iconForeground(
+                      rowMaterial,
+                      previewColor,
+                    ),
+                  }"
+              /></span>
+              <span
+                v-else
+                class="text-preview cell-icon"
+                :style="{
+                  '--icon-hover-fill': previewColor || undefined,
+                  '--icon-foreground': iconForeground(
+                    rowMaterial,
+                    previewColor,
+                  ),
+                }"
+                aria-hidden="true"
+                ><img
+                  class="upload-placeholder"
+                  src="/images/upload-icon.png"
+                  alt=""
+                  draggable="false"
+              /></span>
+              <span
+                class="preview-title desktop-icon-caption"
+                :style="{ width: `${DESKTOP_GRID_CELL_WIDTH - 16}px` }"
+                :title="title"
+                >{{ title || '名称' }}</span
+              >
+            </button>
+            <button
+              v-if="upload"
+              type="button"
+              class="remove-upload"
+              aria-label="删除此图片"
+              title="删除此图片"
+              @click.stop="removeUpload"
+              @pointerdown.stop
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </template>
     </div>
     <input
       ref="fileInput"
@@ -372,29 +482,10 @@ async function choose(event: Event) {
     <p v-if="error" role="alert">{{ error }}</p>
   </fieldset>
   <fieldset>
-    <legend>图标材质</legend>
-    <div class="material-options" role="group" aria-label="图标材质">
-      <button
-        type="button"
-        :aria-pressed="material === 'glass'"
-        @click="material = 'glass'"
-      >
-        液态玻璃
-      </button>
-      <button
-        type="button"
-        :aria-pressed="material === 'fill'"
-        @click="material = 'fill'"
-      >
-        填充
-      </button>
-    </div>
-  </fieldset>
-  <fieldset>
-    <legend>图标颜色</legend>
+    <legend>背景颜色</legend>
     <div
       class="color-grid"
-      aria-label="图标颜色"
+      aria-label="背景颜色"
       @pointerleave="hoveredColor = null"
       @focusout="hoveredColor = null"
     >
@@ -423,6 +514,71 @@ async function choose(event: Event) {
       </div>
     </div>
   </fieldset>
+
+  <fieldset v-if="mode !== 'text'">
+    <legend>图片滤镜</legend>
+    <div
+      class="filter-grid color-grid"
+      role="group"
+      aria-label="图片滤镜"
+      @pointerleave="hoveredPictureFilter = null"
+      @focusout="hoveredPictureFilter = null"
+    >
+      <div
+        v-for="[value, label] in filterColors"
+        :key="value"
+        class="color-row"
+      >
+        <button
+          type="button"
+          :class="{ transparent: !value }"
+          :style="{
+            backgroundColor: value || '#fff',
+            color: swatchInk(value || ''),
+          }"
+          :aria-label="`图片滤镜：${label}`"
+          :title="label"
+          :aria-pressed="pictureFilter === value"
+          @pointerenter="hoveredPictureFilter = value || ''"
+          @focus="hoveredPictureFilter = value || ''"
+          @click="selectPictureFilter(value || '')"
+        >
+          {{ pictureFilter === value ? '✓' : '' }}
+        </button>
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset v-if="mode !== 'text'" class="icon-padding-control">
+    <legend>图标内边距</legend>
+    <div
+      class="padding-slider"
+      :style="{
+        '--padding-progress': `${(iconPadding / 8) * 100}%`,
+        '--padding-fraction': iconPadding / 8,
+      }"
+    >
+      <div class="padding-track" aria-hidden="true">
+        <i
+          v-for="value in [0, 2, 4, 6, 8]"
+          :key="value"
+          :class="{ passed: value <= iconPadding }"
+        ></i>
+      </div>
+      <input
+        v-model.number="iconPadding"
+        type="range"
+        min="0"
+        max="8"
+        step="2"
+        aria-label="图标内边距"
+        :aria-valuetext="`${iconPadding}px`"
+      />
+      <output class="padding-tooltip" aria-hidden="true"
+        >{{ iconPadding }}px</output
+      >
+    </div>
+  </fieldset>
 </template>
 <style scoped>
 fieldset {
@@ -442,11 +598,15 @@ legend {
   line-height: 20px;
   color: #444;
 }
-.icon-options {
+.icon-preview-board {
   position: relative;
   isolation: isolate;
-  overflow: hidden;
+  margin-left: 26px;
   border-radius: 14px;
+  padding-bottom: 12px;
+}
+.icon-options {
+  position: relative;
   padding: 24px 20px;
   min-height: 124px;
   box-sizing: border-box;
@@ -455,6 +615,28 @@ legend {
   align-items: center;
   gap: 16px;
   color: #fff;
+}
+.material-row-label {
+  position: absolute;
+  right: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 3px;
+  color: #888;
+  pointer-events: none;
+}
+.preview-wallpaper-clip {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
 }
 .preview-wallpaper {
   position: absolute;
@@ -484,10 +666,6 @@ legend {
   height: 56px;
   padding: 4px;
   border-radius: 15px;
-  background: var(--icon-glass-fill);
-}
-.icon-options :is(button, .text-option):is(:hover, :focus-visible) .cell-icon {
-  background: var(--icon-glass-hover-fill);
 }
 .icon-options .cell-icon .preview {
   width: 100%;
@@ -508,19 +686,17 @@ legend {
   max-width: none;
 }
 .icon-type-hints {
+  margin-left: 26px;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   padding: 0 20px;
-  margin-top: 10px;
+  margin-bottom: 10px;
   min-height: 18px;
   color: #888;
   text-align: center;
   font-size: 12px;
   line-height: 18px;
-}
-.icon-type-hints .selected {
-  color: #1677ff;
 }
 input[hidden] {
   display: none;
@@ -531,9 +707,12 @@ p[role='alert'] {
   margin: 8px 0 0;
 }
 .color-grid {
+  border: 10px solid #f5f5f7;
+  border-radius: 8px;
+  box-sizing: border-box;
   display: grid;
-  width: min(100%, 256px);
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  width: min(100%, 416px);
+  grid-template-columns: repeat(13, minmax(0, 1fr));
   gap: 0;
 }
 .color-row {
@@ -548,11 +727,13 @@ p[role='alert'] {
   padding: 0;
   border: 0;
   border-radius: 0;
-  box-shadow: inset 0 0 0 0.5px #fff;
+  box-shadow: none;
   font-size: 12px;
   cursor: pointer;
 }
 .color-row button[aria-pressed='true'] {
+  border: 2px solid #fff;
+  box-sizing: border-box;
   font-weight: 800;
 }
 .color-row .transparent {
@@ -592,13 +773,17 @@ p[role='alert'] {
   align-items: center;
   gap: 5px;
 }
-.icon-type-hints .selected::before {
+.icon-options :is(button, .text-option)[aria-pressed='true']::after {
   content: '';
-  flex: 0 0 13px;
-  width: 13px;
-  height: 13px;
-  background: currentColor;
-  mask: url('/images/selected-check.png') center / contain no-repeat;
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 </style>
 
@@ -618,34 +803,139 @@ p[role='alert'] {
 </style>
 
 <style scoped>
-.material-options {
-  display: inline-flex;
-  gap: 4px;
-  padding: 4px;
-  background: #f5f5f7;
-  border-radius: 8px;
-}
-.material-options button {
-  height: 36px;
-  padding: 0 18px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #777;
-  cursor: pointer;
-}
-.material-options button[aria-pressed='true'] {
-  background: white;
-  color: #222;
-  box-shadow: 0 1px 4px #0000000d;
-}
-.material-options button:hover {
-  opacity: 0.7;
+.icon-options .text-preview.cell-icon input.inline-icon-editor {
+  pointer-events: none;
 }
 </style>
 
 <style scoped>
-.icon-options .text-preview.cell-icon input.inline-icon-editor {
+.filter-grid.color-grid {
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  width: min(100%, 512px);
+}
+</style>
+
+<style scoped>
+.icon-padding-control {
+  width: min(100%, 352px);
+}
+.padding-slider {
+  position: relative;
+  height: 30px;
+}
+.padding-track {
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  top: 12px;
+  height: 6px;
+  border-radius: 99px;
+  background: linear-gradient(
+    to right,
+    #000000 var(--padding-progress),
+    #e4e7ed var(--padding-progress)
+  );
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   pointer-events: none;
+}
+.padding-track i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+}
+.padding-track i:first-child,
+.padding-track i:last-child {
+  visibility: hidden;
+}
+.padding-track i.passed {
+  background: #000000;
+}
+.icon-padding-control .padding-slider input[type='range'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 30px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  cursor: pointer;
+}
+.padding-slider input::-webkit-slider-runnable-track {
+  height: 6px;
+  background: transparent;
+  border: 0;
+}
+.padding-slider input::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  border: 2px solid #e4e7ed;
+  background: #fff;
+  box-shadow: none;
+  transition: box-shadow 150ms ease;
+}
+.padding-slider input:hover::-webkit-slider-thumb,
+.padding-slider input:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px #f5f5f7;
+}
+.padding-tooltip {
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: calc(9px + (100% - 18px) * var(--padding-fraction));
+  transform: translateX(-50%) translateY(3px);
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: #000000;
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+.padding-slider:hover .padding-tooltip,
+.padding-slider:focus-within .padding-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+</style>
+
+<style scoped>
+.upload-option {
+  position: relative;
+  min-width: 0;
+}
+.icon-options .upload-option > .remove-upload {
+  position: absolute;
+  top: 0;
+  left: calc(50% + 17px);
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: rgb(0 0 0 / 55%);
+  cursor: pointer;
+}
+.icon-options .upload-option > .remove-upload:hover {
+  background: #d9363e;
 }
 </style>

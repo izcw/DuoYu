@@ -39,6 +39,9 @@ withDefaults(
 }
 .filled-icon {
   background: currentColor;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
   mask-size: contain;
   mask-position: center;
   mask-repeat: no-repeat;

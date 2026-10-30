@@ -66,7 +66,7 @@ function sync(grid: GridStack) {
   syncing = false;
 }
 async function save(grid: GridStack) {
-  if (syncing) return;
+  if (syncing || props.disabled) return;
   const ids = [...grid.engine.nodes]
     .sort((a, b) => a.y! - b.y! || a.x! - b.x!)
     .map((n) => n.id!);

@@ -831,7 +831,7 @@ onUnmounted(() => subscription?.unsubscribe());
 <style scoped>
 .floating-editor :deep(input),
 .floating-editor :deep(textarea),
-.floating-editor :deep(button) {
+.floating-editor :deep(button:not(.color-row button)) {
   border: 0 !important;
 }
 </style>

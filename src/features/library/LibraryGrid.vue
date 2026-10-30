@@ -21,7 +21,8 @@ import {
   DESKTOP_GRID_COLUMNS,
   LIBRARY_GRID_ROWS,
 } from './grid-config';
-import { normalizeSize, resizeLibraryItem } from './library';
+import { resizeLibraryItem } from './library';
+import { normalizeSize, layoutLibraryItems } from './grid-layout';
 const props = withDefaults(
   defineProps<{
     automatic?: boolean;
@@ -31,6 +32,7 @@ const props = withDefaults(
     all: LibraryItem[];
     managing: boolean;
     disabled: boolean;
+    preview?: boolean;
   }>(),
   { rows: LIBRARY_GRID_ROWS, alignment: 'center' },
 );
@@ -101,57 +103,7 @@ const resizePreview = ref<{ id: string; width: number; height: number }>();
 const displaySize = (item: LibraryItem) =>
   resizePreview.value?.id === item.id ? resizePreview.value : size(item);
 // Each collection page owns one bounded grid. Keep overflow records in storage.
-const layout = computed(() => {
-  const items: { item: LibraryItem; x: number; y: number }[] = [];
-  const occupied = new Set<number>();
-  let overflow = 0;
-  // Reserve saved positions before placing new items into remaining empty cells.
-  const positioned = (item: LibraryItem) =>
-    item.gridX != null && item.gridY != null;
-  const ordered = [...props.items].sort(
-    (a, b) => Number(positioned(b)) - Number(positioned(a)),
-  );
-  for (const item of ordered) {
-    const { width: w, height: h } = size(item);
-    const fits = (x: number, y: number) =>
-      x >= 0 &&
-      y >= 0 &&
-      x + w <= DESKTOP_GRID_COLUMNS &&
-      y + h <= props.rows &&
-      Array.from({ length: h }, (_, dy) =>
-        Array.from(
-          { length: w },
-          (_, dx) => (y + dy) * DESKTOP_GRID_COLUMNS + x + dx,
-        ),
-      )
-        .flat()
-        .every((k) => !occupied.has(k));
-    let x =
-        item.gridX == null
-          ? -1
-          : Math.min(item.gridX, DESKTOP_GRID_COLUMNS - w),
-      y = item.gridY == null ? -1 : Math.min(item.gridY, props.rows - h);
-    if (!fits(x, y)) {
-      const slot = Array.from(
-        { length: DESKTOP_GRID_COLUMNS * props.rows },
-        (_, k) => k,
-      ).find((k) =>
-        fits(k % DESKTOP_GRID_COLUMNS, Math.floor(k / DESKTOP_GRID_COLUMNS)),
-      );
-      if (slot == null) {
-        overflow++;
-        continue;
-      }
-      x = slot % DESKTOP_GRID_COLUMNS;
-      y = Math.floor(slot / DESKTOP_GRID_COLUMNS);
-    }
-    for (let dy = 0; dy < h; dy++)
-      for (let dx = 0; dx < w; dx++)
-        occupied.add((y + dy) * DESKTOP_GRID_COLUMNS + x + dx);
-    items.push({ item, x, y });
-  }
-  return { items, overflow };
-});
+const layout = computed(() => layoutLibraryItems(props.items, props.rows));
 watch(
   () => layout.value.overflow,
   (count) => {
@@ -210,7 +162,7 @@ function syncGrid(grid: GridStack) {
   selection.refresh();
 }
 async function saveGrid(grid: GridStack) {
-  if (syncing) return;
+  if (syncing || props.preview || props.disabled) return;
   const nodes = grid.engine.nodes.map((n) => ({
     id: n.id!,
     x: n.x!,
@@ -624,6 +576,7 @@ const monthOffset = computed(
     7,
 );
 async function note(event: Event, id: string) {
+  if (props.preview || props.disabled) return;
   try {
     await database.libraryItems.update(id, {
       text: (event.target as HTMLTextAreaElement).value,
@@ -637,6 +590,8 @@ async function note(event: Event, id: string) {
   <div
     ref="gridContainer"
     class="library-grid-container"
+    :class="{ 'library-preview': preview }"
+    :inert="preview || undefined"
     :style="{
       justifyContent: alignment === 'end' ? 'flex-end' : 'center',
       '--desktop-icon-size': DESKTOP_ICON_SIZE + 'px',
@@ -787,6 +742,7 @@ async function note(event: Event, id: string) {
             </button>
           </div>
           <button
+            v-if="!preview"
             class="cell-resize"
             :aria-label="'调整大小 ' + item.name"
             title="拖动调整大小，也可用方向键"
@@ -925,6 +881,7 @@ async function note(event: Event, id: string) {
   overflow: hidden;
 }
 .cell-link {
+  border: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -950,6 +907,7 @@ async function note(event: Event, id: string) {
   overflow: hidden;
 }
 .folder-border {
+  border: 0;
   position: absolute;
   inset: 0;
   width: 100%;
@@ -985,6 +943,7 @@ async function note(event: Event, id: string) {
   bottom: calc(var(--gs-item-margin-bottom, 8px) + var(--grid-caption-space));
 }
 .tile-caption {
+  border: 0;
   position: absolute;
   bottom: var(--gs-item-margin-bottom, 8px);
   left: var(--gs-item-margin-left, 8px);
@@ -1077,6 +1036,7 @@ async function note(event: Event, id: string) {
   opacity: 0.65;
 }
 .cell-widget textarea {
+  border: 0 !important;
   flex: 1;
   min-height: 0;
   width: 100%;

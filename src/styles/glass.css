@@ -32,7 +32,7 @@
     :active,
     :focus-visible
   )
-  > .glass-interaction-target {
+  > .glass-interaction-target:not(.cell-icon) {
   background: var(--glass-interaction-fill);
   /* Keep the surface filter; nested controls must not blur the panel again. */
 }
@@ -109,7 +109,9 @@
 }
 .glass-interaction-owner:is(:hover, :active, :focus-visible)
   > .cell-icon.glass-interaction-target,
-.icon-options button:is(:hover, :focus-visible) .cell-icon {
+.icon-options
+  :is(button, .text-option):is(:hover, :active, :focus-visible)
+  .cell-icon {
   background: var(--icon-glass-hover-fill);
 }
 
@@ -133,12 +135,12 @@
     linear-gradient(#ffffff18, #ffffff18), var(--icon-frost),
     var(--icon-fill-gradient);
   background: var(--icon-glass-fill);
-  backdrop-filter: none;
   -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
-.cell-icon[data-material='fill'],
-.icon-options[data-material='fill'] .cell-icon {
+.cell-icon[data-material='fill']:has(.text-icon),
+.icon-options[data-material='fill'] .cell-icon:has(.text-icon) {
   padding: 0 !important;
 }
 .cell-icon[data-material='fill'] > .workspace-favicon,
@@ -153,8 +155,8 @@
   --icon-glass-fill: transparent;
   --icon-glass-hover-fill: transparent;
   background: transparent;
-  backdrop-filter: none;
   -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   box-shadow: none;
 }
 
@@ -168,4 +170,96 @@
   width: calc(100% - 8px);
   height: calc(100% - 8px);
   place-self: center;
+}
+
+/* Local spotlight shared by desktop icons and editor previews. */
+.cell-icon {
+  position: relative;
+  isolation: isolate;
+}
+:is(.cell-icon, .cell-panel.widget-card)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at var(--icon-light-x, 50%) var(--icon-light-y, 50%),
+    rgb(255 248 230 / 26%) 0%,
+    rgb(255 230 190 / 10%) 30%,
+    transparent 80%
+  );
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+.cell-icon > * {
+  position: relative;
+  z-index: 1;
+}
+:is(.cell-icon, .cell-panel.widget-card)::after {
+  mix-blend-mode: normal;
+}
+:is(.cell-icon, .cell-panel.widget-card)[data-highlight='true']::after {
+  opacity: 0.95;
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.cell-icon, .cell-panel.widget-card)::after {
+    transition: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) and (hover: hover) {
+  .cell-icon,
+  .grid-stack-item:has(> .cell-panel.widget-card):not(
+      .ui-draggable-dragging,
+      .grid-selection-dragging,
+      .ui-resizable-resizing
+    ) {
+    transform: perspective(400px) rotateX(var(--icon-tilt-x, 0deg))
+      rotateY(var(--icon-tilt-y, 0deg));
+    transition:
+      background 160ms ease,
+      transform 180ms cubic-bezier(0.22, 0.8, 0.22, 1);
+  }
+}
+
+.cell-panel.widget-card {
+  isolation: isolate;
+}
+/* Keep GridStack's drag and resize transforms in control during manipulation. */
+:is(.ui-draggable-dragging, .grid-selection-dragging, .ui-resizable-resizing)
+  .cell-panel.widget-card::after {
+  opacity: 0;
+}
+
+/* The grid item carries both the card and its sibling resize handle. */
+.cell-panel.widget-card .cell-icon {
+  transform: none;
+}
+@media (prefers-reduced-motion: no-preference) and (hover: hover) {
+  .bottom-widget-grid.grid-stack-animate
+    > .grid-stack-item:has(> .cell-panel.widget-card):not(
+      .ui-draggable-dragging,
+      .grid-selection-dragging,
+      .ui-resizable-resizing
+    ) {
+    transition:
+      left 220ms ease,
+      top 220ms ease,
+      transform 180ms cubic-bezier(0.22, 0.8, 0.22, 1);
+  }
+}
+
+/* Folder lighting belongs above its background but beneath its icon contents. */
+.grid-stack-item[data-kind='folder'] > .cell-panel.widget-card::after {
+  z-index: 0;
+}
+.grid-stack-item[data-kind='folder'] > .cell-panel.widget-card > .folder-cells {
+  z-index: 1;
+}
+
+/* Image padding is shared by both materials; text retains its own layout. */
+.cell-icon:not(:has(.text-icon, .inline-icon-editor)) {
+  padding: var(--icon-padding, 4px) !important;
 }
