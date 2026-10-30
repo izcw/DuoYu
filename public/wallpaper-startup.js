@@ -46,9 +46,17 @@
 // Dexie remains the source of truth for the full-resolution wallpaper.
 (() => {
   try {
-    const raw = localStorage.getItem('duoyu:wallpaper-preview');
+    // Match accountStorage before the app and database have initialized.
+    const account = localStorage.getItem('duoyu-sync-account');
+    const prefix = account ? `account:${account}:` : '';
+    const raw = localStorage.getItem(`${prefix}duoyu:wallpaper-preview`);
     if (!raw || raw.length > 180000) return;
     const preview = JSON.parse(raw);
+    if (
+      localStorage.getItem(`${prefix}duoyu-wallpaper-mode`) === 'custom' &&
+      !preview.sourceUrl?.startsWith('local:')
+    )
+      return;
     if (
       typeof preview.data !== 'string' ||
       !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(preview.data)
