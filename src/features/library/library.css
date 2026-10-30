@@ -313,3 +313,33 @@
   cursor: pointer;
   font-size: 13px;
 }
+
+/* The URL editor owns one white surface, with no nested glass clipping. */
+.solid-dialog .library-editor {
+  box-sizing: border-box;
+  width: 100%;
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+}
+.solid-dialog .library-editor label {
+  line-height: 1.5;
+  overflow: visible;
+}
+.solid-dialog .library-editor input {
+  box-sizing: border-box;
+  background: #f5f5f5;
+  color: #222;
+  color-scheme: light;
+}
+.solid-dialog .library-editor input:focus-visible {
+  outline: 2px solid #8ab4f8;
+}
+.solid-dialog .library-form-actions button {
+  color: #222;
+  background: #f0f0f0;
+}
+.solid-dialog .library-form-actions button:last-child {
+  background: #222;
+  color: #fff;
+}

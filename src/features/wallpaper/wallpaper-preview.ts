@@ -1,3 +1,4 @@
+import { accountStorage } from '../../shared/storage/account';
 const PREVIEW_KEY = 'duoyu:wallpaper-preview';
 const MAX_PREVIEW_LENGTH = 180_000;
 
@@ -8,7 +9,7 @@ export function saveWallpaperPreview(
   sourceUrl: string,
 ) {
   try {
-    const stored = localStorage.getItem(PREVIEW_KEY);
+    const stored = accountStorage.getItem(PREVIEW_KEY);
     if (stored) {
       try {
         const preview = JSON.parse(stored);
@@ -37,14 +38,14 @@ export function saveWallpaperPreview(
       const data = canvas.toDataURL('image/jpeg', quality);
       const preview = JSON.stringify({ version, sourceUrl, data });
       if (preview.length <= MAX_PREVIEW_LENGTH) {
-        localStorage.setItem(PREVIEW_KEY, preview);
+        accountStorage.setItem(PREVIEW_KEY, preview);
         return;
       }
     }
-    localStorage.removeItem(PREVIEW_KEY);
+    accountStorage.removeItem(PREVIEW_KEY);
   } catch {
     try {
-      localStorage.removeItem(PREVIEW_KEY);
+      accountStorage.removeItem(PREVIEW_KEY);
     } catch {
       /* Storage unavailable. */
     }

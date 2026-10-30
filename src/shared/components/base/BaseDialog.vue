@@ -4,6 +4,8 @@ const props = defineProps<{
   open: boolean;
   title: string;
   folder?: boolean;
+  solid?: boolean;
+  closeButton?: boolean;
   width?: number;
   aspectRatio?: number;
 }>();
@@ -96,14 +98,26 @@ onUnmounted(() => {
               : undefined
         "
         :class="[
-          folder ? 'folder-dialog' : 'glass-surface',
-          { 'fixed-ratio-dialog': aspectRatio },
+          folder ? 'folder-dialog' : solid ? 'solid-dialog' : 'glass-surface',
+          {
+            'fixed-ratio-dialog': aspectRatio,
+            'closeable-dialog': closeButton,
+          },
         ]"
         role="dialog"
         aria-modal="true"
         :aria-labelledby="titleId"
         tabindex="-1"
       >
+        <button
+          v-if="closeButton"
+          class="dialog-close"
+          type="button"
+          aria-label="关闭"
+          @click="close"
+        >
+          <img src="/images/dialog-close.png" alt="" />
+        </button>
         <h2 :id="titleId">
           <slot name="title">{{ title }}</slot>
         </h2>
@@ -111,6 +125,9 @@ onUnmounted(() => {
           v-if="folder"
           class="folder-dialog-content glass-surface desktop-card-glass"
         >
+          <slot :close="close" />
+        </div>
+        <div v-else-if="closeButton" class="dialog-scroll-body">
           <slot :close="close" />
         </div>
         <slot v-else :close="close" />
@@ -161,9 +178,64 @@ h2 {
   margin: 0 0 20px;
 }
 .folder-dialog-content {
+  --desktop-card-radius: 28px;
   position: relative;
   overflow: hidden;
   padding: 24px;
   border-radius: 28px;
+}
+</style>
+
+<style scoped>
+.solid-dialog {
+  background: #fff;
+  color: #222;
+  box-shadow: 0 16px 60px #0003;
+}
+</style>
+
+<style scoped>
+.closeable-dialog {
+  position: relative;
+  border-radius: 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.closeable-dialog > h2 {
+  padding-right: 44px;
+  flex-shrink: 0;
+  min-height: 32px;
+  line-height: 32px;
+}
+.dialog-scroll-body {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 6px;
+}
+.dialog-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: #f5f5f7;
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  cursor: pointer;
+  transition: opacity 140ms ease;
+}
+.dialog-close img {
+  width: 16px;
+  height: 16px;
+}
+.dialog-close:hover {
+  opacity: 0.7;
 }
 </style>

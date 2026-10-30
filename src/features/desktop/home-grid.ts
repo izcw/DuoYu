@@ -1,9 +1,11 @@
 import { database, type LibraryItem } from '../../shared/storage/database';
+import { activeAccountKey } from '../../shared/storage/account';
 import { WIDGET_GROUPS } from './widget-links';
 import { DESKTOP_GRID_COLUMNS, HOME_GRID_ROWS } from '../library/grid-config';
 
 /** Copy existing home groups once; all pages subsequently share LibraryGrid storage. */
 export async function ensureHomeGrid() {
+  if (activeAccountKey()) return;
   await database.transaction(
     'rw',
     database.libraryItems,

@@ -26,7 +26,9 @@ const rows = computed(() =>
   Math.min(props.maxRows || 9, itemMaxRows(props.item.kind)),
 );
 const columns = computed(() => itemMaxColumns(props.item.kind));
-const menuWidth = computed(() => Math.max(244, columns.value * 24 + 28));
+const menuWidth = computed(() =>
+  Math.max(244, columns.value * 24 + (columns.value - 1) * 4 + 30),
+);
 const cells = computed(() =>
   Array.from({ length: columns.value * rows.value }, (_, i) => ({
     width: (i % columns.value) + 1,
@@ -85,7 +87,7 @@ onUnmounted(() => {
       </div>
       <div
         class="size-picker"
-        :style="{ gridTemplateColumns: `repeat(${columns}, 1fr)` }"
+        :style="{ gridTemplateColumns: `repeat(${columns}, 24px)` }"
         aria-label="选择网格尺寸"
         @mouseleave="preview = undefined"
         @focusout="preview = undefined"
@@ -126,7 +128,7 @@ onUnmounted(() => {
 <style scoped>
 .grid-item-menu {
   position: fixed;
-  z-index: 2147483001;
+  z-index: 2147483002;
   width: 244px;
   box-sizing: border-box;
   padding: 14px;
@@ -161,10 +163,15 @@ header button {
 }
 .size-picker {
   display: grid;
-  grid-template-columns: repeat(9, 1fr);
+  grid-auto-rows: 24px;
   gap: 4px;
 }
 .size-picker button {
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  min-width: 0;
+  min-height: 0;
   aspect-ratio: 1;
   padding: 0;
   border: 1px solid rgb(239 239 237 / 20%);

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { getSyncPreference, setSyncPreference } from '../sync/client';
+import { accountStorage } from '../../shared/storage/account';
 import { computed, ref, watch, onUnmounted } from 'vue';
 import { liveQuery } from 'dexie';
 import { browser } from 'wxt/browser';
@@ -83,9 +85,7 @@ watch(
     wallpaperCategory.value = 'daily';
     todayWallpaper.value = getDailyWallpaperUrl();
     todayFailed.value = false;
-    glass.value = String(
-      (await browser.storage.local.get('glassMode')).glassMode || 'real',
-    );
+    glass.value = String((await getSyncPreference('glassMode')) || 'real');
   },
 );
 async function run(action: () => Promise<unknown>) {
@@ -109,12 +109,12 @@ async function upload(event: Event) {
   (event.target as HTMLInputElement).value = '';
 }
 async function daily() {
-  localStorage.removeItem('duoyu-wallpaper-mode');
+  accountStorage.removeItem('duoyu-wallpaper-mode');
   window.dispatchEvent(new Event('duoyu-wallpaper-change'));
   message.value = '已切换为每日壁纸';
 }
 function saveGlass() {
-  void run(() => browser.storage.local.set({ glassMode: glass.value }));
+  void run(() => setSyncPreference('glassMode', glass.value));
 }
 const selected = ref<LibraryItem>();
 watch(

@@ -28,18 +28,26 @@
     "test:shortcuts": "node scripts/shortcuts.mjs",
     "test:radial": "node scripts/radial-wheel.mjs",
     "test:widget-links": "node scripts/widget-links.mjs",
-    "test:glass": "node scripts/glass.mjs"
+    "test:glass": "node scripts/glass.mjs",
+    "test:auth": "node scripts/auth-protocol.mjs",
+    "test:auth:integration": "node scripts/auth-integration.mjs",
+    "test:cloud:client": "node scripts/cloud-client.mjs",
+    "test:cloud:integration": "node scripts/cloud-integration.mjs",
+    "test:cloud:server": "pnpm --dir server/sync test",
+    "test:cloud:ui": "node scripts/cloud-ui.mjs"
   },
   "dependencies": {
     "@icon-park/vue-next": "^1.4.2",
     "dexie": "^4.4.6",
     "gridstack": "^14.0.0",
+    "jose": "^6.2.13",
     "vue": "^3.5.44"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
     "@types/node": "^24.19.2",
     "@wxt-dev/module-vue": "^1.0.3",
+    "fake-indexeddb": "^6.2.6",
     "prettier": "^3.9.10",
     "typescript": "^5.9.3",
     "vue-tsc": "^3.3.13",

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { accountStorage } from '../../shared/storage/account';
 import { computed, ref, onUnmounted } from 'vue';
 import { liveQuery } from 'dexie';
 import { database, type LibraryItem } from '../../shared/storage/database';
@@ -26,7 +27,9 @@ let dragImage: HTMLElement | undefined;
 const storageKey = 'duoyu-dock-order';
 function readOrder(): string[] {
   try {
-    const saved: unknown = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    const saved: unknown = JSON.parse(
+      accountStorage.getItem(storageKey) || '[]',
+    );
     if (Array.isArray(saved))
       return [
         ...new Set([
@@ -40,6 +43,10 @@ function readOrder(): string[] {
   return [...defaults];
 }
 const order = ref(readOrder());
+function cloudOrder() {
+  order.value = readOrder();
+}
+window.addEventListener('duoyu-sync-preferences', cloudOrder);
 const links = ref<LibraryItem[]>([]);
 const subscription = liveQuery(() =>
   database.libraryItems
@@ -49,6 +56,7 @@ const subscription = liveQuery(() =>
   links.value = value;
 });
 onUnmounted(() => {
+  window.removeEventListener('duoyu-sync-preferences', cloudOrder);
   subscription.unsubscribe();
   dragImage?.remove();
 });
@@ -175,7 +183,7 @@ function drop(event: DragEvent) {
   if (!dragged.value) return;
   over(event);
   try {
-    localStorage.setItem(storageKey, JSON.stringify(order.value));
+    accountStorage.setItem(storageKey, JSON.stringify(order.value));
   } catch {
     /* Keep the current session order. */
   }

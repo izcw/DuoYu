@@ -1,3 +1,4 @@
+import { accountStorage } from '../../shared/storage/account';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { liveQuery } from 'dexie';
 import { browser, type Browser } from 'wxt/browser';
@@ -17,7 +18,8 @@ export function useWorkspace() {
   const spaces = ref<WorkspaceSpace[]>([]);
   const activeSpace = ref('default');
   try {
-    activeSpace.value = localStorage.getItem('duoyu:active-space') || 'default';
+    activeSpace.value =
+      accountStorage.getItem('duoyu:active-space') || 'default';
   } catch {
     /* Optional preference. */
   }
@@ -54,7 +56,7 @@ export function useWorkspace() {
   watch(activeSpace, (id) => {
     query.value = '';
     try {
-      localStorage.setItem('duoyu:active-space', id);
+      accountStorage.setItem('duoyu:active-space', id);
     } catch {
       /* Optional preference. */
     }

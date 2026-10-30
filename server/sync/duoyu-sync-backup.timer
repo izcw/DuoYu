@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily DuoYu sync database backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Asia/Shanghai
+Persistent=true
+Unit=duoyu-sync-backup.service
+
+[Install]
+WantedBy=timers.target

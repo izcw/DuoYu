@@ -1,3 +1,4 @@
+import { accountStorage } from '../../shared/storage/account';
 import { database, type WallpaperRecord } from '../../shared/storage/database';
 import { saveWallpaperPreview } from './wallpaper-preview';
 
@@ -138,7 +139,7 @@ export async function importWallpaper(blob: Blob) {
     };
     await database.wallpapers.put(record);
     await syncPreview(record);
-    localStorage.setItem('duoyu-wallpaper-mode', 'custom');
+    accountStorage.setItem('duoyu-wallpaper-mode', 'custom');
   });
   window.dispatchEvent(new Event('duoyu-wallpaper-change'));
 }

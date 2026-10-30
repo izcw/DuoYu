@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { getSyncPreference, setSyncPreference } from '../sync/client';
 import {
   computed,
   nextTick,
@@ -26,10 +27,18 @@ const searchError = ref('');
 const opening = ref(false);
 let engineChanged = false;
 let saveEngine = Promise.resolve();
+async function cloudEngine() {
+  const value = await getSyncPreference('searchEngine');
+  if (isSearchEngineId(value)) engine.value = value;
+}
+onMounted(() => window.addEventListener('duoyu-sync-preferences', cloudEngine));
+onUnmounted(() =>
+  window.removeEventListener('duoyu-sync-preferences', cloudEngine),
+);
 onMounted(async () => {
   input.value?.focus({ preventScroll: true });
   try {
-    const saved = await browser.storage.local.get('searchEngine');
+    const saved = { searchEngine: await getSyncPreference('searchEngine') };
     if (!engineChanged && isSearchEngineId(saved.searchEngine))
       engine.value = saved.searchEngine;
   } catch {
@@ -42,7 +51,7 @@ function selectEngine(value: SearchEngineId) {
   searchError.value = '';
   // Serialize rapid selections so the final choice also wins on disk.
   saveEngine = saveEngine
-    .then(() => browser.storage.local.set({ searchEngine: value }))
+    .then(() => setSyncPreference('searchEngine', value))
     .catch(() => {});
 }
 const focused = ref(false);

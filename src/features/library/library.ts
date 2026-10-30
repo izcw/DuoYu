@@ -1,3 +1,4 @@
+import { truncateLinkTitle } from './link-title';
 import { itemMaxColumns, itemMaxRows } from './grid-config';
 import { database, type LibraryItem } from '../../shared/storage/database';
 import { webUrl } from '../workspace/collections';
@@ -16,12 +17,32 @@ export type LibraryDraft = Pick<
   | 'height'
 >;
 export async function saveLibraryItem(draft: LibraryDraft, id?: string) {
-  const name = draft.name.trim().slice(0, 80);
+  let name = draft.name.trim().slice(0, 80);
+  if (!name && draft.kind === 'link' && webUrl(draft.url.trim())) {
+    name = new URL(draft.url.trim()).hostname;
+    try {
+      const response = await fetch(draft.url.trim(), {
+        credentials: 'omit',
+        signal: AbortSignal.timeout(4000),
+      });
+      if (response.ok) {
+        const html = (await response.text()).slice(0, 300000);
+        name =
+          new DOMParser()
+            .parseFromString(html, 'text/html')
+            .title.trim()
+            .slice(0, 80) || name;
+      }
+    } catch {
+      /* Cross-origin pages may prohibit title lookup; keep the hostname. */
+    }
+  }
+  if (draft.kind === 'link') name = truncateLinkTitle(name);
   if (!name) throw new Error('请输入名称');
   const url = draft.kind === 'link' ? webUrl(draft.url.trim()) : '';
   if (url === null) throw new Error('请输入完整的 http:// 或 https:// 网址');
   const icon = draft.icon.trim();
-  if (icon && !webUrl(icon))
+  if (icon && !webUrl(icon) && !icon.startsWith('duoyu-icon:'))
     throw new Error('图标地址须为 http:// 或 https:// 网址');
   await database.transaction('rw', database.libraryItems, async () => {
     const previous = id ? await database.libraryItems.get(id) : undefined;
@@ -185,6 +206,7 @@ export async function mergeLibraryLinks(sourceId: string, targetId: string) {
   });
 }
 export async function seedLibraryDemo() {
+  if (database.name !== 'duoyu') return;
   await database.transaction(
     'rw',
     database.libraryItems,

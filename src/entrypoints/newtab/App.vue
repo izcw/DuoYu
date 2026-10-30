@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { accountStorage } from '../../shared/storage/account';
 import { nextTick, ref, watch } from 'vue';
 import { useDesktopPages } from '../../features/desktop/useDesktopPages';
 import WorkspaceOverlay from '../../features/workspace/WorkspaceOverlay.vue';
@@ -7,18 +8,20 @@ import ClockWidget from '../../features/clock/ClockWidget.vue';
 import SearchBox from '../../features/search/SearchBox.vue';
 import GlassModeSwitch from '../../features/desktop/GlassModeSwitch.vue';
 import DesktopDock from '../../features/desktop/DesktopDock.vue';
+import AccountButton from '../../features/auth/AccountButton.vue';
 import BottomWidgets from '../../features/desktop/BottomWidgets.vue';
 import WallpaperWheel from '../../features/shortcuts/WallpaperWheel.vue';
 import LibraryBoard from '../../features/library/LibraryBoard.vue';
 import LibraryPageMenu from '../../features/library/LibraryPageMenu.vue';
+import { pageDragActive } from '../../features/library/page-drag';
 import type { LibraryPage } from '../../shared/storage/database';
 const workspaceOpen = ref(false);
 const { page, root, go } = useDesktopPages(() => workspaceOpen.value, stepPage);
 const libraryPage = ref(
-  localStorage.getItem('duoyu-library-page') || 'default',
+  accountStorage.getItem('duoyu-library-page') || 'default',
 );
 watch(libraryPage, (value) =>
-  localStorage.setItem('duoyu-library-page', value),
+  accountStorage.setItem('duoyu-library-page', value),
 );
 const libraryPageTitle = ref('常用收藏');
 const libraryPages = ref<LibraryPage[]>([]);
@@ -83,6 +86,7 @@ function stepPage(direction: number) {
 
 <template>
   <WallpaperBackground />
+  <AccountButton />
   <Teleport to="body">
     <div
       class="desktop-library-backdrop glass-focus-layer"
@@ -107,6 +111,7 @@ function stepPage(direction: number) {
     class="newtab desktop-pages"
     :class="{
       'is-apps-page': page === 1,
+      'is-desktop-dragging': pageDragActive,
       'is-home-quiet': page === 0 && homeQuiet,
     }"
     :data-desktop-page="page"
@@ -117,8 +122,8 @@ function stepPage(direction: number) {
     <LibraryPageMenu
       v-model="libraryPage"
       class="desktop-menu"
-      :inert="page === 0"
-      :aria-hidden="page === 0"
+      :inert="page === 0 && !pageDragActive"
+      :aria-hidden="page === 0 && !pageDragActive"
       @title="libraryPageTitle = $event"
       @home="go(0)"
       :home-active="page === 0"
@@ -271,7 +276,8 @@ function stepPage(direction: number) {
     opacity 300ms ease,
     transform 500ms cubic-bezier(0.22, 0.8, 0.22, 1);
 }
-.is-apps-page .desktop-menu {
+.is-apps-page .desktop-menu,
+.is-desktop-dragging .desktop-menu {
   opacity: 1;
   transform: translate(0, -50%);
   pointer-events: auto;

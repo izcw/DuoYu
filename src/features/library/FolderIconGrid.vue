@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { beginFolderDrag } from './page-drag';
+import { beginFolderDrag, folderDragItemId } from './page-drag';
 import type { GridItemHTMLElement } from 'gridstack';
 import { FOLDER_ICON_SIZE } from './grid-config';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
@@ -22,6 +22,7 @@ const emit = defineEmits<{
   open: [item: LibraryItem];
   error: [message: string];
   escape: [];
+  contextmenu: [event: MouseEvent, item: LibraryItem];
 }>();
 const container = ref<HTMLElement | null>(null);
 const element = ref<HTMLElement | null>(null);
@@ -208,14 +209,16 @@ function open(item: LibraryItem) {
         v-for="item in visible"
         :key="item.id"
         class="grid-stack-item"
+        :class="{ 'folder-transfer-source': folderDragItemId === item.id }"
         :data-folder-item="item.id"
       >
         <button
           class="grid-stack-item-content widget-card folder-link glass-interaction-owner"
           :aria-label="'打开收藏 ' + item.name"
           @click.stop="open(item)"
+          @contextmenu.prevent.stop="emit('contextmenu', $event, item)"
         >
-          <span class="folder-icon glass-interaction-target"
+          <span class="folder-icon cell-icon glass-interaction-target"
             ><WorkspaceFavicon
               :src="item.icon"
               :page-url="item.url"
@@ -238,6 +241,10 @@ function open(item: LibraryItem) {
 .folder-auto-grid > .grid-stack-item {
   pointer-events: auto;
 }
+.folder-auto-grid > .folder-transfer-source {
+  visibility: hidden !important;
+  pointer-events: none;
+}
 .folder-auto-grid {
   width: 100%;
 }
@@ -257,24 +264,8 @@ function open(item: LibraryItem) {
 }
 .folder-icon {
   width: min(var(--folder-icon-size), 100%);
+  height: auto;
   aspect-ratio: 1;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  padding: 4px;
-  border-radius: 15px;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-}
-.folder-icon :deep(.workspace-favicon) {
-  width: 100%;
-  height: 100%;
-  background: transparent;
-  border-radius: 12px;
-}
-.folder-icon :deep(img) {
-  width: 100%;
-  height: 100%;
 }
 .folder-icon-label {
   font-size: 11px;

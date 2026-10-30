@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { getSyncPreference, setSyncPreference } from '../sync/client';
 import { inject, ref, onMounted, onUnmounted, watch } from 'vue';
 import { browser } from 'wxt/browser';
 import type { GlassMode } from './glass/renderer';
@@ -24,11 +25,18 @@ function syncMode(changes: Record<string, { newValue?: unknown }>) {
 }
 onMounted(() => browser.storage.local.onChanged.addListener(syncMode));
 onUnmounted(() => browser.storage.local.onChanged.removeListener(syncMode));
+async function cloudMode() {
+  syncMode({ glassMode: { newValue: await getSyncPreference('glassMode') } });
+}
+onMounted(() => window.addEventListener('duoyu-sync-preferences', cloudMode));
+onUnmounted(() =>
+  window.removeEventListener('duoyu-sync-preferences', cloudMode),
+);
 let modeQueue = Promise.resolve();
 function setGlassMode(mode: GlassMode) {
   glassMode.value = mode;
   modeQueue = modeQueue
-    .then(() => browser.storage.local.set({ glassMode: mode }))
+    .then(() => setSyncPreference('glassMode', mode))
     .catch(() => {
       notice.value = '玻璃效果保存失败，当前选择仅在本页生效';
     });
@@ -59,7 +67,7 @@ function setGlassMode(mode: GlassMode) {
 .glass-mode-switch {
   position: absolute;
   top: 18px;
-  right: 24px;
+  right: 76px;
   z-index: 20;
   display: flex;
   width: max-content;

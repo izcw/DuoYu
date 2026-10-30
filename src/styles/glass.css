@@ -72,7 +72,100 @@
 /* Each surface samples the already-composited pixels directly beneath it.
    Do not repaint the original wallpaper here: that bypasses focus overlays. */
 .desktop-card-glass {
+  isolation: isolate;
+  clip-path: inset(0 round var(--desktop-card-radius, 20px));
   background: var(--glass-control-fill);
   -webkit-backdrop-filter: var(--glass-control-filter);
   backdrop-filter: var(--glass-control-filter);
+}
+
+/* Icons share the folder glass material, with a subtle persistent tint. */
+.cell-icon {
+  --icon-glass-tint: color-mix(
+    in srgb,
+    var(--icon-hover-fill, transparent) 18%,
+    transparent
+  );
+  --icon-glass-tint-hover: color-mix(
+    in srgb,
+    var(--icon-hover-fill, transparent) 32%,
+    transparent
+  );
+  --icon-glass-fill:
+    linear-gradient(var(--icon-glass-tint), var(--icon-glass-tint)),
+    var(--glass-control-fill);
+  --icon-glass-hover-fill:
+    linear-gradient(var(--icon-glass-tint-hover), var(--icon-glass-tint-hover)),
+    linear-gradient(
+      var(--glass-interaction-fill),
+      var(--glass-interaction-fill)
+    ),
+    var(--glass-control-fill);
+  background: var(--icon-glass-fill);
+  -webkit-backdrop-filter: var(--glass-control-filter);
+  backdrop-filter: var(--glass-control-filter);
+  box-shadow: var(--glass-control-edge), var(--glass-control-shadow);
+  transition: background 160ms ease;
+}
+.glass-interaction-owner:is(:hover, :active, :focus-visible)
+  > .cell-icon.glass-interaction-target,
+.icon-options button:is(:hover, :focus-visible) .cell-icon {
+  background: var(--icon-glass-hover-fill);
+}
+
+/* Opaque fill: smooth frosted highlight over a bottom-left to top-right gradient. */
+.cell-icon[data-material='fill'],
+.icon-options[data-material='fill'] .cell-icon {
+  --icon-fill-base: var(--icon-hover-fill, #d8dbe2);
+  --icon-fill-gradient: linear-gradient(
+    to top right,
+    color-mix(in srgb, var(--icon-fill-base) 96%, #000),
+    color-mix(in srgb, var(--icon-fill-base) 94%, #fff)
+  );
+  --icon-frost: radial-gradient(
+    ellipse at 80% 10%,
+    #ffffff0a,
+    #ffffff04 60%,
+    transparent
+  );
+  --icon-glass-fill: var(--icon-frost), var(--icon-fill-gradient);
+  --icon-glass-hover-fill:
+    linear-gradient(#ffffff18, #ffffff18), var(--icon-frost),
+    var(--icon-fill-gradient);
+  background: var(--icon-glass-fill);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.cell-icon[data-material='fill'],
+.icon-options[data-material='fill'] .cell-icon {
+  padding: 0 !important;
+}
+.cell-icon[data-material='fill'] > .workspace-favicon,
+.icon-options[data-material='fill'] .cell-icon > .workspace-favicon {
+  border-radius: inherit;
+  overflow: hidden;
+}
+
+/* Transparent fill has no material layer, including on hover. */
+.cell-icon[data-material='fill'][data-transparent='true'],
+.icon-options[data-material='fill'][data-transparent='true'] .cell-icon {
+  --icon-glass-fill: transparent;
+  --icon-glass-hover-fill: transparent;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+
+.cell-icon .text-icon {
+  color: var(--icon-foreground, #fff);
+}
+
+/* Fill images remain edge-to-edge; text keeps the glass material's 4px inset. */
+.cell-icon[data-material='fill'] .text-icon,
+.icon-options[data-material='fill'] .cell-icon .text-icon {
+  width: calc(100% - 8px);
+  height: calc(100% - 8px);
+  place-self: center;
 }

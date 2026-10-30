@@ -12,7 +12,9 @@ export async function backupDesktop() {
   const tables: Record<string, unknown[]> = {};
   // Read a consistent snapshot before encoding binary wallpaper data.
   await database.transaction('r', database.tables, async () => {
-    for (const table of database.tables)
+    for (const table of database.tables.filter(
+      (table) => !table.name.startsWith('sync'),
+    ))
       tables[table.name] = await table.toArray();
   });
   tables.wallpapers = await Promise.all(
@@ -27,7 +29,12 @@ export async function backupDesktop() {
       };
     }),
   );
-  const storage = await browser.storage.local.get(null);
+  // Explicit preference allowlist: authentication and future secrets must never
+  // enter portable backups (or become candidates for cloud synchronization).
+  const storage = await browser.storage.local.get([
+    'glassMode',
+    'searchEngine',
+  ]);
   const preferences = Object.fromEntries(
     Object.entries(localStorage).filter(([key]) => key.startsWith('duoyu')),
   );

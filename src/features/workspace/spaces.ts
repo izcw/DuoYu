@@ -1,6 +1,7 @@
 import { database } from '../../shared/storage/database';
 
 export async function ensureDefaultSpace() {
+  if (database.name !== 'duoyu') return;
   await database.transaction('rw', database.workspaceSpaces, async () => {
     if (!(await database.workspaceSpaces.get('default')))
       await database.workspaceSpaces.put({

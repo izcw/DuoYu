@@ -1,4 +1,9 @@
 import { Dexie, type EntityTable } from 'dexie';
+import { activeAccountKey } from './account';
+import {
+  installSyncCapture,
+  type CapturedOperation,
+} from '../../features/sync/capture';
 
 export interface ShortcutItem {
   id: string;
@@ -70,7 +75,27 @@ export interface LibraryItem {
 }
 
 /** Shared IndexedDB entry point. Add future tables through versioned migrations. */
-export const database = new Dexie('duoyu') as Dexie & {
+export const database = new Dexie(
+  activeAccountKey() ? 'duoyu-account-' + activeAccountKey() : 'duoyu',
+) as Dexie & {
+  preferences: EntityTable<{ id: string; value: unknown }, 'id'>;
+  syncOutbox: EntityTable<CapturedOperation, 'id'>;
+  syncShadow: EntityTable<
+    {
+      id: string;
+      table: string;
+      entityId: string;
+      payload: unknown;
+      deleted: boolean;
+      revision: string;
+    },
+    'id'
+  >;
+  syncMeta: EntityTable<{ id: string; value: unknown }, 'id'>;
+  syncConflicts: EntityTable<
+    { id: string; createdAt: number; operation: unknown; reason: string },
+    'id'
+  >;
   wallpapers: EntityTable<WallpaperRecord, 'id'>;
   shortcuts: EntityTable<ShortcutRecord, 'id'>;
   widgetLayouts: EntityTable<WidgetLayoutRecord, 'id'>;
@@ -117,6 +142,15 @@ database
       .toCollection()
       .modify({ spaceId: 'default' });
   });
+
+database.version(8).stores({
+  preferences: 'id',
+  syncOutbox: 'id,createdAt',
+  syncShadow: 'id',
+  syncMeta: 'id',
+  syncConflicts: 'id,createdAt',
+});
+installSyncCapture(database, !!activeAccountKey());
 
 database
   .version(7)

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { accountStorage } from '../../shared/storage/account';
+import { truncateLinkTitle } from './link-title';
+import LinkIconEditor from './LinkIconEditor.vue';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { liveQuery } from 'dexie';
 import { browser } from 'wxt/browser';
@@ -40,10 +43,21 @@ const gridView = ref<InstanceType<typeof LibraryGrid>>();
 const insertionPoint = ref<{ x: number; y: number }>();
 const tool = ref<'' | 'widgets' | 'wallpaper' | 'search' | 'settings'>('');
 const automatic = ref(
-  localStorage.getItem('duoyu-layout-' + props.pageId) === 'auto',
+  accountStorage.getItem('duoyu-layout-' + props.pageId) === 'auto',
 );
 watch(automatic, (value) =>
-  localStorage.setItem('duoyu-layout-' + props.pageId, value ? 'auto' : 'free'),
+  accountStorage.setItem(
+    'duoyu-layout-' + props.pageId,
+    value ? 'auto' : 'free',
+  ),
+);
+function cloudLayout() {
+  automatic.value =
+    accountStorage.getItem('duoyu-layout-' + props.pageId) === 'auto';
+}
+onMounted(() => window.addEventListener('duoyu-sync-preferences', cloudLayout));
+onUnmounted(() =>
+  window.removeEventListener('duoyu-sync-preferences', cloudLayout),
 );
 function newPosition(width: number, height: number) {
   return gridView.value!.placement(insertionPoint.value, width, height);
@@ -233,13 +247,87 @@ async function edit(item?: LibraryItem, kind: 'link' | 'folder' = 'link') {
         icon: '',
         parent: kind === 'folder' ? '' : folder.value,
       };
+  titleNotice.value = '';
   editing.value = true;
   error.value = '';
   removing.value = undefined;
   await nextTick();
   nameInput.value?.focus({ preventScroll: true });
 }
-function submit() {
+function truncateName(event: Event) {
+  if ((event as InputEvent).isComposing) return;
+  const input = event.target as HTMLInputElement;
+  input.value = truncateLinkTitle(input.value);
+  draft.value.name = input.value;
+}
+const titleNotice = ref('');
+const fetchingTitle = ref(false);
+let titleRequest = 0;
+let lastAutoTitle = '';
+let pendingTitleUrl = '';
+async function fetchTitle(force = false) {
+  const url = draft.value.url;
+  if (
+    draft.value.kind !== 'link' ||
+    (!force && draft.value.name.trim() && draft.value.name !== lastAutoTitle)
+  )
+    return;
+  try {
+    const parsed = new URL(url);
+    if (
+      !['https:', 'http:'].includes(parsed.protocol) ||
+      !parsed.hostname.includes('.')
+    )
+      return;
+  } catch {
+    return;
+  }
+  if (!force && fetchingTitle.value && pendingTitleUrl === url) return;
+  pendingTitleUrl = url;
+  const request = ++titleRequest;
+  const previousName = draft.value.name;
+  fetchingTitle.value = true;
+  try {
+    const origin = new URL(url).origin;
+    const granted = await browser.permissions.contains({
+      origins: [origin + '/*'],
+    });
+    if (!granted) {
+      titleNotice.value =
+        '网站访问权限未开启，请在扩展管理中允许访问所有网站，或手动填写名称';
+      return;
+    }
+    titleNotice.value = '正在获取标题…';
+    const result = await browser.runtime.sendMessage({
+      type: 'website-title',
+      url,
+    });
+    if (
+      request !== titleRequest ||
+      draft.value.url !== url ||
+      draft.value.name !== previousName
+    )
+      return;
+    const decoder = document.createElement('textarea');
+    decoder.innerHTML = result?.title || '';
+    const fetchedName = truncateLinkTitle(decoder.value.trim());
+    if (fetchedName) {
+      draft.value.name = fetchedName;
+      lastAutoTitle = fetchedName;
+    }
+    titleNotice.value = fetchedName
+      ? ''
+      : result?.error ||
+        '网页没有提供标题；可先打开网址，再重新填写网址以读取标签页标题';
+  } catch {
+    if (request === titleRequest)
+      titleNotice.value = '标题获取失败，可手动填写';
+  } finally {
+    if (request === titleRequest) fetchingTitle.value = false;
+  }
+}
+async function submit() {
+  await fetchTitle();
   void run(async () => {
     await saveLibraryItem(
       {
@@ -385,6 +473,9 @@ onUnmounted(() => subscription?.unsubscribe());
     </nav>
     <BaseDialog
       :open="editing"
+      close-button
+      solid
+      :width="680"
       :title="editingId ? '编辑网址' : '添加网址'"
       @update:open="editing = $event"
     >
@@ -394,38 +485,60 @@ onUnmounted(() => subscription?.unsubscribe());
         aria-label="编辑收藏"
         @submit.prevent="submit"
       >
-        <label
-          >名称<input
-            ref="nameInput"
-            v-model="draft.name"
-            aria-label="收藏名称"
-            maxlength="80"
-            required
-        /></label>
-        <template v-if="draft.kind === 'link'">
-          <label
-            >网址<input
+        <label v-if="draft.kind === 'link'"
+          >网址<span class="input-with-icon"
+            ><svg
+              class="input-leading-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <ellipse cx="12" cy="12" rx="4" ry="9" />
+              <path d="M3 12h18" /></svg
+            ><input
               v-model="draft.url"
               aria-label="收藏网址"
+              @input="fetchTitle()"
               placeholder="https://"
               type="url"
-              required
-          /></label>
-          <label
-            >图标地址（可选）<input
-              v-model="draft.icon"
-              aria-label="收藏图标地址"
-              placeholder="留空使用网站图标，加载失败显示名称首字"
-              type="url"
-          /></label>
-          <label
-            >文件夹<select v-model="draft.parent" aria-label="收藏文件夹">
-              <option value="">全部收藏</option>
-              <option v-for="f in folders" :key="f.id" :value="f.id">
-                {{ f.name }}
-              </option>
-            </select></label
-          >
+              required /></span
+        ></label>
+        <div class="title-field">
+          <label for="library-link-title">名称</label>
+          <div class="title-input-row">
+            <span class="input-with-icon"
+              ><span class="input-leading-icon" aria-hidden="true">T</span
+              ><input
+                id="library-link-title"
+                ref="nameInput"
+                v-model="draft.name"
+                aria-label="收藏名称"
+                @input="truncateName"
+                @compositionend="truncateName"
+                placeholder="留空自动获取"
+            /></span>
+            <button
+              type="button"
+              class="fetch-title"
+              :disabled="fetchingTitle || !draft.url.trim()"
+              @click="fetchTitle(true)"
+            >
+              {{ fetchingTitle ? '获取中…' : '获取标题' }}
+            </button>
+          </div>
+          <p v-if="titleNotice" class="title-status" role="status">
+            {{ titleNotice }}
+          </p>
+        </div>
+        <template v-if="draft.kind === 'link'">
+          <LinkIconEditor
+            v-model="draft.icon"
+            :url="draft.url"
+            :title="draft.name"
+          />
         </template>
         <div class="library-form-actions">
           <button
@@ -588,16 +701,182 @@ onUnmounted(() => subscription?.unsubscribe());
 .floating-editor label {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
-.floating-editor input,
-.floating-editor select {
+.floating-editor :deep(input),
+.floating-editor :deep(select) {
+  height: 36px;
   width: 100%;
   box-sizing: border-box;
-  padding: 10px;
+  padding: 7px 10px;
   border: 1px solid rgb(239 239 237 / 20%);
-  border-radius: 10px;
-  background: rgb(239 239 237 / 10%);
+  border-radius: 9px;
+  background: #fafafa;
   color: inherit;
+}
+</style>
+
+<style scoped>
+.title-field {
+  display: grid;
+  gap: 8px;
+}
+.title-input-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+.title-input-row input {
+  min-width: 0;
+  flex: 1;
+}
+.fetch-title {
+  flex-shrink: 0;
+  border: 1px solid #ccc;
+  border-radius: 9px;
+  padding: 0 14px;
+  color: #333;
+  background: #f5f5f5;
+  cursor: pointer;
+}
+.fetch-title:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.title-status {
+  margin: 0;
+  font-size: 12px;
+  color: #777;
+}
+</style>
+
+<style scoped>
+.floating-editor .fetch-title,
+.floating-editor .library-form-actions button {
+  height: 36px;
+  box-sizing: border-box;
+}
+</style>
+
+<style scoped>
+.input-with-icon {
+  position: relative;
+  display: block;
+  flex: 1;
+  min-width: 0;
+}
+.input-with-icon input {
+  padding-left: 38px !important;
+}
+.input-leading-icon {
+  position: absolute;
+  left: 13px;
+  top: 9px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  line-height: 18px;
+  color: #888;
+  pointer-events: none;
+}
+</style>
+
+<style scoped>
+.floating-editor {
+  gap: 18px;
+}
+.floating-editor label {
+  font-size: 13px;
+  line-height: 20px;
+  color: #444;
+  font-weight: 500;
+}
+.floating-editor :deep(input) {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+}
+.floating-editor :deep(input::placeholder) {
+  color: #aaa;
+}
+.floating-editor .library-form-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 18px;
+  padding-bottom: 16px;
+  border-top: 1px solid #eee;
+}
+.floating-editor .library-form-actions button {
+  min-width: 82px;
+  border-radius: 9px;
+  padding: 0 20px;
+  font-size: 14px;
+}
+.fetch-title {
+  font-size: 13px;
+  transition: background 140ms ease;
+}
+.fetch-title:not(:disabled):hover {
+  background: #eaeaea;
+}
+.title-status {
+  font-size: 12px;
+  line-height: 18px;
+}
+</style>
+
+<style scoped>
+.floating-editor :deep(input),
+.floating-editor :deep(textarea),
+.floating-editor :deep(button) {
+  border: 0 !important;
+}
+</style>
+
+<style scoped>
+.floating-editor :deep(input:not(.inline-icon-editor)),
+.floating-editor :deep(textarea) {
+  background: #f5f5f7;
+  border-radius: 6px;
+}
+.floating-editor .fetch-title,
+.floating-editor .library-form-actions button {
+  border-radius: 6px;
+  background: #f5f5f7;
+  transition: opacity 140ms ease;
+}
+.floating-editor .library-form-actions button:last-child {
+  background: #000;
+  color: #fff;
+}
+.floating-editor .fetch-title:not(:disabled):hover,
+.floating-editor .library-form-actions button:not(:disabled):hover {
+  opacity: 0.7;
+  background: #f5f5f7;
+}
+.floating-editor .library-form-actions button:last-child:not(:disabled):hover {
+  background: #000;
+}
+</style>
+
+<style scoped>
+.floating-editor {
+  --editor-section-gap: 18px;
+  --editor-label-gap: 8px;
+  gap: var(--editor-section-gap);
+}
+.floating-editor label,
+.floating-editor :deep(legend) {
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: #444;
+}
+.floating-editor label,
+.title-field {
+  gap: var(--editor-label-gap);
 }
 </style>

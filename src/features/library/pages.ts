@@ -1,6 +1,7 @@
 import { database } from '../../shared/storage/database';
 
 export async function ensureLibraryPage() {
+  if (database.name !== 'duoyu') return;
   await database.transaction('rw', database.libraryPages, async () => {
     if (!(await database.libraryPages.count()))
       await database.libraryPages.put({

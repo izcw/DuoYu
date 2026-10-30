@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { accountStorage } from '../../shared/storage/account';
 import { onMounted, onUnmounted, ref } from 'vue';
 import { getDailyWallpaperUrl } from './wallpaper';
 import {
@@ -38,7 +39,7 @@ async function display(record: WallpaperRecord) {
   if (previous) URL.revokeObjectURL(previous);
 }
 async function update() {
-  if (localStorage.getItem('duoyu-wallpaper-mode') === 'custom') return;
+  if (accountStorage.getItem('duoyu-wallpaper-mode') === 'custom') return;
   const next = getDailyWallpaperUrl();
   if (
     pending ||
@@ -61,7 +62,7 @@ async function update() {
   }
 }
 async function wallpaperChanged() {
-  if (localStorage.getItem('duoyu-wallpaper-mode') === 'custom') {
+  if (accountStorage.getItem('duoyu-wallpaper-mode') === 'custom') {
     const cached = await readWallpaperForDisplay();
     if (cached) await display(cached);
   } else {

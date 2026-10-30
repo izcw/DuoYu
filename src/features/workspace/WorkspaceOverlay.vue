@@ -81,9 +81,9 @@ onUnmounted(() => {
 .newtab,
 .wallpaper-status,
 body
-  > :not(#app):not(.desktop-dock):not(.workspace-overlay):not(
-    .base-dialog-backdrop
-  ):not(.library-context-menu) {
+  > :not(#app):not(.desktop-dock):not(.account-entry):not(
+    .workspace-overlay
+  ):not(.base-dialog-backdrop):not(.library-context-menu) {
   transition:
     opacity 320ms ease,
     visibility 0s;
@@ -92,9 +92,9 @@ body
 .workspace-active .wallpaper-status,
 .workspace-active
   body
-  > :not(#app):not(.desktop-dock):not(.workspace-overlay):not(
-    .base-dialog-backdrop
-  ):not(.library-context-menu) {
+  > :not(#app):not(.desktop-dock):not(.account-entry):not(
+    .workspace-overlay
+  ):not(.base-dialog-backdrop):not(.library-context-menu) {
   visibility: hidden !important;
   opacity: 0 !important;
   pointer-events: none !important;

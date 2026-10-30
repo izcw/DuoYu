@@ -1,10 +1,16 @@
 import { ref } from 'vue';
-import { DESKTOP_GRID_COLUMNS, DESKTOP_GRID_CELL_HEIGHT } from './grid-config';
+import {
+  DESKTOP_GRID_COLUMNS,
+  DESKTOP_GRID_CELL_HEIGHT,
+  DESKTOP_ICON_SIZE,
+} from './grid-config';
 import type { GridStack } from 'gridstack';
 import { BoundedWidgetEngine } from '../../shared/BoundedWidgetEngine';
 import { database } from '../../shared/storage/database';
 
 export const pageDragError = ref('');
+export const pageDragActive = ref(false);
+export const folderDragItemId = ref('');
 let session:
   | {
       id: string;
@@ -13,6 +19,8 @@ let session:
       ghost: HTMLElement;
       original: HTMLElement;
       originalVisibility: string;
+      offsetX: number;
+      offsetY: number;
       sourceBounds?: DOMRect;
       switched: boolean;
       fromFolder?: boolean;
@@ -26,12 +34,29 @@ export function beginPageDrag(
   id: string,
   source: string,
   element: HTMLElement,
+  pointer?: MouseEvent,
 ) {
   cancelPageDrag();
-  const visual =
-    element.querySelector<HTMLElement>('.cell-icon, .folder-icon') || element;
+  const isFolder = !!element.querySelector('.folder-cells');
+  const visual = isFolder
+    ? element
+    : element.querySelector<HTMLElement>('.cell-icon, .folder-icon') || element;
   const rect = visual.getBoundingClientRect();
   const ghost = visual.cloneNode(true) as HTMLElement;
+  const appearance = getComputedStyle(visual);
+  for (const property of [
+    'background',
+    'backdrop-filter',
+    '-webkit-backdrop-filter',
+    'border-radius',
+    'padding',
+    'box-sizing',
+    'color',
+  ])
+    ghost.style.setProperty(property, appearance.getPropertyValue(property));
+  for (const property of appearance)
+    if (property.startsWith('--'))
+      ghost.style.setProperty(property, appearance.getPropertyValue(property));
   const original = element.closest<HTMLElement>('.grid-stack-item') || element;
   ghost.removeAttribute('id');
   ghost.classList.add('desktop-transfer-preview');
@@ -56,6 +81,33 @@ export function beginPageDrag(
     transform: 'none',
     transition: 'none',
   });
+  if (isFolder) {
+    ghost.replaceChildren();
+    Object.assign(ghost.style, {
+      width: `${DESKTOP_ICON_SIZE}px`,
+      height: `${DESKTOP_ICON_SIZE}px`,
+      display: 'none',
+      padding: '6px',
+      borderRadius: '15px',
+      gridTemplateColumns: 'repeat(3, 1fr)',
+      gridTemplateRows: 'repeat(3, 1fr)',
+      gap: '3px',
+      overflow: 'hidden',
+    });
+    for (const icon of [
+      ...element.querySelectorAll<HTMLElement>('.folder-icon'),
+    ].slice(0, 9)) {
+      const mini = icon.cloneNode(true) as HTMLElement;
+      Object.assign(mini.style, {
+        width: '100%',
+        height: '100%',
+        minWidth: '0',
+        padding: '0',
+        borderRadius: '4px',
+      });
+      ghost.append(mini);
+    }
+  }
   if (visual !== element) {
     ghost.style.background = 'transparent';
     ghost
@@ -77,11 +129,22 @@ export function beginPageDrag(
     switched: false,
     original,
     originalVisibility: original.style.visibility,
+    offsetX: isFolder
+      ? DESKTOP_ICON_SIZE / 2
+      : pointer
+        ? pointer.clientX - rect.left
+        : rect.width / 2,
+    offsetY: isFolder
+      ? DESKTOP_ICON_SIZE / 2
+      : pointer
+        ? pointer.clientY - rect.top
+        : rect.height / 2,
     sourceBounds: element
       .closest('.library-cell-grid')
       ?.getBoundingClientRect(),
   };
   pageDragError.value = '';
+  pageDragActive.value = true;
 }
 export function beginFolderDrag(
   id: string,
@@ -89,12 +152,15 @@ export function beginFolderDrag(
   element: HTMLElement,
   event: MouseEvent,
 ) {
-  beginPageDrag(id, source, element);
+  beginPageDrag(id, source, element, event);
   if (!session) return;
   session.fromFolder = true;
+  folderDragItemId.value = id;
   session.switched = true;
   session.ghost.style.opacity = '1';
-  session.ghost.style.display = 'block';
+  session.ghost.style.display = session.ghost.querySelector('.folder-icon')
+    ? 'grid'
+    : 'block';
   session.ghost.style.boxShadow = 'none';
   session.ghost.style.border = '0';
   session.ghost.style.outline = 'none';
@@ -114,6 +180,8 @@ export function beginDockDrag(id: string, element: HTMLElement) {
     'home';
 }
 export function cancelPageDrag() {
+  pageDragActive.value = false;
+  folderDragItemId.value = '';
   clearTimeout(timer);
   hover = '';
   session?.ghost.remove();
@@ -124,8 +192,8 @@ function move(event: MouseEvent | DragEvent) {
   if (!session) return;
   point = { x: event.clientX, y: event.clientY };
   if (event.type === 'dragover') event.preventDefault();
-  session.ghost.style.left = `${point.x - 30}px`;
-  session.ghost.style.top = `${point.y - 30}px`;
+  session.ghost.style.left = `${point.x - session.offsetX}px`;
+  session.ghost.style.top = `${point.y - session.offsetY}px`;
   if (!session.switched && session.sourceBounds) {
     const r = session.sourceBounds;
     const outside =
@@ -138,7 +206,9 @@ function move(event: MouseEvent | DragEvent) {
       : session.originalVisibility;
     if (outside) {
       document.body.append(session.ghost);
-      session.ghost.style.display = 'block';
+      session.ghost.style.display = session.ghost.querySelector('.folder-icon')
+        ? 'grid'
+        : 'block';
       session.ghost.style.opacity = '1';
     } else session.ghost.remove();
   }
@@ -163,7 +233,9 @@ function move(event: MouseEvent | DragEvent) {
     session.target = id;
     session.switched = true;
     document.body.append(session.ghost);
-    session.ghost.style.display = 'block';
+    session.ghost.style.display = session.ghost.querySelector('.folder-icon')
+      ? 'grid'
+      : 'block';
     // End the old GridStack helper before its page unmounts. This is not a user drop.
     document.dispatchEvent(
       new MouseEvent('mouseup', { bubbles: true, button: 0 }),

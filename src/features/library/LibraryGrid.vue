@@ -9,7 +9,7 @@ import BaseDialog from '../../shared/components/base/BaseDialog.vue';
 import FolderIconGrid from './FolderIconGrid.vue';
 import GridItemMenu from './GridItemMenu.vue';
 import WorkspaceFavicon from '../workspace/WorkspaceFavicon.vue';
-import { beginPageDrag } from './page-drag';
+import { beginPageDrag, pageDragActive } from './page-drag';
 import {
   itemMaxColumns,
   itemMaxRows,
@@ -167,9 +167,13 @@ const gridElement = ref<HTMLElement | null>(null);
 const gridContainer = ref<HTMLElement | null>(null);
 // Keep Vue from replacing classes owned by GridStack when guide visibility changes.
 watch(
-  () => !!dragging.value || !!resizePreview.value,
-  (visible) =>
-    gridElement.value?.classList.toggle('grid-guides-visible', visible),
+  () =>
+    [
+      gridElement.value,
+      !!dragging.value || !!resizePreview.value || pageDragActive.value,
+    ] as const,
+  ([element, visible]) =>
+    element?.classList.toggle('grid-guides-visible', visible),
   { flush: 'post' },
 );
 let syncing = false;
@@ -234,6 +238,11 @@ function showItemMenu(event: MouseEvent, item: LibraryItem) {
   itemMenu.value = { item, x: event.clientX, y: event.clientY };
 }
 async function chooseSize(width: number, height: number) {
+  if (itemMenu.value?.item.parent) {
+    await resizeLibraryItem(itemMenu.value.item.id, width, height);
+    itemMenu.value = undefined;
+    return;
+  }
   const grid = getGrid();
   const node = grid?.engine.nodes.find((n) => n.id === itemMenu.value?.item.id);
   if (!grid || !node) return;
@@ -787,7 +796,7 @@ async function note(event: Event, id: string) {
         </div>
         <component
           :is="item.kind === 'widget' ? 'span' : 'button'"
-          class="tile-caption cell-label"
+          class="tile-caption cell-label desktop-icon-caption"
           :class="{ 'folder-caption': item.kind === 'folder' }"
           :title="item.name"
           :aria-label="
@@ -879,6 +888,7 @@ async function note(event: Event, id: string) {
         :disabled="disabled"
         @open="openItem"
         @escape="leaveFolder"
+        @contextmenu="showItemMenu"
         @error="emit('error', $event)"
       />
     </div>
@@ -939,27 +949,6 @@ async function note(event: Event, id: string) {
   text-overflow: ellipsis;
   overflow: hidden;
 }
-.cell-icon {
-  overflow: hidden;
-  box-sizing: border-box;
-  padding: 4px;
-  flex-shrink: 0;
-  width: var(--cell-icon-size, 56px);
-  height: var(--cell-icon-size, 56px);
-  border-radius: 15px;
-  display: grid;
-  place-items: center;
-}
-.cell-icon :deep(.workspace-favicon) {
-  width: 100%;
-  height: 100%;
-  background: transparent;
-  border-radius: 12px;
-}
-.cell-icon :deep(img) {
-  width: 100%;
-  height: 100%;
-}
 .folder-border {
   position: absolute;
   inset: 0;
@@ -1001,14 +990,6 @@ async function note(event: Event, id: string) {
   left: var(--gs-item-margin-left, 8px);
   right: var(--gs-item-margin-right, 8px);
   width: auto;
-  height: 16px;
-  line-height: 16px;
-  padding: 0;
-  font-size: 11px !important;
-  background: transparent;
-  color: white;
-  text-align: center;
-  text-shadow: 0 1px 3px rgb(0 0 0 / 20%);
 }
 
 .library-cell-grid > [data-kind='link'] > .tile-caption {

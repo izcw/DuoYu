@@ -1,0 +1,7 @@
+[Unit]
+Description=Encrypted DuoYu sync database backup
+
+[Service]
+Type=oneshot
+ExecStart=/bin/node /www/wwwroot/duoyu-sync/src/backup.mjs
+UMask=0077
