@@ -4,7 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { readFile, mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import pg from '../../DuoYu-Backend/server/sync/node_modules/pg/lib/index.js';
-import { createSyncServer, accountId } from '../../DuoYu-Backend/server/sync/src/http.mjs';
+import {
+  createSyncServer,
+  accountId,
+} from '../../DuoYu-Backend/server/sync/src/http.mjs';
 import { applyOperation } from '../../DuoYu-Backend/server/sync/src/store.mjs';
 const pool = new pg.Pool({
   host: '127.0.0.1',
@@ -13,7 +16,12 @@ const pool = new pg.Pool({
   password: 'duoyu_dev_only',
   database: 'duoyu_sync_test',
 });
-await pool.query(await readFile(new URL('../../DuoYu-Backend/server/sync/schema.sql', import.meta.url), 'utf8'));
+await pool.query(
+  await readFile(
+    new URL('../../DuoYu-Backend/server/sync/schema.sql', import.meta.url),
+    'utf8',
+  ),
+);
 const profile = {
   issuer: 'https://ui.test',
   sub: randomUUID(),
@@ -251,10 +259,8 @@ try {
   assert(
     await localPanel.locator('.library-preview').evaluate((el) => el.inert),
   );
-  await page.getByLabel('缩放', { exact: true }).selectOption('2');
-  await page.waitForFunction(
-    () => document.querySelector('.preview-viewport')?.scrollTop > 0,
-  );
+  assert.equal(await page.getByLabel('缩放', { exact: true }).count(), 0);
+  assert.equal(await page.getByLabel('预览页面', { exact: true }).count(), 0);
   const previewBounds = await localPanel
     .locator('.preview-viewport')
     .boundingBox();
@@ -397,14 +403,9 @@ try {
   );
   await page.getByRole('button', { name: '刷新预览', exact: true }).click();
   await page.getByText('这个位置已被其他项目占用', { exact: true }).waitFor();
-  await page
-    .getByLabel('预览页面', { exact: true })
-    .selectOption('folder:folder');
   await localPanel
-    .locator('.tile-caption')
-    .filter({ hasText: '文件夹图标' })
+    .locator('[data-library-id="i"].conflict-highlight')
     .waitFor();
-  await page.getByLabel('预览页面', { exact: true }).selectOption('page:home');
   await page.getByRole('button', { name: '应用本机版本', exact: true }).click();
   await page.getByText('没有需要处理的更改。', { exact: true }).waitFor();
   const placement = (
@@ -492,4 +493,3 @@ try {
   await pool.query('DELETE FROM sync_accounts WHERE id=$1', [account.id]);
   await pool.end();
 }
-

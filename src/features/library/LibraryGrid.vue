@@ -33,6 +33,7 @@ const props = withDefaults(
     managing: boolean;
     disabled: boolean;
     preview?: boolean;
+    highlightIds?: string[];
   }>(),
   { rows: LIBRARY_GRID_ROWS, alignment: 'center' },
 );
@@ -483,7 +484,7 @@ const selection = useGridSelection(gridContainer, gridElement, {
   save: saveGrid,
   error: (message) => emit('error', message),
 });
-const { marquee } = selection;
+const { marquee, locked: selectionLocked } = selection;
 watch(
   () =>
     [
@@ -590,7 +591,7 @@ async function note(event: Event, id: string) {
   <div
     ref="gridContainer"
     class="library-grid-container"
-    :class="{ 'library-preview': preview }"
+    :class="{ 'library-preview': preview, 'selection-locked': selectionLocked }"
     :inert="preview || undefined"
     :style="{
       justifyContent: alignment === 'end' ? 'flex-end' : 'center',
@@ -615,6 +616,9 @@ async function note(event: Event, id: string) {
         v-for="{ item } in layout.items"
         :key="item.id"
         class="grid-stack-item"
+        :class="{
+          'conflict-highlight': preview && highlightIds?.includes(item.id),
+        }"
         :data-kind="item.kind"
         :gs-id="item.id"
         :gs-no-move="false"
@@ -862,6 +866,47 @@ async function note(event: Event, id: string) {
     </nav>
   </BaseDialog>
 </template>
+<style scoped>
+.selection-locked .library-cell-grid > .grid-stack-item {
+  cursor: grab;
+}
+/* Nested folder grids explicitly enable pointer events; override every child
+   so the outer card owns the complete selection drag surface. */
+.selection-locked .library-cell-grid > .grid-stack-item :deep(*) {
+  pointer-events: none !important;
+}
+.selection-locked :deep(.ui-resizable-handle),
+.selection-locked .cell-resize {
+  display: none !important;
+}
+.grid-stack-item.grid-selected {
+  --tile-highlight-color: #fff;
+}
+.library-preview .grid-stack-item.conflict-highlight {
+  --tile-highlight-color: #feb43f;
+}
+.grid-stack-item:is(.grid-selected, .conflict-highlight)[data-kind='link']
+  > .cell-tile,
+.grid-stack-item:is(.grid-selected, .conflict-highlight)[data-kind='link']
+  > .cell-tile
+  > .cell-link {
+  overflow: visible;
+}
+.grid-stack-item:is(.grid-selected, .conflict-highlight)
+  > .cell-tile
+  > .cell-link
+  > .cell-icon.glass-interaction-target,
+.grid-stack-item:is(.grid-selected, .conflict-highlight)
+  > .cell-tile.cell-panel {
+  outline: 2px solid var(--tile-highlight-color, #fff);
+  outline-offset: 0;
+}
+/* Selection and conflict frames share the same exterior glass boundary. */
+.grid-stack-item:is(.grid-selected, .conflict-highlight)
+  > .cell-tile.cell-panel.desktop-card-glass {
+  clip-path: none;
+}
+</style>
 <style scoped>
 .library-grid-container {
   min-width: 0;

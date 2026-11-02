@@ -88,6 +88,11 @@ const items = computed(() =>
       : [];
   }),
 );
+const dockEntries = computed(() => [
+  ...items.value.slice(0, pinned.length),
+  { id: '__dock-divider', name: '', icon: '', url: undefined },
+  ...items.value.slice(pinned.length),
+]);
 const dragged = ref('');
 let original: string[] = [];
 let slots: { id: string; center: number }[] = [];
@@ -208,36 +213,43 @@ function drop(event: DragEvent) {
       @drop.prevent.stop="drop"
     >
       <ReorderTransition class="dock-items">
-        <button
-          v-for="(item, index) in items"
-          :key="item.id"
-          class="dock-entry"
-          :class="{
-            'dock-divider': index === 2,
-            'dock-dragging': dragged === item.id,
-          }"
-          :data-dock-id="item.id"
-          :draggable="!pinned.includes(item.id)"
-          :aria-label="item.name"
-          :title="item.name"
-          :aria-current="isActive(item.id) ? 'page' : undefined"
-          @dragstart.stop="start($event, item.id)"
-          @dragend="finish"
-          @click="activate(item)"
-        >
-          <span class="dock-tile"
-            ><WorkspaceFavicon
-              v-if="links.some((link) => link.id === item.id)"
-              :src="item.icon"
-              :page-url="item.url"
-              :title="item.name" /><img
-              v-else
-              :src="item.icon"
-              alt=""
-              draggable="false"
-          /></span>
-          <span class="dock-dot" :class="{ active: isActive(item.id) }" />
-        </button>
+        <template v-for="item in dockEntries" :key="item.id">
+          <span
+            v-if="item.id === '__dock-divider'"
+            key="dock-divider"
+            class="dock-divider"
+            aria-hidden="true"
+          />
+          <button
+            v-else
+            :key="item.id"
+            class="dock-entry"
+            :class="{
+              'dock-dragging': dragged === item.id,
+            }"
+            :data-dock-id="item.id"
+            :draggable="!pinned.includes(item.id)"
+            :aria-label="item.name"
+            :title="item.name"
+            :aria-current="isActive(item.id) ? 'page' : undefined"
+            @dragstart.stop="start($event, item.id)"
+            @dragend="finish"
+            @click="activate(item)"
+          >
+            <span class="dock-tile"
+              ><WorkspaceFavicon
+                v-if="links.some((link) => link.id === item.id)"
+                :src="item.icon"
+                :page-url="item.url"
+                :title="item.name" /><img
+                v-else
+                :src="item.icon"
+                alt=""
+                draggable="false"
+            /></span>
+            <span class="dock-dot" :class="{ active: isActive(item.id) }" />
+          </button>
+        </template>
       </ReorderTransition>
     </nav>
   </Teleport>
@@ -279,7 +291,7 @@ function drop(event: DragEvent) {
   gap: 10px;
 }
 .dock-dragging {
-  opacity: 0;
+  opacity: 0.3;
 }
 .dock-entry {
   user-select: none;
@@ -336,9 +348,12 @@ function drop(event: DragEvent) {
   background: #fff;
 }
 .dock-divider {
-  border-left: 1px solid #ffffff55;
-  padding-left: 12px;
-  margin-left: 2px;
+  flex: 0 0 1px;
+  width: 1px;
+  height: 46px;
+  align-self: flex-start;
+  background: #ffffff55;
+  pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .desktop-dock,

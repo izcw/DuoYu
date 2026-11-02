@@ -72,7 +72,6 @@ let startScroll = 0;
 let savingOrder = false;
 let original: LibraryPage[] = [];
 let preview: LibraryPage[] = [];
-const insertion = ref<{ id: string; after: boolean }>();
 let dropped = false;
 function select(page: LibraryPage) {
   active.value = page.id;
@@ -131,7 +130,6 @@ function start(event: DragEvent, id: string) {
   dragged.value = id;
   original = [...pages.value];
   preview = original;
-  insertion.value = undefined;
   startScroll = menu.value?.scrollTop || 0;
   // Read once, before FLIP transforms move rows under a stationary pointer.
   slots = [
@@ -160,25 +158,20 @@ function over(event: DragEvent) {
   const next = original.filter((page) => page.id !== dragged.value);
   next.splice(index, 0, item);
   preview = next;
-  const others = original.filter((page) => page.id !== dragged.value);
-  insertion.value = next.every((page, index) => page.id === original[index]?.id)
-    ? undefined
-    : {
-        id: others[Math.min(index, others.length - 1)]!.id,
-        after: index === others.length,
-      };
+  // Reuse the menu's FLIP transition: nearby rows make room for the dragged
+  // icon, while its translucent row shows the exact destination slot.
+  if (next.some((page, index) => page.id !== pages.value[index]?.id))
+    pages.value = next;
 }
 function end() {
   if (!dropped && dragged.value) pages.value = original;
   dragged.value = '';
   slots = [];
-  insertion.value = undefined;
 }
 function drop() {
   if (!dragged.value) return;
   dropped = true;
   pages.value = preview;
-  insertion.value = undefined;
   dragged.value = '';
   const order = pages.value.map((page) => page.id);
   const fallback = original;
@@ -282,8 +275,6 @@ onUnmounted(() => {
         class="library-page-row"
         :class="{
           'is-dragging': dragged === item.id,
-          'drop-before': insertion?.id === item.id && !insertion.after,
-          'drop-after': insertion?.id === item.id && insertion.after,
         }"
         :data-library-page-id="item.id"
         :draggable="!editing && !busy"
@@ -434,23 +425,6 @@ onUnmounted(() => {
   position: relative;
   border-radius: 14px;
   cursor: grab;
-}
-.library-page-row.drop-before::before,
-.library-page-row.drop-after::after {
-  content: '';
-  position: absolute;
-  left: 4px;
-  right: 4px;
-  height: 3px;
-  background: #efefed;
-  border-radius: 3px;
-  pointer-events: none;
-}
-.library-page-row.drop-before::before {
-  top: -4px;
-}
-.library-page-row.drop-after::after {
-  bottom: -4px;
 }
 .library-page-row.is-dragging {
   opacity: 0.3;

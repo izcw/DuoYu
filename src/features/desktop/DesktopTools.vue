@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { getSyncPreference, setSyncPreference } from '../sync/client';
-import { accountStorage } from '../../shared/storage/account';
+import WallpaperDownloadProgress from '../wallpaper/WallpaperDownloadProgress.vue';
+import type { WallpaperProgress } from '../wallpaper/download-wallpaper';
+import WallpaperSelectionMark from '../wallpaper/WallpaperSelectionMark.vue';
+import { useWallpaperSelection } from '../wallpaper/useWallpaperSelection';
+const selectedWallpaper = useWallpaperSelection();
 import { computed, ref, watch, onUnmounted } from 'vue';
 import { liveQuery } from 'dexie';
 import { browser } from 'wxt/browser';
-import StoreLayout from '../../shared/components/base/StoreLayout.vue';
+import DialogLayout from '../../shared/components/base/DialogLayout.vue';
 import CloudCatalog from './CloudCatalog.vue';
+import MyWallpapers from '../wallpaper/MyWallpapers.vue';
 import BingWallpaperGallery from '../wallpaper/BingWallpaperGallery.vue';
 import './store-cards.css';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
@@ -14,11 +18,11 @@ import { database, type LibraryItem } from '../../shared/storage/database';
 import { getDailyWallpaperUrl } from '../wallpaper/wallpaper';
 import {
   importWallpaper,
+  selectDailyWallpaper,
   removeUploadedWallpaper,
 } from '../wallpaper/wallpaper-cache';
-import { backupDesktop } from './desktop-backup';
 const props = defineProps<{
-  tool: '' | 'widgets' | 'wallpaper' | 'search' | 'settings';
+  tool: '' | 'widgets' | 'wallpaper' | 'search';
   automatic: boolean;
   error?: string;
 }>();
@@ -34,8 +38,7 @@ const title = computed(
       widgets: '组件商店',
       wallpaper: '壁纸商店',
       search: '图标搜索',
-      settings: '设置',
-    })[props.tool || 'settings'],
+    })[props.tool || 'search'],
 );
 const widgets = [
   { kind: 'calendar', icon: '▦', name: '日历', description: '查看本月日期' },
@@ -72,10 +75,10 @@ const filteredWidgets = computed(() =>
   ),
 );
 const busy = ref(false);
+const progress = ref<WallpaperProgress>();
 const message = ref('');
 const query = ref('');
 const items = ref<LibraryItem[]>([]);
-const glass = ref('real');
 const subscription = liveQuery(() => database.libraryItems.toArray()).subscribe(
   (value) => (items.value = value),
 );
@@ -96,10 +99,10 @@ watch(
     wallpaperCategory.value = 'daily';
     todayWallpaper.value = getDailyWallpaperUrl();
     todayFailed.value = false;
-    glass.value = String((await getSyncPreference('glassMode')) || 'real');
   },
 );
 async function run(action: () => Promise<unknown>) {
+  if (busy.value) return;
   busy.value = true;
   message.value = '';
   try {
@@ -115,17 +118,14 @@ async function upload(event: Event) {
   if (file)
     await run(async () => {
       await importWallpaper(file);
-      message.value = '壁纸已应用';
+      message.value = '';
     });
   (event.target as HTMLInputElement).value = '';
 }
 async function daily() {
-  accountStorage.removeItem('duoyu-wallpaper-mode');
-  window.dispatchEvent(new Event('duoyu-wallpaper-change'));
-  message.value = '已切换为每日壁纸';
-}
-function saveGlass() {
-  void run(() => setSyncPreference('glassMode', glass.value));
+  progress.value = undefined;
+  await selectDailyWallpaper((value) => (progress.value = value));
+  message.value = '';
 }
 const selected = ref<LibraryItem>();
 watch(
@@ -145,11 +145,13 @@ async function open(item: LibraryItem) {
     :open="!!tool"
     :title="title"
     :width="store ? 1160 : undefined"
-    :aspect-ratio="store ? 4 / 3 : undefined"
+    :height="store ? 760 : undefined"
+    solid
+    close-button
     @update:open="emit('close')"
   >
     <div class="desktop-tools" :class="{ 'store-tools': store }">
-      <StoreLayout
+      <DialogLayout
         v-if="tool === 'widgets'"
         v-model="widgetCategory"
         :menus="[
@@ -169,7 +171,7 @@ async function open(item: LibraryItem) {
           <button
             v-for="widget in filteredWidgets"
             :key="widget.kind"
-            class="store-card store-widget-card glass-surface glass-interactive"
+            class="store-card store-widget-card"
             :title="widget.description"
             @click="emit('add', widget.kind)"
           >
@@ -178,30 +180,37 @@ async function open(item: LibraryItem) {
           </button>
           <button
             v-if="widgetCategory !== 'daily'"
-            class="store-card store-widget-card glass-surface glass-interactive"
+            class="store-card store-widget-card"
             @click="emit('folder')"
           >
             <span class="tool-symbol">▣</span><strong>新建文件夹</strong>
           </button>
         </div>
-      </StoreLayout>
-      <StoreLayout
+      </DialogLayout>
+      <DialogLayout
         v-if="tool === 'wallpaper'"
         v-model="wallpaperCategory"
         :menus="[
-          { id: 'daily', name: '每日壁纸' },
-          { id: 'bing', name: '必应壁纸' },
-          { id: 'local', name: '本地壁纸' },
-          { id: 'cloud', name: '精选壁纸' },
+          { id: 'daily', name: '每日壁纸', icon: 'Sun' },
+          { id: 'bing', name: '必应', icon: 'Picture' },
+          { id: 'cloud', name: '精选', icon: 'Star' },
+          { id: 'local', name: '我的壁纸', icon: 'Folder' },
         ]"
       >
         <CloudCatalog v-if="wallpaperCategory === 'cloud'" kind="wallpapers" />
-        <BingWallpaperGallery v-else-if="wallpaperCategory === 'bing'" />
-        <div v-else class="store-card-grid wallpaper-card-grid">
+        <KeepAlive>
+          <BingWallpaperGallery v-if="wallpaperCategory === 'bing'" />
+        </KeepAlive>
+        <div
+          v-if="wallpaperCategory === 'daily'"
+          class="store-card-grid wallpaper-card-grid"
+        >
           <button
             v-if="wallpaperCategory === 'daily'"
             class="store-card wallpaper-card glass-surface"
-            @click="daily"
+            :aria-pressed="selectedWallpaper === 'daily'"
+            :disabled="busy"
+            @click="run(daily)"
           >
             <img
               v-if="!todayFailed"
@@ -211,53 +220,18 @@ async function open(item: LibraryItem) {
               @error="todayFailed = true"
             />
             <span v-else class="daily-preview-error">今日预览加载失败</span>
+            <WallpaperSelectionMark :selected="selectedWallpaper === 'daily'" />
             <span class="wallpaper-caption"
-              ><strong>每日壁纸</strong><small>每天自动更新</small></span
+              ><strong>每日壁纸</strong
+              ><WallpaperDownloadProgress
+                v-if="busy"
+                :progress="progress"
+              /><small v-else>每天自动更新</small></span
             >
           </button>
-          <template v-else>
-            <div
-              class="store-card wallpaper-card wallpaper-preview glass-surface"
-            >
-              <span class="wallpaper-caption"><strong>当前壁纸</strong></span>
-              <button
-                v-if="hasUploadedWallpaper"
-                type="button"
-                class="wallpaper-remove-upload glass-control glass-interactive"
-                :disabled="busy"
-                @click.stop="
-                  run(async () => {
-                    await removeUploadedWallpaper();
-                    message = '本地壁纸已删除，云端将在同步后释放未使用的图片';
-                  })
-                "
-              >
-                删除上传图片
-              </button>
-            </div>
-            <button
-              class="store-card wallpaper-card wallpaper-upload glass-surface glass-interactive"
-              :disabled="busy"
-              @click="uploadInput?.click()"
-            >
-              <svg viewBox="0 0 32 32" aria-hidden="true">
-                <path d="M16 21V5m-6 6 6-6 6 6M6 21v6h20v-6" />
-              </svg>
-              <strong>{{ busy ? '正在导入…' : '导入本地壁纸' }}</strong>
-              <small>选择图片 · 最大 20 MB</small>
-            </button>
-            <input
-              ref="uploadInput"
-              class="wallpaper-file-input"
-              aria-label="导入壁纸"
-              type="file"
-              accept="image/*"
-              :disabled="busy"
-              @change="upload"
-            />
-          </template>
         </div>
-      </StoreLayout>
+        <MyWallpapers v-if="wallpaperCategory === 'local'" />
+      </DialogLayout>
       <template v-if="tool === 'search'">
         <input
           v-model="query"
@@ -312,36 +286,6 @@ async function open(item: LibraryItem) {
           </p>
         </div>
       </template>
-      <template v-if="tool === 'settings'">
-        <label
-          >当前页面布局<select
-            :value="automatic ? 'auto' : 'free'"
-            @change="
-              emit(
-                'layout',
-                ($event.target as HTMLSelectElement).value === 'auto',
-              )
-            "
-          >
-            <option value="free">自由布局</option>
-            <option value="auto">自动布局</option>
-          </select></label
-        >
-        <label
-          >玻璃效果<select v-model="glass" @change="saveGlass">
-            <option value="real">真实</option>
-            <option value="natural">自然</option>
-            <option value="soft">柔和</option>
-          </select></label
-        >
-        <button
-          class="tool-entry glass-control glass-interactive"
-          :disabled="busy"
-          @click="run(backupDesktop)"
-        >
-          立即备份
-        </button>
-      </template>
       <p v-if="message" role="status">{{ message }}</p>
       <p v-if="error" role="alert">{{ error }}</p>
     </div>
@@ -355,6 +299,7 @@ async function open(item: LibraryItem) {
 }
 .store-tools {
   flex: 1;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
 }
@@ -412,6 +357,13 @@ async function open(item: LibraryItem) {
   text-overflow: ellipsis;
   white-space: nowrap;
   margin-top: 5px;
+}
+.store-widget-card {
+  background: #f5f5f7;
+  color: #222;
+}
+.store-widget-card:hover {
+  background: #ededf1;
 }
 .tool-symbol {
   font-size: 26px;

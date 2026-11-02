@@ -7,12 +7,17 @@ import { assetObjectUrl } from './assets';
 import { previewItems, previewPreference } from './conflict-preview';
 import type { Entity } from './model';
 import { HOME_GRID_ROWS, LIBRARY_GRID_ROWS } from '../library/grid-config';
-const props = defineProps<{ entities: Entity[]; view: string; zoom: number }>();
+const props = defineProps<{
+  entities: Entity[];
+  view: string;
+  highlightIds?: string[];
+  highlightRegion?: boolean;
+}>();
 const content = computed(() => previewItems(props.entities, props.view));
 const viewport = ref<HTMLElement>();
 let scrollFrame = 0;
 watch(
-  () => [props.zoom, props.view],
+  () => props.view,
   async () => {
     await nextTick();
     cancelAnimationFrame(scrollFrame);
@@ -98,10 +103,11 @@ onUnmounted(() => {
   <div ref="viewport" class="preview-viewport">
     <div
       class="preview-desktop glass-material-scope"
+      :class="{ 'conflict-region': highlightRegion }"
       :data-glass-mode="material"
       :style="{
-        width: zoom * 100 + '%',
-        height: Math.round(420 * zoom) + 'px',
+        width: '100%',
+        height: '420px',
       }"
     >
       <WallpaperSurface
@@ -112,10 +118,14 @@ onUnmounted(() => {
         @error="error = '壁纸预览加载失败'"
       />
       <div v-if="!home" class="preview-focus glass-focus-layer" />
-      <div class="preview-grid">
+      <div
+        class="preview-grid"
+        :class="{ 'preview-folder glass-surface': view.startsWith('folder:') }"
+      >
         <LibraryGrid
           :key="view"
           preview
+          :highlight-ids="highlightIds"
           :items="content.items"
           :all="content.all"
           :rows="home ? HOME_GRID_ROWS : LIBRARY_GRID_ROWS"
@@ -146,6 +156,10 @@ onUnmounted(() => {
   min-height: 100%;
   overflow: hidden;
 }
+.conflict-region {
+  outline: 3px solid #ffad32;
+  outline-offset: -3px;
+}
 .preview-focus {
   position: absolute;
   inset: 0;
@@ -155,6 +169,12 @@ onUnmounted(() => {
   position: absolute;
   inset: 22px 18px 26px;
   z-index: 2;
+}
+.preview-folder {
+  border: 1px solid #ffffff70;
+  border-radius: 24px;
+  background: #ffffff20;
+  padding: 12px;
 }
 .preview-empty {
   position: absolute;

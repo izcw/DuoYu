@@ -37,7 +37,7 @@ export function conflictChanges(record: SyncConflict): Change[] {
   );
 }
 export async function fetchRemoteConflicts(request: typeof rpc = rpc) {
-  const response = await request('/v1/sync/conflicts');
+  const response = await request('/api/v1/sync/conflicts');
   const epoch = (await database.syncMeta.get('epoch'))?.value;
   const changed =
     (await database.syncMeta.get('conflictEpoch'))?.value !== epoch;
@@ -76,7 +76,7 @@ export async function discardConflict(
   const record = await database.syncConflicts.get(id);
   if (!record) return;
   if (record.server)
-    await rpc('/v1/sync/conflicts/' + id + '/resolve', 'POST', {});
+    await rpc('/api/v1/sync/conflicts/' + id + '/resolve', 'POST', {});
   await database.syncConflicts.update(id, { resolvedAt: Date.now() });
   await syncNow();
 }
@@ -280,7 +280,7 @@ export async function retryConflict(
       if (!changes.length) {
         await database.syncConflicts.update(id, { resolvedAt: Date.now() });
         if (record.server)
-          await rpc('/v1/sync/conflicts/' + id + '/resolve', 'POST', {});
+          await rpc('/api/v1/sync/conflicts/' + id + '/resolve', 'POST', {});
         return;
       }
       // A resolution is a fresh commit based on current cloud state, never a replay

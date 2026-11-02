@@ -18,7 +18,8 @@ import {
   getAsset,
   ASSET_PREFIX,
 } from './assets';
-import { fetchRemoteConflicts } from './conflicts';
+import { fetchRemoteConflicts, conflictChanges } from './conflicts';
+import { pendingWallpaperChanges } from './pending-wallpaper';
 import {
   denormalized,
   overlay,
@@ -185,6 +186,14 @@ export async function applyRemote(
       await database.syncOutbox.delete(ack);
     }
     const view = new Map([...next].filter(([, e]) => !e.deleted));
+    const wallpaper = await database.wallpapers.get('daily');
+    const unresolved = (
+      await database.syncConflicts.orderBy('createdAt').toArray()
+    ).map((record) => ({
+      resolvedAt: record.resolvedAt,
+      changes: conflictChanges(record),
+    }));
+    overlay(view, pendingWallpaperChanges(wallpaper?.contentHash, unresolved));
     for (const op of await database.syncOutbox.orderBy('createdAt').toArray())
       overlay(view, rowChanges(op.rows));
     const tables = denormalized([...view.values()]);
@@ -244,10 +253,19 @@ async function hydrateWallpaper() {
         return;
       const p = current!.payload as Row;
       const existing = await database.wallpapers.get('daily');
+      const unresolved = (
+        await database.syncConflicts.orderBy('createdAt').toArray()
+      ).map((record) => ({
+        resolvedAt: record.resolvedAt,
+        changes: conflictChanges(record),
+      }));
+      if (pendingWallpaperChanges(existing?.contentHash, unresolved).length)
+        return;
       if (existing?.contentHash !== p.contentHash)
         await database.wallpapers.put({
           id: 'daily',
           sourceUrl: p.sourceUrl,
+          selection: p.selection,
           contentHash: p.contentHash,
           blob,
           savedAt: Date.now(),
@@ -260,7 +278,7 @@ async function hydrateWallpaper() {
   }
 }
 export async function refreshSnapshot(ack?: string, reason?: string) {
-  const r = await rpc('/v1/sync/snapshot');
+  const r = await rpc('/api/v1/sync/snapshot');
   if (r.schemaVersion !== 1) throw Error('云端同步版本不兼容');
   await applyRemote(r.entities, r.revision, true, ack, reason, r.epoch);
 }
@@ -311,7 +329,9 @@ async function pull() {
     try {
       const epoch = String((await database.syncMeta.get('epoch'))?.value ?? '');
       r = await rpc(
-        '/v1/sync/changes?after=' + cursor + (epoch ? '&epoch=' + epoch : ''),
+        '/api/v1/sync/changes?after=' +
+          cursor +
+          (epoch ? '&epoch=' + epoch : ''),
       );
     } catch (e) {
       if ((e as Error & { status: number }).status !== 410) throw e;
@@ -374,7 +394,11 @@ export async function syncNow() {
               await database.syncOutbox.delete(op.id);
               continue;
             }
-            const result = await rpc('/v1/sync/operations', 'POST', prepared);
+            const result = await rpc(
+              '/api/v1/sync/operations',
+              'POST',
+              prepared,
+            );
             await refreshSnapshot(
               op.id,
               result.status === 'conflict' ? result.code : undefined,

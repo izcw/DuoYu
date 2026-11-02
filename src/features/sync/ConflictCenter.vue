@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { liveQuery } from 'dexie';
+import PageIcon from '../../shared/components/base/PageIcon.vue';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
 import { database } from '../../shared/storage/database';
 import type { SyncConflict } from './capture';
 import type { Entity } from './model';
 import {
   conflictChanges,
-  conflictReasons,
   discardConflict,
   retryConflict,
   fieldLabels,
@@ -16,9 +16,10 @@ import {
 import { formatSyncTime, syncNow } from './client';
 import ConflictDesktopPreview from './ConflictDesktopPreview.vue';
 import {
+  groupPreviewMenus,
   previewVersion,
   previewPages,
-  previewDefaultPage,
+  previewConflictViews,
   prepareLocalPreview,
   previewResolutionChanges,
 } from './conflict-preview';
@@ -28,9 +29,7 @@ const records = ref<SyncConflict[]>([]),
   selected = ref(''),
   busy = ref(false),
   error = ref(''),
-  message = ref(''),
-  view = ref('page:home'),
-  zoom = ref(1);
+  message = ref('');
 let subscription: ReturnType<ReturnType<typeof liveQuery>['subscribe']>;
 onMounted(() => {
   subscription = liveQuery(async () => ({
@@ -48,50 +47,57 @@ onMounted(() => {
       revision: e.revision,
       deleted: e.deleted,
     }));
-    if (!records.value.some((r) => r.id === selected.value))
-      selected.value = records.value[0]?.id || '';
   });
 });
 onUnmounted(() => subscription?.unsubscribe());
-const current = computed(() =>
-  records.value.find((r) => r.id === selected.value),
+const groups = computed(() =>
+  groupPreviewMenus(records.value, conflictChanges, shadow.value),
 );
-const changes = computed(() =>
-  current.value ? conflictChanges(current.value) : [],
+watch(
+  groups,
+  (value) => {
+    if (!value.some((group) => group.id === selected.value))
+      selected.value = value[0]?.id || '';
+  },
+  { immediate: true },
+);
+const current = computed(() =>
+  groups.value.find((group) => group.id === selected.value),
+);
+const changes = computed(() => current.value?.changes ?? []);
+const resolving = computed(() =>
+  current.value?.records.some((record) => record.state === 'resolving'),
 );
 const localLayout = computed(() =>
   prepareLocalPreview(shadow.value, changes.value),
 );
 const local = computed(() => localLayout.value.entities),
   cloud = computed(() => previewVersion(shadow.value, changes.value, false));
-const pages = computed(() => previewPages([local.value, cloud.value]));
+const views = computed(() =>
+  previewConflictViews(changes.value, [local.value, cloud.value]),
+);
+const highlightedIds = computed(() => changes.value.map((change) => change.id));
 watch(selected, () => {
-  view.value = previewDefaultPage(changes.value);
-  zoom.value = 1;
   error.value = '';
   message.value = '';
 });
-watch(pages, () => {
-  if (!pages.value.some((p) => p.id === view.value))
-    view.value = pages.value[0]?.id || 'page:home';
-});
-function name(record: SyncConflict) {
-  const first = conflictChanges(record)[0];
+function menuIcon(menu: string) {
+  if (menu === 'page:home') return 'Home';
+  if (menu === 'page:__dock') return 'Computer';
+  const id = menu.slice(menu.indexOf(':') + 1);
+  const changed = records.value
+    .flatMap(conflictChanges)
+    .find((c) => c.table === 'libraryPages' && c.id === id);
   return (
-    first?.value?.name ||
-    first?.base?.name ||
-    first?.value?.title ||
-    first?.base?.title ||
-    (first?.table === 'wallpapers'
-      ? '壁纸更改'
-      : first?.table === 'preferences'
-        ? '桌面设置'
-        : '一组更改')
+    changed?.value?.icon ||
+    shadow.value.find((e) => e.table === 'libraryPages' && e.id === id)?.payload
+      .icon ||
+    'Bookmark'
   );
 }
-function versionLabel(entities: Entity[]) {
+function versionLabel(entities: Entity[], view: string) {
   return (
-    previewPages([entities]).find((p) => p.id === view.value)?.name ||
+    previewPages([entities]).find((p) => p.id === view)?.name ||
     '此版本没有该区域'
   );
 }
@@ -119,6 +125,7 @@ const settings = computed(() =>
     })),
 );
 async function run(action: () => Promise<unknown>) {
+  if (busy.value) return;
   busy.value = true;
   error.value = '';
   message.value = '';
@@ -133,8 +140,9 @@ async function run(action: () => Promise<unknown>) {
 }
 async function apply(side: 'local' | 'cloud') {
   if (side === 'local' && localLayout.value.overflow) return;
-  const record = current.value;
-  if (!record) return;
+  const group = current.value;
+  if (!group || busy.value || resolving.value) return;
+  const members = [...group.records].reverse();
   const map = new Map(
     shadow.value.map((e) => [e.table + ':' + e.id, e.revision]),
   );
@@ -148,65 +156,61 @@ async function apply(side: 'local' | 'cloud') {
       map.get(c.table + ':' + c.id) ?? '0',
     ]),
   );
-  await run(() =>
-    side === 'local'
-      ? retryConflict(record.id, {}, expected, true, resolved)
-      : discardConflict(record.id, expected),
-  );
+  await run(async () => {
+    if (side === 'local') {
+      // Stage the complete menu version durably before acknowledging redundant records.
+      // A failed upload remains in the outbox (or a new conflict), never only in this UI.
+      await retryConflict(members[0]!.id, {}, expected, true, resolved);
+      for (const record of members.slice(1)) await discardConflict(record.id);
+    } else {
+      for (const record of members) await discardConflict(record.id, expected);
+    }
+  });
 }
 </script>
 <template>
   <BaseDialog
     v-model:open="open"
     title="处理同步更改"
-    :width="1480"
+    :width="1680"
+    :height="940"
     solid
     close-button
     ><div class="conflict-content">
       <div class="conflict-heading">
-        <p>左右预览这组更改，选择要应用的版本。</p>
+        <span class="menu-summary">{{ groups.length }} 个待处理菜单</span>
         <button class="secondary" :disabled="busy" @click="run(syncNow)">
           刷新预览
         </button>
       </div>
       <div v-if="records.length" class="conflict-layout">
-        <aside class="conflict-list" aria-label="待处理更改">
+        <aside class="conflict-list" aria-label="冲突菜单">
           <button
-            v-for="record in records"
-            :key="record.id"
-            :class="{ selected: selected === record.id }"
-            :aria-pressed="selected === record.id"
+            v-for="group in groups"
+            :key="group.id"
+            :class="{ selected: selected === group.id }"
+            :aria-pressed="selected === group.id"
             :disabled="busy"
-            @click="selected = record.id"
+            @click="selected = group.id"
           >
-            <strong>{{ name(record) }}</strong
-            ><span>{{ formatSyncTime(record.createdAt) }}</span
-            ><small>{{ conflictChanges(record).length }} 项更改</small>
+            <div class="menu-title">
+              <PageIcon
+                v-for="menu in group.menus"
+                :key="menu"
+                :name="menuIcon(menu)"
+                :size="22"
+                :active="selected === group.id"
+              />
+              <strong>{{ group.name }}</strong>
+            </div>
+            <span>{{ group.changes.length }} 个冲突项</span>
+            <small>{{ formatSyncTime(group.records.at(-1)!.createdAt) }}</small>
           </button>
         </aside>
         <section v-if="current" class="comparison">
           <div class="comparison-info">
-            <p>
-              {{
-                conflictReasons[current.reason] ||
-                '这组更改暂未被云端接受，请预览后选择版本。'
-              }}
-            </p>
-            <div class="preview-controls">
-              <label
-                >预览页面<select v-model="view" aria-label="预览页面">
-                  <option v-for="page in pages" :key="page.id" :value="page.id">
-                    {{ page.name }}
-                  </option>
-                </select></label
-              ><label
-                >缩放<select v-model.number="zoom" aria-label="缩放">
-                  <option :value="1">适应窗口</option>
-                  <option :value="2">放大 2 倍</option>
-                  <option :value="3">放大 3 倍</option>
-                </select></label
-              >
-            </div>
+            <strong>{{ current.name }}</strong>
+            <span class="frame-legend"><i />{{ changes.length }} 个冲突项</span>
           </div>
           <div class="version-panels">
             <article
@@ -227,14 +231,24 @@ async function apply(side: 'local' | 'cloud') {
                     : '当前已同步数据'
                 }}</small>
               </header>
-              <div class="version-location">
-                {{ versionLabel(side === 'local' ? local : cloud) }}
-              </div>
-              <ConflictDesktopPreview
-                :entities="side === 'local' ? local : cloud"
-                :view="view"
-                :zoom="zoom"
-              />
+              <template v-for="view in views" :key="view">
+                <div class="version-location">
+                  {{ versionLabel(side === 'local' ? local : cloud, view) }}
+                </div>
+                <ConflictDesktopPreview
+                  :entities="side === 'local' ? local : cloud"
+                  :view="view"
+                  :highlight-ids="highlightedIds"
+                  :highlight-region="
+                    changes.some(
+                      (c) =>
+                        c.table === 'wallpapers' ||
+                        c.table === 'preferences' ||
+                        (c.table === 'libraryPages' && view === 'page:' + c.id),
+                    )
+                  "
+                />
+              </template>
               <div v-if="settings.length" class="version-settings">
                 <p v-for="setting in settings" :key="setting.id">
                   <span>{{ setting.label }}</span
@@ -242,13 +256,12 @@ async function apply(side: 'local' | 'cloud') {
                 </p>
               </div>
               <footer>
-                <span v-if="current.state === 'resolving'"
-                  >正在同步处理结果</span
+                <span v-if="resolving">正在同步处理结果</span
                 ><button
                   class="apply-version"
                   :disabled="
                     busy ||
-                    current.state === 'resolving' ||
+                    resolving ||
                     (side === 'local' && localLayout.overflow > 0)
                   "
                   @click="apply(side)"
@@ -258,11 +271,8 @@ async function apply(side: 'local' | 'cloud') {
               </footer>
             </article>
           </div>
-          <p class="preview-note">
-            <template v-if="localLayout.overflow"
-              >本机版本布局空间不足，暂时无法应用。</template
-            >
-            预览使用桌面原有网格与材质。未涉及的更改继续保留，预览不会改动数据。
+          <p v-if="localLayout.overflow" class="preview-note">
+            本机版本布局空间不足，暂时无法应用。
           </p>
         </section>
       </div>
@@ -321,6 +331,45 @@ async function apply(side: 'local' | 'cloud') {
 }
 .conflict-list button.selected {
   background: #f5f5f7;
+  border-color: #e4e7ed;
+}
+.menu-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+.menu-title strong {
+  flex: 1;
+}
+.menu-summary {
+  font-size: 13px;
+  color: #82858e;
+}
+.frame-legend {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #82858e;
+}
+.frame-legend i {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #feb43f;
+  border-radius: 3px;
+}
+.conflict-list button {
+  border: 1px solid transparent;
+  border-radius: 12px;
+  transition: background 0.15s;
+}
+.conflict-list button:hover {
+  background: #fafafa;
+}
+.conflict-list button.selected span {
+  color: #a56412;
 }
 .conflict-list strong {
   font-size: 13px;
@@ -339,31 +388,11 @@ async function apply(side: 'local' | 'cloud') {
 }
 .comparison-info {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
-}
-.preview-controls {
-  display: flex;
-  gap: 18px;
-  flex-wrap: wrap;
-}
-.preview-controls label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  color: #727782;
-}
-.preview-controls select {
-  background: #f5f5f7;
-  border: 0;
-  border-radius: 6px;
-  height: 34px;
-  padding: 0 10px;
-  color: #222;
-  max-width: 220px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .version-panels {
   display: grid;
@@ -534,12 +563,6 @@ button:not(:disabled):hover {
   }
   .conflict-heading {
     align-items: flex-start;
-  }
-  .preview-controls {
-    gap: 10px;
-  }
-  .preview-controls select {
-    max-width: 170px;
   }
 }
 </style>

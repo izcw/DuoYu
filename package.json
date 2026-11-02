@@ -40,7 +40,11 @@
     "build:admin": "corepack pnpm@11.25.0 --dir ../DuoYu-Backend/admin build",
     "test:admin:ui": "corepack pnpm@11.25.0 --dir ../DuoYu-Backend test:admin:ui",
     "test:cloud:assets": "node scripts/asset-lifecycle.mjs",
-    "test:upload:ui": "node scripts/upload-lifecycle-ui.mjs"
+    "test:upload:ui": "node scripts/upload-lifecycle-ui.mjs",
+    "test:data-integrity": "node scripts/data-integrity.mjs",
+    "test:library:crud": "node scripts/library-crud-ui.mjs",
+    "test:desktop:interactions": "node scripts/desktop-interactions-ui.mjs",
+    "test:folder:dialog": "node scripts/folder-dialog-ui.mjs"
   },
   "dependencies": {
     "@icon-park/vue-next": "^1.4.2",

@@ -9,8 +9,20 @@ export function normalizeSize(
   height: number,
   kind: LibraryItem['kind'] = 'folder',
 ) {
-  let w = Math.max(1, Math.min(itemMaxColumns(kind), Math.round(width))),
-    h = Math.max(1, Math.min(itemMaxRows(kind), Math.round(height)));
+  let w = Math.max(
+      1,
+      Math.min(
+        itemMaxColumns(kind),
+        Math.round(Number.isFinite(width) ? width : 1),
+      ),
+    ),
+    h = Math.max(
+      1,
+      Math.min(
+        itemMaxRows(kind),
+        Math.round(Number.isFinite(height) ? height : 1),
+      ),
+    );
   if (kind !== 'link' && w * h < 3) {
     if (h > w) h = 3;
     else w = 3;
@@ -52,11 +64,12 @@ export function layoutLibraryItems(
       )
         .flat()
         .every((k) => !occupied.has(k));
-    let x =
-        item.gridX == null
-          ? -1
-          : Math.min(item.gridX, DESKTOP_GRID_COLUMNS - w),
-      y = item.gridY == null ? -1 : Math.min(item.gridY, rows - h);
+    let x = !Number.isFinite(item.gridX)
+        ? -1
+        : Math.min(Math.round(item.gridX!), DESKTOP_GRID_COLUMNS - w),
+      y = !Number.isFinite(item.gridY)
+        ? -1
+        : Math.min(Math.round(item.gridY!), rows - h);
     if (!fits(x, y)) {
       const slot = Array.from(
         { length: DESKTOP_GRID_COLUMNS * rows },

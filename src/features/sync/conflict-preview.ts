@@ -1,4 +1,4 @@
-import type { Entity, Change, Row } from './model';
+import { same, type Entity, type Change, type Row } from './model';
 import type { LibraryItem } from '../../shared/storage/database';
 import { layoutLibraryItems } from '../library/grid-layout';
 import { HOME_GRID_ROWS, LIBRARY_GRID_ROWS } from '../library/grid-config';
@@ -294,4 +294,124 @@ export function previewDefaultPage(changes: Change[]) {
       return 'shortcuts:' + (p.groupId || c.id);
   }
   return 'page:home';
+}
+/** Include both sides of a move, without showing unrelated desktop pages. */
+export function previewConflictViews(changes: Change[], versions: Entity[][]) {
+  const views = new Set<string>();
+  for (const change of changes) {
+    const payloads = [
+      change.value,
+      change.base,
+      ...versions.flatMap((version) =>
+        version
+          .filter(
+            (e) => !e.deleted && e.table === change.table && e.id === change.id,
+          )
+          .map((e) => e.payload),
+      ),
+    ];
+    for (const payload of payloads) {
+      if (payload)
+        views.add(previewDefaultPage([{ ...change, value: payload }]));
+    }
+    if (payloads.every((p) => !p)) views.add(previewDefaultPage([change]));
+  }
+  return views.size ? [...views] : ['page:home'];
+}
+/** Merge chronological edits field by field so a later icon edit cannot erase an earlier rename. */
+export function mergePreviewChanges(groups: Change[][]): Change[] {
+  const merged = new Map<string, Change>();
+  for (const changes of groups)
+    for (const change of changes) {
+      const key = change.table + ':' + change.id;
+      const previous = merged.get(key);
+      if (!previous || !previous.value || !change.value) {
+        merged.set(key, {
+          ...change,
+          value: change.value ? { ...change.value } : null,
+        });
+        continue;
+      }
+      const value = { ...previous.value };
+      for (const field of Object.keys({ ...change.base, ...change.value })) {
+        if (same(change.base?.[field], change.value[field])) continue;
+        if (field in change.value) value[field] = change.value[field];
+        else delete value[field];
+      }
+      merged.set(key, { ...previous, value });
+    }
+  return [...merged.values()];
+}
+
+/** Keep multi-menu operations together rather than splitting an atomic edit. */
+export function groupPreviewMenus<T extends { id: string; createdAt: number }>(
+  records: T[],
+  getChanges: (record: T) => Change[],
+  shadow: Entity[],
+) {
+  const allChanges = mergePreviewChanges(
+    [...records]
+      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+      .map(getChanges),
+  );
+  const versions = [previewVersion(shadow, allChanges, true), shadow];
+  const menuOf = (view: string): string => {
+    if (!view.startsWith('folder:')) return view;
+    let id = view.slice(7);
+    const seen = new Set<string>();
+    while (id && !seen.has(id)) {
+      seen.add(id);
+      const folder = versions
+        .flat()
+        .find((e) => e.table === 'libraryItems' && e.id === id);
+      const payload =
+        folder?.payload ??
+        allChanges.find((c) => c.table === 'libraryItems' && c.id === id)?.base;
+      if (!payload) break;
+      if (!payload.parent) return 'page:' + (payload.pageId || 'home');
+      id = payload.parent;
+    }
+    return 'page:home';
+  };
+  const groups: {
+    id: string;
+    menus: string[];
+    records: T[];
+    changes: Change[];
+    name: string;
+  }[] = [];
+  for (const record of records) {
+    const menus = new Set(
+      previewConflictViews(getChanges(record), versions).map(menuOf),
+    );
+    const matching = groups.filter((group) =>
+      group.menus.some((menu) => menus.has(menu)),
+    );
+    const members = [record, ...matching.flatMap((group) => group.records)];
+    for (const group of matching) {
+      group.menus.forEach((menu) => menus.add(menu));
+      groups.splice(groups.indexOf(group), 1);
+    }
+    const keys = [...menus].sort();
+    members.sort(
+      (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+    );
+    const changes = mergePreviewChanges(members.map(getChanges));
+    const labels = previewPages([
+      previewVersion(shadow, changes, true),
+      shadow,
+    ]);
+    groups.push({
+      id: keys.join('|'),
+      menus: keys,
+      records: members,
+      changes,
+      name: keys
+        .map((key) => labels.find((p) => p.id === key)?.name || '桌面菜单')
+        .join(' · '),
+    });
+  }
+  return groups.sort(
+    (a, b) => b.records.at(-1)!.createdAt - a.records.at(-1)!.createdAt,
+  );
 }

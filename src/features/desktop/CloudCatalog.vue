@@ -1,12 +1,22 @@
 <script setup lang="ts">
+import WallpaperDownloadProgress from '../wallpaper/WallpaperDownloadProgress.vue';
+import {
+  downloadWallpaper,
+  type WallpaperProgress,
+} from '../wallpaper/download-wallpaper';
+import WallpaperSelectionMark from '../wallpaper/WallpaperSelectionMark.vue';
 import { ref, watch } from 'vue';
 import { rpc, syncNow } from '../sync/client';
 import { planJsonImport, commitJsonImport } from '../sync/import-json';
+import { useWallpaperSelection } from '../wallpaper/useWallpaperSelection';
+const selectedWallpaper = useWallpaperSelection();
+const progress = ref<WallpaperProgress>();
 import { importWallpaper } from '../wallpaper/wallpaper-cache';
 const props = defineProps<{ kind: 'templates' | 'widgets' | 'wallpapers' }>();
 const emit = defineEmits<{ add: [kind: 'calendar' | 'weather' | 'note'] }>();
 const rows = ref<any[]>([]),
   busy = ref(false),
+  applying = ref<string>(),
   error = ref(''),
   message = ref(''),
   chosen = ref<any>();
@@ -15,7 +25,7 @@ async function load() {
   error.value = '';
   message.value = '';
   try {
-    rows.value = (await rpc('/v1/catalog/' + props.kind)).items;
+    rows.value = (await rpc('/api/v1/catalog/' + props.kind)).items;
   } catch (e) {
     error.value = e instanceof Error ? e.message : '加载失败';
   } finally {
@@ -31,7 +41,10 @@ watch(
   { immediate: true },
 );
 async function apply(row: any) {
+  if (busy.value) return;
   busy.value = true;
+  applying.value = String(row.id);
+  progress.value = undefined;
   error.value = '';
   try {
     if (props.kind === 'widgets') {
@@ -42,7 +55,7 @@ async function apply(row: any) {
     } else if (props.kind === 'templates') {
       if (row.payload?.format === 'duoyu-template') {
         row.requestId ??= crypto.randomUUID();
-        await rpc('/v1/templates/' + row.id + '/apply', 'POST', {
+        await rpc('/api/v1/templates/' + row.id + '/apply', 'POST', {
           request_id: row.requestId,
         });
         await syncNow();
@@ -58,20 +71,20 @@ async function apply(row: any) {
         !/^\/catalog-assets\/[0-9a-f]{64}$/.test(url.pathname)
       )
         throw Error('壁纸地址无效');
-      const r = await fetch(url, { credentials: 'omit', redirect: 'error' });
-      if (!r.ok) throw Error('壁纸下载失败');
-      if (Number(r.headers.get('content-length') || 0) > 20 * 1048576)
-        throw Error('壁纸超过20MB');
-      const blob = await r.blob();
-      if (blob.size > 20 * 1048576) throw Error('壁纸超过20MB');
-      await importWallpaper(blob);
-      message.value = '壁纸已应用';
+      const blob = await downloadWallpaper(
+        url,
+        (value) => (progress.value = value),
+        { credentials: 'omit', redirect: 'error' },
+      );
+      await importWallpaper(blob, 'cloud:' + row.id);
+      message.value = '';
     }
     chosen.value = undefined;
   } catch (e) {
     error.value = e instanceof Error ? e.message : '操作失败';
   } finally {
     busy.value = false;
+    applying.value = undefined;
   }
 }
 </script>
@@ -81,7 +94,7 @@ async function apply(row: any) {
       {{ error }} <button @click="load">重新加载</button>
     </p>
     <p v-if="message" role="status">{{ message }}</p>
-    <p v-if="busy">正在处理…</p>
+    <p v-if="busy && kind !== 'wallpapers'">正在处理…</p>
     <div v-if="chosen" class="catalog-confirm">
       <strong>{{ chosen.name }}</strong>
       <p>{{ chosen.description }}</p>
@@ -102,18 +115,44 @@ async function apply(row: any) {
         class="store-card glass-surface"
         :class="kind === 'wallpapers' ? 'wallpaper-card' : 'store-widget-card'"
         :disabled="busy"
-        @click="chosen = row"
+        :aria-pressed="
+          kind === 'wallpapers'
+            ? selectedWallpaper === 'cloud:' + row.id
+            : undefined
+        "
+        @click="kind === 'wallpapers' ? apply(row) : (chosen = row)"
       >
         <img
           v-if="kind === 'wallpapers'"
-          :src="row.payload.url"
+          :src="row.payload.preview_url || row.payload.url + '?preview=1'"
           :alt="row.name"
           loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
         /><span v-else class="tool-symbol">{{
           kind === 'templates' ? '▤' : '▦'
-        }}</span
-        ><strong>{{ row.name }}</strong>
+        }}</span>
+        <span v-if="kind === 'wallpapers'" class="wallpaper-caption"
+          ><strong>{{ row.name }}</strong
+          ><WallpaperDownloadProgress
+            v-if="applying === String(row.id)"
+            :progress="progress"
+          /><small v-else>{{ row.description }}</small></span
+        >
+        <strong v-else>{{ row.name }}</strong>
+        <WallpaperSelectionMark
+          :selected="
+            kind === 'wallpapers' && selectedWallpaper === 'cloud:' + row.id
+          "
+        />
       </button>
+    </div>
+    <div
+      v-if="kind === 'wallpapers'"
+      class="wallpaper-load-status"
+      aria-live="polite"
+    >
+      <span v-if="busy && applying === undefined">正在加载壁纸…</span>
     </div>
     <p v-if="!busy && !error && !rows.length">暂无已发布资源</p>
   </div>

@@ -10,6 +10,8 @@ import ClockWidget from '../../features/clock/ClockWidget.vue';
 import SearchBox from '../../features/search/SearchBox.vue';
 import GlassModeSwitch from '../../features/desktop/GlassModeSwitch.vue';
 import DesktopDock from '../../features/desktop/DesktopDock.vue';
+import SettingsDialog from '../../features/desktop/SettingsDialog.vue';
+import { settingsPage } from '../../features/desktop/settings-state';
 import AccountButton from '../../features/auth/AccountButton.vue';
 import BottomWidgets from '../../features/desktop/BottomWidgets.vue';
 import WallpaperWheel from '../../features/shortcuts/WallpaperWheel.vue';
@@ -21,6 +23,13 @@ const workspaceOpen = ref(false);
 const { page, root, go } = useDesktopPages(() => workspaceOpen.value, stepPage);
 const libraryPage = ref(
   accountStorage.getItem('duoyu-library-page') || 'default',
+);
+watch(
+  [page, libraryPage],
+  ([current, id]) => {
+    settingsPage.value = current === 0 ? 'home' : id;
+  },
+  { immediate: true },
 );
 watch(libraryPage, (value) =>
   accountStorage.setItem('duoyu-library-page', value),
@@ -90,6 +99,7 @@ function stepPage(direction: number) {
 <template>
   <WallpaperBackground />
   <AccountButton />
+  <SettingsDialog />
   <Teleport to="body">
     <div
       class="desktop-library-backdrop glass-focus-layer"

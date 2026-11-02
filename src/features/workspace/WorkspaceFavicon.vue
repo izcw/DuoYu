@@ -6,6 +6,7 @@ import TextIcon from '../../shared/components/base/TextIcon.vue';
 import { computed, ref, watch, watchEffect, onMounted, onUnmounted } from 'vue';
 import { assetObjectUrl } from '../sync/assets';
 import { browser } from 'wxt/browser';
+import { automaticIcon } from '../library/auto-icon';
 const props = defineProps<{
   src?: string;
   title: string;
@@ -58,6 +59,27 @@ watchEffect((cleanup) => {
 const customFailed = ref(false);
 const failed = ref(false);
 const hdFailed = ref(false);
+const discoveredIcon = ref('');
+watch(
+  () => [props.pageUrl, props.refreshKey, props.src] as const,
+  async ([url, refresh], _, cleanup) => {
+    let current = true;
+    cleanup(() => {
+      current = false;
+    });
+    discoveredIcon.value = '';
+    if (
+      !url ||
+      !/^https?:\/\//i.test(url) ||
+      (appearance.value && appearance.value.mode !== 'auto') ||
+      (!appearance.value && props.src)
+    )
+      return;
+    const icon = await automaticIcon(url, refresh);
+    if (current) discoveredIcon.value = icon;
+  },
+  { immediate: true },
+);
 const assetReference = computed(() =>
   appearance.value?.mode === 'upload' ? appearance.value.image : props.src,
 );
@@ -95,7 +117,7 @@ const source = computed(() => {
     : props.src || '';
   if (
     !customFailed.value &&
-    /^(https?:\/\/|data:image\/|\/images\/)/i.test(value) &&
+    /^(https?:\/\/|data:image\/|\/(?:images|icons)\/)/i.test(value) &&
     value.length < 200000
   )
     return value;
@@ -106,6 +128,7 @@ const source = computed(() => {
       (host === 'douyin.com' || host.endsWith('.douyin.com'))
     )
       return '/images/douyin-hd.png';
+    if (discoveredIcon.value) return discoveredIcon.value;
     const url = new URL('/_favicon/', browser.runtime.getURL('/'));
     url.searchParams.set('pageUrl', props.pageUrl);
     url.searchParams.set('size', '128');
@@ -150,6 +173,10 @@ onUnmounted(() => {
   filterRequest++;
 });
 function onError() {
+  if (discoveredIcon.value && source.value === discoveredIcon.value) {
+    discoveredIcon.value = '';
+    return;
+  }
   if (source.value === '/images/douyin-hd.png') {
     hdFailed.value = true;
     return;

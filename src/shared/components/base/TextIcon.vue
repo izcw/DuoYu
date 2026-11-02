@@ -44,11 +44,8 @@ const characters = computed(() =>
 );
 const rows = computed(() => {
   const chars = characters.value;
-  if (!hasChinese(chars.join(''))) {
-    return chars.length <= 5 ? [chars] : [chars.slice(0, 5), chars.slice(5)];
-  }
   if (chars.length <= 3) return [chars];
-  const split = chars.length === 4 ? 2 : 3;
+  const split = Math.ceil(chars.length / 2);
   return [chars.slice(0, split), chars.slice(split)];
 });
 function selected(row: number, position: number) {
@@ -66,7 +63,7 @@ const fontSize = computed(() => {
   return (
     (hasChinese(characters.value.join(''))
       ? [54, 54, 34, 24, 29, 23, 23][count]
-      : [54, 54, 40, 32, 25, 21][Math.min(count, 5)]) + 'cqw'
+      : [54, 54, 40, 32, 25, 21][rows.value[0]!.length]) + 'cqw'
   );
 });
 </script>
@@ -75,7 +72,13 @@ const fontSize = computed(() => {
     class="text-icon"
     :class="{ editing, selecting: editing && selectionStart !== selectionEnd }"
   >
-    <span class="text-icon-lines" :style="{ fontSize }">
+    <span
+      class="text-icon-lines"
+      :class="{
+        'compact-lines': rows.length > 1 && !hasChinese(characters.join('')),
+      }"
+      :style="{ fontSize }"
+    >
       <span v-for="(row, index) in rows" :key="index" class="text-icon-row">
         <span
           v-if="editing && !row.length"
@@ -124,14 +127,12 @@ const fontSize = computed(() => {
   gap: 0.06em;
   white-space: nowrap;
 }
+.text-icon-lines.compact-lines {
+  line-height: 0.9;
+  gap: 0;
+}
 .text-icon-row:has(> :only-child) {
   justify-content: center;
-}
-</style>
-
-<style scoped>
-.text-icon-row:last-child:not(:first-child) {
-  justify-content: space-between;
 }
 </style>
 

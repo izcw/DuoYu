@@ -1,4 +1,12 @@
 <script setup lang="ts">
+import MenuAdd from '@icon-park/vue-next/es/icons/Add';
+import MenuFolder from '@icon-park/vue-next/es/icons/Folder';
+import MenuAllApplication from '@icon-park/vue-next/es/icons/AllApplication';
+import MenuApplicationMenu from '@icon-park/vue-next/es/icons/ApplicationMenu';
+import MenuPicture from '@icon-park/vue-next/es/icons/Picture';
+import MenuSearch from '@icon-park/vue-next/es/icons/Search';
+import MenuDownload from '@icon-park/vue-next/es/icons/Download';
+import MenuSetting from '@icon-park/vue-next/es/icons/Setting';
 import { accountStorage } from '../../shared/storage/account';
 import { truncateLinkTitle } from './link-title';
 import LinkIconEditor from './LinkIconEditor.vue';
@@ -16,8 +24,8 @@ import {
 import './library.css';
 import { isWallpaperBlank } from '../wallpaper/blank-area';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
+import { openSettings } from '../desktop/settings-state';
 import DesktopTools from '../desktop/DesktopTools.vue';
-import { backupDesktop } from '../desktop/desktop-backup';
 import LibraryGrid from './LibraryGrid.vue';
 import { LIBRARY_GRID_ROWS } from './grid-config';
 import { mergeLibraryLinks } from './library';
@@ -41,7 +49,7 @@ const props = withDefaults(
 const board = ref<HTMLElement>();
 const gridView = ref<InstanceType<typeof LibraryGrid>>();
 const insertionPoint = ref<{ x: number; y: number }>();
-const tool = ref<'' | 'widgets' | 'wallpaper' | 'search' | 'settings'>('');
+const tool = ref<'' | 'widgets' | 'wallpaper' | 'search'>('');
 const automatic = ref(
   accountStorage.getItem('duoyu-layout-' + props.pageId) === 'auto',
 );
@@ -127,10 +135,8 @@ function contextAction(
 ) {
   context.value = undefined;
   if (action === 'layout') automatic.value = !automatic.value;
-  else if (action === 'backup')
-    void run(async () => {
-      await backupDesktop();
-    });
+  else if (action === 'backup' || action === 'settings')
+    openSettings(action === 'backup' ? 'backup' : 'general', props.pageId);
   else if (action === 'link' || action === 'folder')
     void edit(undefined, action);
   else tool.value = action;
@@ -262,6 +268,29 @@ function truncateName(event: Event) {
 }
 const titleNotice = ref('');
 const fetchingTitle = ref(false);
+const fetchingMetadata = ref(false);
+const iconEditor = ref<InstanceType<typeof LinkIconEditor>>();
+async function fetchMetadata() {
+  if (fetchingMetadata.value || fetchingTitle.value || busy.value) return;
+  try {
+    const url = new URL(draft.value.url.trim());
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      url.username ||
+      url.password
+    )
+      throw new Error();
+  } catch {
+    titleNotice.value = '请输入完整的 http:// 或 https:// 网址';
+    return;
+  }
+  fetchingMetadata.value = true;
+  try {
+    await Promise.all([fetchTitle(true), iconEditor.value?.refreshAutomatic()]);
+  } finally {
+    fetchingMetadata.value = false;
+  }
+}
 let titleRequest = 0;
 let lastAutoTitle = '';
 let pendingTitleUrl = '';
@@ -327,8 +356,9 @@ async function fetchTitle(force = false) {
   }
 }
 async function submit() {
-  await fetchTitle();
-  void run(async () => {
+  // Acquire the busy guard before any asynchronous title lookup or write.
+  // saveLibraryItem resolves an empty title itself, using the submitted snapshot.
+  await run(async () => {
     await saveLibraryItem(
       {
         ...draft.value,
@@ -486,26 +516,38 @@ onUnmounted(() => subscription?.unsubscribe());
         @submit.prevent="submit"
       >
         <label v-if="draft.kind === 'link'"
-          >网址<span class="input-with-icon"
-            ><svg
-              class="input-leading-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              aria-hidden="true"
+          >网址<span class="title-input-row"
+            ><span class="input-with-icon"
+              ><svg
+                class="input-leading-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <ellipse cx="12" cy="12" rx="4" ry="9" />
+                <path d="M3 12h18" /></svg
+              ><input
+                v-model="draft.url"
+                aria-label="收藏网址"
+                @input="fetchTitle()"
+                placeholder="https://"
+                type="url"
+                required /></span
+            ><button
+              type="button"
+              class="fetch-title"
+              :disabled="
+                fetchingMetadata || fetchingTitle || busy || !draft.url.trim()
+              "
+              @click="fetchMetadata"
             >
-              <circle cx="12" cy="12" r="9" />
-              <ellipse cx="12" cy="12" rx="4" ry="9" />
-              <path d="M3 12h18" /></svg
-            ><input
-              v-model="draft.url"
-              aria-label="收藏网址"
-              @input="fetchTitle()"
-              placeholder="https://"
-              type="url"
-              required /></span
-        ></label>
+              {{ fetchingMetadata ? '正在获取' : '获取标题和图标' }}
+            </button></span
+          ></label
+        >
         <div class="title-field">
           <label for="library-link-title">名称</label>
           <div class="title-input-row">
@@ -520,14 +562,6 @@ onUnmounted(() => subscription?.unsubscribe());
                 @compositionend="truncateName"
                 placeholder="留空自动获取"
             /></span>
-            <button
-              type="button"
-              class="fetch-title"
-              :disabled="fetchingTitle || !draft.url.trim()"
-              @click="fetchTitle(true)"
-            >
-              {{ fetchingTitle ? '获取中…' : '获取标题' }}
-            </button>
           </div>
           <p v-if="titleNotice" class="title-status" role="status">
             {{ titleNotice }}
@@ -535,6 +569,7 @@ onUnmounted(() => subscription?.unsubscribe());
         </div>
         <template v-if="draft.kind === 'link'">
           <LinkIconEditor
+            ref="iconEditor"
             v-model="draft.icon"
             :url="draft.url"
             :title="draft.name"
@@ -650,7 +685,12 @@ onUnmounted(() => subscription?.unsubscribe());
           :disabled="loading || busy"
           @click="contextAction('link')"
         >
-          ＋ 添加网址
+          <MenuAdd
+            :size="18"
+            :stroke-width="2"
+            fill="currentColor"
+            aria-hidden="true"
+          /><span>添加网址</span>
         </button>
         <button
           role="menuitem"
@@ -658,19 +698,25 @@ onUnmounted(() => subscription?.unsubscribe());
           :disabled="loading || busy"
           @click="contextAction('folder')"
         >
-          新建文件夹
+          <MenuFolder
+            :size="18"
+            :stroke-width="2"
+            fill="currentColor"
+            aria-hidden="true"
+          /><span>新建文件夹</span>
         </button>
         <button
           v-for="action in [
-            { id: 'widgets', name: '组件商店' },
+            { id: 'widgets', name: '组件商店', icon: MenuAllApplication },
             {
               id: 'layout',
+              icon: MenuApplicationMenu,
               name: automatic ? '切换为自由布局' : '切换为自动布局',
             },
-            { id: 'wallpaper', name: '换壁纸' },
-            { id: 'search', name: '图标搜索' },
-            { id: 'backup', name: '立即备份' },
-            { id: 'settings', name: '设置' },
+            { id: 'wallpaper', name: '换壁纸', icon: MenuPicture },
+            { id: 'search', name: '图标搜索', icon: MenuSearch },
+            { id: 'backup', name: '立即备份', icon: MenuDownload },
+            { id: 'settings', name: '设置', icon: MenuSetting },
           ] as const"
           :key="action.id"
           role="menuitem"
@@ -678,7 +724,13 @@ onUnmounted(() => subscription?.unsubscribe());
           :disabled="busy"
           @click="contextAction(action.id)"
         >
-          {{ action.name }}
+          <component
+            :is="action.icon"
+            :size="18"
+            :stroke-width="2"
+            fill="currentColor"
+            aria-hidden="true"
+          /><span>{{ action.name }}</span>
         </button>
       </div>
     </Teleport>
@@ -688,6 +740,15 @@ onUnmounted(() => subscription?.unsubscribe());
 <style scoped>
 .library-context-menu {
   outline: none;
+}
+.library-context-menu button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.library-context-menu button > :first-child {
+  display: inline-flex;
+  flex: 0 0 18px;
 }
 .floating-editor {
   display: flex;

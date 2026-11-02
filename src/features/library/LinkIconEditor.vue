@@ -5,6 +5,7 @@ import { DESKTOP_GRID_CELL_WIDTH } from './grid-config';
 import TextIcon from '../../shared/components/base/TextIcon.vue';
 import { computed, ref, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import WorkspaceFavicon from '../workspace/WorkspaceFavicon.vue';
+import { automaticIcon } from './auto-icon';
 const previewRegion = ref<HTMLElement>();
 const wallpaperPosition = ref({});
 let frame = 0;
@@ -101,6 +102,11 @@ function automatic() {
   mode.value = 'auto';
   refresh.value++;
 }
+async function refreshAutomatic() {
+  automatic();
+  await automaticIcon(props.url, refresh.value);
+}
+defineExpose({ refreshAutomatic });
 const colorRows = [
   {
     name: '中性色',
@@ -269,7 +275,7 @@ async function choose(event: Event) {
   <fieldset>
     <legend>图标</legend>
     <div class="icon-type-hints" aria-hidden="true">
-      <span>{{ mode === 'auto' ? '点击重新获取' : '自动获取' }}</span>
+      <span>自动获取</span>
       <span>{{ mode === 'text' ? '点击修改' : '文字图标' }}</span>
       <span>{{ mode === 'upload' ? '点击上传' : '自定义上传' }}</span>
     </div>
@@ -292,10 +298,10 @@ async function choose(event: Event) {
           <button
             type="button"
             :aria-pressed="mode === 'auto' && material === rowMaterial"
-            title="自动获取，点击重新获取"
+            title="选择自动图标"
             @click="
               material = rowMaterial;
-              automatic();
+              mode = 'auto';
             "
           >
             <span
@@ -304,12 +310,12 @@ async function choose(event: Event) {
                 '--icon-foreground': iconForeground(rowMaterial, previewColor),
               }"
               class="cell-icon"
-              ><img
+              ><WorkspaceFavicon
                 v-if="!url.trim()"
                 class="default-site-logo"
                 src="/icons/128.png"
-                alt="默认扩展图标"
-                draggable="false" />
+                title="默认扩展图标"
+                :picture-filter="previewPictureFilter || '#808080'" />
               <WorkspaceFavicon
                 :picture-filter="previewPictureFilter"
                 v-else
@@ -481,73 +487,78 @@ async function choose(event: Event) {
     />
     <p v-if="error" role="alert">{{ error }}</p>
   </fieldset>
-  <fieldset>
-    <legend>背景颜色</legend>
-    <div
-      class="color-grid"
-      aria-label="背景颜色"
-      @pointerleave="hoveredColor = null"
-      @focusout="hoveredColor = null"
-    >
+  <div class="color-controls-row">
+    <fieldset>
+      <legend>背景颜色</legend>
       <div
-        v-for="row in colorRows"
-        :key="row.name"
-        class="color-row"
-        role="group"
-        :aria-label="row.name"
+        class="color-grid"
+        aria-label="背景颜色"
+        @pointerleave="hoveredColor = null"
+        @focusout="hoveredColor = null"
       >
-        <button
-          v-for="(value, index) in row.values"
-          :key="value"
-          type="button"
-          :class="{ transparent: !value }"
-          :style="{ backgroundColor: value || '#fff', color: swatchInk(value) }"
-          :title="swatchName(row, index)"
-          :aria-label="swatchName(row, index)"
-          :aria-pressed="color === value"
-          @pointerenter="hoveredColor = value"
-          @focus="hoveredColor = value"
-          @click="color = value"
+        <div
+          v-for="row in colorRows"
+          :key="row.name"
+          class="color-row"
+          role="group"
+          :aria-label="row.name"
         >
-          {{ color === value ? '✓' : '' }}
-        </button>
+          <button
+            v-for="(value, index) in row.values"
+            :key="value"
+            type="button"
+            :class="{ transparent: !value }"
+            :style="{
+              backgroundColor: value || '#fff',
+              color: swatchInk(value),
+            }"
+            :title="swatchName(row, index)"
+            :aria-label="swatchName(row, index)"
+            :aria-pressed="color === value"
+            @pointerenter="hoveredColor = value"
+            @focus="hoveredColor = value"
+            @click="color = value"
+          >
+            {{ color === value ? '✓' : '' }}
+          </button>
+        </div>
       </div>
-    </div>
-  </fieldset>
+    </fieldset>
 
-  <fieldset v-if="mode !== 'text'">
-    <legend>图片滤镜</legend>
-    <div
-      class="filter-grid color-grid"
-      role="group"
-      aria-label="图片滤镜"
-      @pointerleave="hoveredPictureFilter = null"
-      @focusout="hoveredPictureFilter = null"
-    >
+    <fieldset v-if="mode !== 'text'">
+      <legend>图片滤镜</legend>
       <div
-        v-for="[value, label] in filterColors"
-        :key="value"
-        class="color-row"
+        class="filter-grid color-grid"
+        role="group"
+        aria-label="图片滤镜"
+        @pointerleave="hoveredPictureFilter = null"
+        @focusout="hoveredPictureFilter = null"
       >
-        <button
-          type="button"
-          :class="{ transparent: !value }"
-          :style="{
-            backgroundColor: value || '#fff',
-            color: swatchInk(value || ''),
-          }"
-          :aria-label="`图片滤镜：${label}`"
-          :title="label"
-          :aria-pressed="pictureFilter === value"
-          @pointerenter="hoveredPictureFilter = value || ''"
-          @focus="hoveredPictureFilter = value || ''"
-          @click="selectPictureFilter(value || '')"
+        <div
+          v-for="[value, label] in filterColors"
+          :key="value"
+          class="color-row"
         >
-          {{ pictureFilter === value ? '✓' : '' }}
-        </button>
+          <button
+            type="button"
+            :class="{ transparent: !value }"
+            :style="{
+              backgroundColor: value || '#fff',
+              color: swatchInk(value || ''),
+            }"
+            :aria-label="`图片滤镜：${label}`"
+            :title="label"
+            :aria-pressed="pictureFilter === value"
+            @pointerenter="hoveredPictureFilter = value || ''"
+            @focus="hoveredPictureFilter = value || ''"
+            @click="selectPictureFilter(value || '')"
+          >
+            {{ pictureFilter === value ? '✓' : '' }}
+          </button>
+        </div>
       </div>
-    </div>
-  </fieldset>
+    </fieldset>
+  </div>
 
   <fieldset v-if="mode !== 'text'" class="icon-padding-control">
     <legend>图标内边距</legend>
@@ -586,6 +597,16 @@ fieldset {
   padding: 0;
   margin: 0;
   min-width: 0;
+}
+.color-controls-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.color-controls-row > fieldset {
+  flex: 0 0 auto;
 }
 fieldset + fieldset {
   margin-top: 0;
@@ -711,8 +732,10 @@ p[role='alert'] {
   border-radius: 8px;
   box-sizing: border-box;
   display: grid;
-  width: min(100%, 416px);
-  grid-template-columns: repeat(13, minmax(0, 1fr));
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  grid-template-columns: repeat(13, 24px);
   gap: 0;
 }
 .color-row {
@@ -721,9 +744,11 @@ p[role='alert'] {
   gap: 0;
 }
 .color-row button {
-  width: 100%;
+  width: 24px;
   aspect-ratio: 1;
-  height: auto;
+  height: 24px;
+  flex-shrink: 0;
+  box-sizing: border-box;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -791,9 +816,12 @@ p[role='alert'] {
 .icon-options .cell-icon > .default-site-logo {
   width: 100%;
   height: 100%;
+  background: transparent;
+}
+.icon-options .cell-icon > .default-site-logo :deep(img) {
+  width: 100%;
+  height: 100%;
   object-fit: contain;
-  filter: grayscale(1);
-  opacity: 0.65;
 }
 .icon-options .cell-icon > .upload-placeholder {
   width: 32px;
@@ -810,8 +838,8 @@ p[role='alert'] {
 
 <style scoped>
 .filter-grid.color-grid {
-  grid-template-columns: repeat(16, minmax(0, 1fr));
-  width: min(100%, 512px);
+  grid-template-columns: repeat(4, 24px);
+  grid-template-rows: repeat(4, 24px);
 }
 </style>
 
@@ -894,7 +922,8 @@ p[role='alert'] {
   position: absolute;
   bottom: calc(100% + 3px);
   left: calc(9px + (100% - 18px) * var(--padding-fraction));
-  transform: translateX(-50%) translateY(3px);
+  /* Keep the whole label inside the track at both endpoints. */
+  transform: translateX(calc(-100% * var(--padding-fraction))) translateY(3px);
   padding: 4px 8px;
   border-radius: 7px;
   background: #000000;
@@ -911,7 +940,7 @@ p[role='alert'] {
 .padding-slider:hover .padding-tooltip,
 .padding-slider:focus-within .padding-tooltip {
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
+  transform: translateX(calc(-100% * var(--padding-fraction))) translateY(0);
 }
 </style>
 

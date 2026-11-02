@@ -1,6 +1,16 @@
 <script setup lang="ts">
+import WallpaperDownloadProgress from './WallpaperDownloadProgress.vue';
+import {
+  downloadWallpaper,
+  type WallpaperProgress,
+} from './download-wallpaper';
+import WallpaperSelectionMark from './WallpaperSelectionMark.vue';
 import { nextTick, onMounted, onUnmounted, ref } from 'vue';
+import { useWallpaperSelection } from './useWallpaperSelection';
+const selectedWallpaper = useWallpaperSelection();
+const progress = ref<WallpaperProgress>();
 import { importWallpaper } from './wallpaper-cache';
+import { getBingOriginalUrl } from './wallpaper';
 interface Wallpaper {
   id: number;
   title: string;
@@ -58,18 +68,42 @@ async function load() {
     }
   }
 }
+function isSelected(item: Wallpaper) {
+  if (selectedWallpaper.value === 'bing:' + item.id) return true;
+  // Preserve selections saved before gallery IDs replaced download URLs.
+  if (!selectedWallpaper.value.startsWith('bing:https://')) return false;
+  try {
+    const saved = new URL(selectedWallpaper.value.slice(5));
+    const current = new URL(item.url);
+    const identity = (url: URL) =>
+      (url.searchParams.get('id') || url.pathname).replace(
+        /_(?:\d+x\d+|UHD)(?=\.)/i,
+        '',
+      );
+    return identity(saved) === identity(current);
+  } catch {
+    return false;
+  }
+}
 async function apply(item: Wallpaper) {
   if (applying.value !== undefined) return;
   applying.value = item.id;
+  progress.value = undefined;
   message.value = '';
   try {
-    const response = await fetch(item.url, {
-      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]),
-      referrerPolicy: 'no-referrer',
-    });
-    if (!response.ok) throw new Error();
-    await importWallpaper(await response.blob());
-    message.value = `已应用：${item.title}`;
+    const blob = await downloadWallpaper(
+      getBingOriginalUrl(item.url),
+      (value) => (progress.value = value),
+      {
+        signal: AbortSignal.any([
+          controller.signal,
+          AbortSignal.timeout(20000),
+        ]),
+        referrerPolicy: 'no-referrer',
+      },
+    );
+    await importWallpaper(blob, 'bing:' + item.id);
+    message.value = '';
   } catch {
     if (!disposed) message.value = '壁纸应用失败，请重试';
   } finally {
@@ -100,6 +134,7 @@ onUnmounted(() => {
       :disabled="applying !== undefined"
       :aria-label="`应用壁纸 ${item.title}`"
       :title="item.copyright"
+      :aria-pressed="isSelected(item)"
       @click="apply(item)"
     >
       <img
@@ -109,11 +144,13 @@ onUnmounted(() => {
         decoding="async"
         referrerpolicy="no-referrer"
       />
+      <WallpaperSelectionMark :selected="isSelected(item)" />
       <span class="wallpaper-caption"
         ><strong>{{ item.title }}</strong
-        ><small>{{
-          applying === item.id ? '正在应用…' : item.datetime
-        }}</small></span
+        ><WallpaperDownloadProgress
+          v-if="applying === item.id"
+          :progress="progress"
+        /><small v-else>{{ item.datetime }}</small></span
       >
     </button>
   </div>
@@ -130,15 +167,3 @@ onUnmounted(() => {
     <span v-else-if="!more">已显示全部壁纸</span>
   </div>
 </template>
-<style scoped>
-.wallpaper-load-status {
-  min-height: 32px;
-  text-align: center;
-  font-size: 12px;
-  opacity: 0.8;
-}
-.wallpaper-load-status button {
-  color: inherit;
-  padding: 8px 16px;
-}
-</style>

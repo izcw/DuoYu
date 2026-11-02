@@ -271,9 +271,15 @@ export async function planJsonImport(
     for (const r of array(raw.preferences)) {
       if (
         object(r) &&
-        (['glassMode', 'searchEngine', 'dockOrder', 'wallpaperMode'].includes(
-          r.id,
-        ) ||
+        ([
+          'glassMode',
+          'searchEngine',
+          'dockOrder',
+          'wallpaperMode',
+          'wallpaperSelection',
+          'savedWallpaper:store',
+          'savedWallpaper:upload',
+        ].includes(r.id) ||
           String(r.id).startsWith('layout:'))
       )
         tables.preferences!.push({ id: r.id, value: r.value });

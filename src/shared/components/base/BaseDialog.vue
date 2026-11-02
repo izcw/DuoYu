@@ -7,6 +7,7 @@ const props = defineProps<{
   solid?: boolean;
   closeButton?: boolean;
   width?: number;
+  height?: number;
   aspectRatio?: number;
 }>();
 const emit = defineEmits<{ 'update:open': [value: boolean] }>();
@@ -66,7 +67,14 @@ function escapeOutside(event: KeyboardEvent) {
     props.open &&
     event.key === 'Escape' &&
     !panel.value?.contains(event.target as Node) &&
-    [...document.querySelectorAll('.base-dialog')].at(-1) === panel.value
+    [...document.querySelectorAll<HTMLElement>('.base-dialog-backdrop')]
+      .sort(
+        (a, b) =>
+          Number(getComputedStyle(a).zIndex) -
+          Number(getComputedStyle(b).zIndex),
+      )
+      .at(-1)
+      ?.contains(panel.value || null)
   )
     key(event);
 }
@@ -81,6 +89,7 @@ onUnmounted(() => {
     ><div
       v-if="open"
       class="base-dialog-backdrop"
+      :class="{ 'folder-dialog-backdrop': folder }"
       @pointerdown.self="close"
       @keydown="key"
     >
@@ -88,19 +97,24 @@ onUnmounted(() => {
         ref="panel"
         class="base-dialog"
         :style="
-          aspectRatio
+          height
             ? {
-                width: `min(${width || 1160}px, calc(100vw - 32px), calc((100svh - 32px) * ${aspectRatio}))`,
-                aspectRatio: String(aspectRatio),
+                width: `min(${width || 1160}px, calc(100vw - 32px))`,
+                height: `min(${height}px, calc(100svh - 32px))`,
               }
-            : width
-              ? { width: `min(${width}px, calc(100vw - 32px))` }
-              : undefined
+            : aspectRatio
+              ? {
+                  width: `min(${width || 1160}px, calc(100vw - 32px), calc((100svh - 32px) * ${aspectRatio}))`,
+                  aspectRatio: String(aspectRatio),
+                }
+              : width
+                ? { width: `min(${width}px, calc(100vw - 32px))` }
+                : undefined
         "
         :class="[
           folder ? 'folder-dialog' : solid ? 'solid-dialog' : 'glass-surface',
           {
-            'fixed-ratio-dialog': aspectRatio,
+            'fixed-ratio-dialog': aspectRatio || height,
             'closeable-dialog': closeButton,
           },
         ]"
@@ -144,6 +158,9 @@ onUnmounted(() => {
   place-items: center;
   backdrop-filter: blur(8px);
 }
+.folder-dialog-backdrop {
+  z-index: 2147483001;
+}
 .base-dialog {
   width: min(360px, calc(100vw - 32px));
   max-height: calc(100svh - 32px);
@@ -162,6 +179,9 @@ onUnmounted(() => {
 }
 .fixed-ratio-dialog > h2 {
   flex-shrink: 0;
+}
+.fixed-ratio-dialog > .dialog-scroll-body {
+  flex: 1;
 }
 h2 {
   margin: 0 0 20px;

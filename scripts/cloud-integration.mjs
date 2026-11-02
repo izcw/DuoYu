@@ -500,6 +500,7 @@ try {
   await database.delete();
   await new Promise((r) => server.close(r));
   for (const table of [
+    'sync_user_backups',
     'sync_assets',
     'sync_asset_deletions',
     'sync_conflicts',

@@ -19,10 +19,11 @@ let displayedSource = '';
 const cachedWallpaper = readWallpaperForDisplay();
 let pending = false;
 let retryAfter = 0;
+let revision = 0;
 
-async function display(record: WallpaperRecord) {
+async function display(record: WallpaperRecord, request: number) {
   const next = await decodeWallpaper(record.blob);
-  if (controller.signal.aborted) {
+  if (controller.signal.aborted || request !== revision) {
     URL.revokeObjectURL(next);
     return;
   }
@@ -50,8 +51,15 @@ async function update() {
   )
     return;
   pending = true;
+  const request = revision;
   try {
-    await display(await refreshWallpaper(next, controller.signal));
+    const record = await refreshWallpaper(next, controller.signal);
+    if (
+      request !== revision ||
+      accountStorage.getItem('duoyu-wallpaper-mode') === 'custom'
+    )
+      return;
+    await display(record, request);
     retryAfter = 0;
   } catch {
     if (!controller.signal.aborted) {
@@ -60,19 +68,15 @@ async function update() {
     }
   } finally {
     pending = false;
+    if (request !== revision && !controller.signal.aborted) void update();
   }
 }
 async function wallpaperChanged() {
+  const request = ++revision;
   if (accountStorage.getItem('duoyu-wallpaper-mode') === 'custom') {
     const cached = await readWallpaperForDisplay();
-    if (cached) await display(cached);
-    else {
-      accountStorage.removeItem('duoyu-wallpaper-mode');
-      accountStorage.removeItem('duoyu:wallpaper-preview');
-      displayedSource = '';
-      retryAfter = 0;
-      await update();
-    }
+    // Missing cloud assets are temporary; never reset the user's chosen mode.
+    if (cached && request === revision) await display(cached, request);
   } else {
     displayedSource = '';
     retryAfter = 0;
@@ -84,11 +88,14 @@ function online() {
   void update();
 }
 onMounted(async () => {
+  window.addEventListener('online', online);
+  window.addEventListener('duoyu-wallpaper-change', wallpaperChanged);
+  const request = revision;
   const cached = await cachedWallpaper;
   if (controller.signal.aborted) return;
   if (cached) {
     try {
-      await display(cached);
+      await display(cached, request);
     } catch {
       // Fall through to the network if the stored image cannot be decoded.
     }
@@ -96,8 +103,6 @@ onMounted(async () => {
   if (controller.signal.aborted) return;
   void update();
   timer = setInterval(() => void update(), 60_000);
-  window.addEventListener('online', online);
-  window.addEventListener('duoyu-wallpaper-change', wallpaperChanged);
 });
 onUnmounted(() => {
   controller.abort();

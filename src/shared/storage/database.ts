@@ -23,6 +23,7 @@ export interface WidgetLayoutRecord {
 }
 
 export interface WallpaperRecord {
+  selection?: string;
   contentHash?: string;
   id: 'daily';
   sourceUrl: string;

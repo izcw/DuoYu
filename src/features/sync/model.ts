@@ -52,6 +52,7 @@ export function normalized(table: string, row: Row | null): Row[] {
               asset: row.blob ?? row.asset,
               sourceUrl: row.sourceUrl,
               contentHash: row.contentHash,
+              ...(row.selection ? { selection: row.selection } : {}),
             },
           },
         ]

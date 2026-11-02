@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import ts from 'typescript';
+const code = ts.transpileModule(await readFile('src/features/sync/pending-wallpaper.ts', 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2023, module: ts.ModuleKind.ES2022 } }).outputText;
+const { pendingWallpaperChanges } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
+const wallpaper = hash => ({ table: 'wallpapers', id: 'daily', base: null, value: { contentHash: hash }, revision: '0' });
+const changes = [wallpaper('new'), { table: 'preferences', id: 'wallpaperMode', value: { value: 'custom' } }, { table: 'preferences', id: 'savedWallpaper:upload', value: {} }, { table: 'libraryItems', id: 'other', value: {} }];
+assert.equal(pendingWallpaperChanges('new', [{ changes }]).length, 3);
+assert.deepEqual(pendingWallpaperChanges('newer', [{ changes }]), []);
+assert.deepEqual(pendingWallpaperChanges('new', [{ changes, resolvedAt: 1 }]), []);
+assert.deepEqual(pendingWallpaperChanges(undefined, [{ changes }]), []);
+assert.equal(pendingWallpaperChanges('new', [{ changes: [wallpaper('old')] }, { changes }])[0].value.contentHash, 'new');
+console.log('PASS unresolved current wallpaper retained; resolved and older choices do not override newer uploads; unrelated edits excluded');

@@ -14,6 +14,7 @@ export function useGridSelection(
   },
 ) {
   const selected = ref(new Set<string>());
+  const locked = ref(false);
   const marquee = ref<{
     left: number;
     top: number;
@@ -61,6 +62,7 @@ export function useGridSelection(
       return;
     const target = event.target as HTMLElement;
     if (
+      !locked.value &&
       target.closest(
         'input,textarea,select,[contenteditable],.ui-resizable-handle,.cell-resize,.cell-actions,.folder-icon-grid',
       )
@@ -76,11 +78,17 @@ export function useGridSelection(
       if (next.has(id)) next.delete(id);
       else next.add(id);
       selected.value = next;
+      locked.value = next.size > 0;
       suppressUntil = performance.now() + 500;
       return;
     }
-    if (id && (!selected.value.has(id) || selected.value.size < 2)) {
-      selected.value = new Set([id]);
+    if (id && locked.value && !selected.value.has(id)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+    if (id && !locked.value) {
+      clear();
       return; // Single-card dragging remains owned by GridStack.
     }
     if (!id && target.closest('button,a')) return;
@@ -98,7 +106,7 @@ export function useGridSelection(
       dx: 0,
       dy: 0,
     };
-    if (!id && !extend) selected.value = new Set();
+    if (!id && !extend) clear();
   }
   function move(event: MouseEvent) {
     if (!gesture) return;
@@ -139,6 +147,7 @@ export function useGridSelection(
           next.add(node.id!);
       }
       selected.value = next;
+      locked.value = next.size > 0;
     } else {
       const nodes = gesture.nodes;
       const scale =
@@ -261,19 +270,33 @@ export function useGridSelection(
   }
   const up = (event: MouseEvent) => finish(event);
   const cancel = () => finish(undefined, true);
+  function loseFocus() {
+    cancel();
+    clear();
+  }
+  function visibilityChanged() {
+    if (document.hidden) loseFocus();
+  }
   function key(event: KeyboardEvent) {
     if (event.key === 'Escape') {
       cancel();
-      selected.value = new Set();
+      clear();
+    } else if (
+      locked.value &&
+      container.value?.contains(event.target as Node)
+    ) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
     }
   }
   function click(event: MouseEvent) {
-    if (performance.now() < suppressUntil) {
+    if (locked.value || performance.now() < suppressUntil) {
       event.preventDefault();
       event.stopImmediatePropagation();
     }
   }
   function clear() {
+    locked.value = false;
     selected.value = new Set();
     paint();
   }
@@ -281,24 +304,43 @@ export function useGridSelection(
     if (gesture) cancel();
     const ids = new Set(options.getGrid()?.engine.nodes.map((n) => n.id!));
     selected.value = new Set([...selected.value].filter((id) => ids.has(id)));
+    if (!selected.value.size) locked.value = false;
     paint();
   }
+  function blockAction(event: Event) {
+    if (!locked.value) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+  function blockPointer(event: PointerEvent) {
+    if (locked.value) event.stopImmediatePropagation();
+  }
   onMounted(() => {
+    container.value?.addEventListener('pointerdown', blockPointer, true);
+    container.value?.addEventListener('contextmenu', blockAction, true);
+    container.value?.addEventListener('dragstart', blockAction, true);
+    container.value?.addEventListener('dblclick', blockAction, true);
     container.value?.addEventListener('mousedown', down, true);
     container.value?.addEventListener('click', click, true);
     document.addEventListener('mousemove', move, true);
     document.addEventListener('mouseup', up, true);
     document.addEventListener('keydown', key, true);
-    window.addEventListener('blur', cancel);
+    window.addEventListener('blur', loseFocus);
+    document.addEventListener('visibilitychange', visibilityChanged);
   });
   onUnmounted(() => {
     cancel();
+    container.value?.removeEventListener('pointerdown', blockPointer, true);
+    container.value?.removeEventListener('contextmenu', blockAction, true);
+    container.value?.removeEventListener('dragstart', blockAction, true);
+    container.value?.removeEventListener('dblclick', blockAction, true);
     container.value?.removeEventListener('mousedown', down, true);
     container.value?.removeEventListener('click', click, true);
     document.removeEventListener('mousemove', move, true);
     document.removeEventListener('mouseup', up, true);
     document.removeEventListener('keydown', key, true);
-    window.removeEventListener('blur', cancel);
+    window.removeEventListener('blur', loseFocus);
+    document.removeEventListener('visibilitychange', visibilityChanged);
   });
-  return { selected, marquee, active, refresh, clear };
+  return { selected, marquee, active, locked, refresh, clear };
 }

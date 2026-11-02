@@ -1,33 +1,10 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue';
 import { browser } from 'wxt/browser';
-import BaseDialog from '../../shared/components/base/BaseDialog.vue';
-import { authConfig, AUTH_SESSION_KEY, type AuthView } from './config';
-import {
-  syncState,
-  syncNow,
-  formatSyncTime,
-  reloadSyncExtension,
-} from '../sync/client';
-import JsonImportDialog from '../sync/JsonImportDialog.vue';
-import ConflictCenter from '../sync/ConflictCenter.vue';
-const importOpen = ref(false),
-  conflictsOpen = ref(false);
-async function cloudAction(task: () => Promise<unknown>) {
-  if (busy.value) return;
-  busy.value = true;
-  error.value = '';
-  try {
-    await task();
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '同步操作失败';
-  } finally {
-    busy.value = false;
-  }
-}
+import { openSettings } from '../desktop/settings-state';
+import { AUTH_SESSION_KEY, type AuthView } from './config';
 const view = ref<AuthView>({ account: null });
-const open = ref(false),
-  busy = ref(false),
+const busy = ref(false),
   error = ref(''),
   imageFailed = ref(false);
 let timer: ReturnType<typeof setInterval>;
@@ -75,9 +52,6 @@ onUnmounted(() => {
   window.removeEventListener('focus', focus);
   document.removeEventListener('visibilitychange', focus);
 });
-function accountCenter() {
-  void browser.tabs.create({ url: `${authConfig.issuer}/#/account/profile` });
-}
 </script>
 <template>
   <Teleport to="body">
@@ -86,7 +60,7 @@ function accountCenter() {
       type="button"
       :aria-label="view.account ? '我的账号' : '登录多鱼账号'"
       :title="view.account?.name || '登录多鱼账号'"
-      @click.stop="open = true"
+      @click.stop="openSettings('account')"
       @pointerdown.stop
       @contextmenu.stop
     >
@@ -102,78 +76,6 @@ function accountCenter() {
       />
     </button>
   </Teleport>
-  <BaseDialog
-    v-model:open="open"
-    :title="view.account ? '我的账号' : '登录多鱼账号'"
-    :width="360"
-  >
-    <div class="account-panel">
-      <template v-if="view.account">
-        <strong>{{ view.account.name || '多鱼用户' }}</strong>
-        <p>{{ view.account.email }}</p>
-        <button type="button" @click="accountCenter">账号与安全</button>
-        <p class="account-message" role="status">
-          云同步：{{ syncState.status
-          }}<template v-if="syncState.pending">
-            · {{ syncState.pending }} 项待上传</template
-          >
-        </p>
-        <p v-if="syncState.lastSyncedAt" class="account-message sync-time">
-          最近同步：{{ formatSyncTime(syncState.lastSyncedAt) }}
-        </p>
-        <p v-if="syncState.assetError" class="account-message">
-          {{ syncState.assetError }}
-        </p>
-        <p v-if="syncState.error" class="account-message">
-          {{ syncState.error }}
-        </p>
-        <button
-          v-if="syncState.needsReload"
-          type="button"
-          @click="reloadSyncExtension"
-        >
-          重新加载扩展并恢复同步
-        </button>
-        <button type="button" :disabled="busy" @click="cloudAction(syncNow)">
-          立即同步
-        </button>
-        <button
-          type="button"
-          :disabled="busy"
-          @click="
-            open = false;
-            importOpen = true;
-          "
-        >
-          导入JSON文件
-        </button>
-        <button
-          v-if="syncState.conflicts"
-          type="button"
-          @click="
-            open = false;
-            conflictsOpen = true;
-          "
-        >
-          处理同步更改（{{ syncState.conflicts }}）
-        </button>
-        <button type="button" :disabled="busy" @click="action('logout')">
-          退出登录
-        </button>
-      </template>
-      <template v-else>
-        <p>使用多鱼账号登录</p>
-        <button type="button" :disabled="busy" @click="action('login')">
-          {{ busy ? '正在连接…' : '前往登录' }}
-        </button>
-      </template>
-      <p v-if="error || view.warning" class="account-message" role="status">
-        {{ error || view.warning }}
-      </p>
-    </div>
-  </BaseDialog>
-  <JsonImportDialog v-model:open="importOpen" />
-  <ConflictCenter v-model:open="conflictsOpen" />
 </template>
 <style scoped>
 .account-entry {
@@ -203,33 +105,5 @@ function accountCenter() {
 .account-entry:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 4px;
-}
-.account-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.account-panel p {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.account-panel button {
-  padding: 12px 16px;
-  border: 0;
-  border-radius: 12px;
-  color: #fff;
-  background: #ffffff20;
-  cursor: pointer;
-}
-.account-panel button:hover {
-  background: #ffffff30;
-}
-.account-panel button:disabled {
-  opacity: 0.5;
-  cursor: wait;
-}
-.account-message {
-  font-size: 13px;
-  line-height: 1.6;
 }
 </style>

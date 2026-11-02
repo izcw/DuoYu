@@ -46,7 +46,7 @@ IndexedDB 增加 syncMeta（设备 ID、cursor、schemaVersion）、outbox（ope
 
 ## 服务端提交协议
 
-API 草案：GET /v1/sync/snapshot、GET /v1/sync/changes?after=cursor、POST /v1/sync/operations、GET /v1/sync/status、POST /v1/assets。所有响应携带 schemaVersion；cursor 和 bigint revision 用十进制字符串传给 JavaScript，避免超过安全整数。
+API 草案：GET /api/v1/sync/snapshot、GET /api/v1/sync/changes?after=cursor、POST /api/v1/sync/operations、GET /api/v1/sync/status、POST /api/v1/assets。所有响应携带 schemaVersion；cursor 和 bigint revision 用十进制字符串传给 JavaScript，避免超过安全整数。
 
 每次写请求携带设备 ID、稳定 operation_id、请求摘要、实体 base_revision、字段 patch 及用于三方合并的基础值。服务端只认可认证结果中的账号。相同 operation_id + 相同摘要返回原回执；摘要不一致返回409。请求超时后原样重试，确保已提交请求不会重复新增。
 

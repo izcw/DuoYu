@@ -16,7 +16,7 @@ for (const [name, source] of [
     },
   }).outputText;
   code = code.replace(
-    /(['"])(?:\.\/|\.\.\/library\/)(grid-config|grid-layout)\1/g,
+    /(['"])(?:\.\/|\.\.\/library\/)(grid-config|grid-layout|model)\1/g,
     (_, q, file) => q + './' + file + '.mjs' + q,
   );
   await writeFile('work/conflict-preview-test/' + name + '.mjs', code);
@@ -27,6 +27,8 @@ const {
   previewVersion,
   previewItems,
   previewPages,
+  mergePreviewChanges,
+  groupPreviewMenus,
 } = await import('../work/conflict-preview-test/preview.mjs');
 const { snapshotValue } =
   await import('../work/conflict-preview-test/model.mjs');
@@ -106,3 +108,151 @@ structuredClone(safe);
 console.log(
   'PASS shared desktop placement, preferred local layout and displaced-item resolution, cloud immutability, deletion, overflow, folder browsing and IndexedDB-safe preview snapshots',
 );
+
+const { previewConflictViews } =
+  await import('../work/conflict-preview-test/preview.mjs');
+assert.deepEqual(
+  previewConflictViews(
+    [
+      {
+        table: 'libraryItems',
+        id: 'child',
+        base: { parent: 'folder-a', pageId: 'home' },
+        value: { parent: 'folder-a', pageId: 'home' },
+      },
+    ],
+    [],
+  ),
+  ['folder:folder-a'],
+);
+assert.deepEqual(
+  previewConflictViews(
+    [
+      {
+        table: 'libraryItems',
+        id: 'child',
+        base: { parent: 'folder-a', pageId: 'home' },
+        value: { parent: 'folder-b', pageId: 'work' },
+      },
+    ],
+    [],
+  ),
+  ['folder:folder-b', 'folder:folder-a'],
+);
+assert.deepEqual(
+  previewConflictViews(
+    [
+      {
+        table: 'libraryItems',
+        id: 'link',
+        base: { pageId: 'home' },
+        value: { pageId: 'home' },
+      },
+    ],
+    [
+      [
+        {
+          table: 'libraryItems',
+          id: 'link',
+          payload: { pageId: 'work' },
+          revision: '2',
+          deleted: false,
+        },
+      ],
+    ],
+  ),
+  ['page:home', 'page:work'],
+);
+assert.deepEqual(
+  previewConflictViews(
+    [
+      {
+        table: 'libraryItems',
+        id: 'deleted',
+        base: { parent: 'folder-a' },
+        value: null,
+      },
+    ],
+    [],
+  ),
+  ['folder:folder-a'],
+);
+console.log(
+  'PASS automatic conflict regions: folder-only, cross-folder, cloud relocation and deletion',
+);
+{
+  const baseIcon = {
+    id: 'a',
+    name: 'original',
+    icon: 'old',
+    pageId: 'home',
+    parent: '',
+  };
+  const rename = {
+    table: 'libraryItems',
+    id: 'a',
+    base: baseIcon,
+    value: { ...baseIcon, name: 'renamed' },
+    revision: '1',
+  };
+  const recolor = { ...rename, value: { ...baseIcon, icon: 'new' } };
+  const immutable = JSON.stringify([rename, recolor]);
+  const merged = mergePreviewChanges([[rename], [recolor]]);
+  assert.equal(merged[0].value.name, 'renamed');
+  assert.equal(merged[0].value.icon, 'new');
+  assert.equal(JSON.stringify([rename, recolor]), immutable);
+  assert.equal(
+    mergePreviewChanges([
+      [rename],
+      [{ ...rename, value: { ...baseIcon, name: 'latest' } }],
+    ])[0].value.name,
+    'latest',
+  );
+  assert.equal(
+    mergePreviewChanges([[rename], [{ ...rename, value: null }]])[0].value,
+    null,
+  );
+  const record = (id, createdAt, changes) => ({ id, createdAt, changes });
+  const folder = {
+    ...item('folder', 0),
+    payload: { ...item('folder', 0).payload, kind: 'folder', pageId: 'work' },
+  };
+  const inFolder = {
+    ...rename,
+    id: 'child',
+    base: null,
+    value: { ...baseIcon, id: 'child', parent: 'folder', pageId: 'work' },
+  };
+  const page = {
+    table: 'libraryPages',
+    id: 'work',
+    payload: { id: 'work', name: 'Work' },
+    revision: '1',
+    deleted: false,
+  };
+  const menuRecords = [
+    record('new', 2, [recolor]),
+    record('old', 1, [rename]),
+    record('folder-edit', 3, [inFolder]),
+  ];
+  const menus = groupPreviewMenus(menuRecords, (r) => r.changes, [
+    folder,
+    page,
+  ]);
+  assert.equal(menus.length, 2);
+  assert.equal(menus.find((g) => g.id === 'page:home').records.length, 2);
+  assert.equal(menus.find((g) => g.id === 'page:home').changes.length, 1);
+  assert.equal(menus.find((g) => g.id === 'page:work').name, 'Work');
+  const moved = { ...rename, value: { ...baseIcon, pageId: 'work' } };
+  const linked = groupPreviewMenus(
+    [...menuRecords, record('move', 4, [moved])],
+    (r) => r.changes,
+    [folder, page],
+  );
+  assert.equal(linked.length, 1);
+  assert.equal(linked[0].records.length, 4);
+  assert.deepEqual(linked[0].menus, ['page:home', 'page:work']);
+  console.log(
+    'PASS menu grouping, folder ownership, atomic cross-menu moves, chronological field merge and deletion',
+  );
+}

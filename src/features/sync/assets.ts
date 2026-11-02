@@ -56,7 +56,7 @@ export async function getAsset(reference: string): Promise<Blob> {
   if (active.has(sha)) return active.get(sha)!;
   const job = (async () => {
     if (!transport) throw Error('图片下载服务未就绪');
-    const r = await transport('/v1/assets/' + sha, 'GET', undefined, true);
+    const r = await transport('/api/v1/assets/' + sha, 'GET', undefined, true);
     const blob = new Blob(
       [Uint8Array.from(atob(r.base64), (c) => c.charCodeAt(0))],
       { type: r.mediaType },
@@ -109,7 +109,7 @@ export async function uploadAsset(
   // Chrome runtime messaging serializes JSON; Base64 is only used for this IPC
   // bridge. The background decodes it and sends binary bytes over HTTPS.
   await transport(
-    '/v1/assets/' + sha,
+    '/api/v1/assets/' + sha,
     'POST',
     await blobBase64(saved.blob),
     true,

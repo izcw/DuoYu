@@ -1,5 +1,7 @@
 import { browser } from 'wxt/browser';
 import { websiteTitle } from '../features/library/website-title';
+import { websiteIcon } from '../features/library/website-icon';
+import { remoteMetadata } from '../features/library/remote-metadata';
 import { launchLoginWindow } from '../features/auth/login-window';
 import {
   AUTH_SESSION_KEY,
@@ -33,12 +35,44 @@ export default defineBackground(() => {
     if (
       sender.id !== browser.runtime.id ||
       sender.url !== browser.runtime.getURL('/newtab.html') ||
-      message?.type !== 'website-title'
+      !['website-title', 'website-icon'].includes(message?.type)
     )
       return;
     void (async () => {
       try {
         const url = new URL(message.url);
+        if (
+          !['http:', 'https:'].includes(url.protocol) ||
+          url.username ||
+          url.password
+        )
+          throw new Error('请输入有效的 http:// 或 https:// 网址');
+        if (message.type === 'website-icon') {
+          const tab = (await browser.tabs.query({})).find(
+            (t) =>
+              t.url === url.href && /^https?:\/\//i.test(t.favIconUrl || ''),
+          );
+          if (tab?.favIconUrl) {
+            respond({ icon: tab.favIconUrl });
+            return;
+          }
+          const metadata = await remoteMetadata(url.href);
+          if (metadata.icon) {
+            respond({ icon: metadata.icon });
+            return;
+          }
+          if (
+            !['http:', 'https:'].includes(url.protocol) ||
+            url.username ||
+            url.password ||
+            !(await browser.permissions.contains({
+              origins: [url.origin + '/*'],
+            }))
+          )
+            throw new Error();
+          respond({ icon: await websiteIcon(url.href) });
+          return;
+        }
         const existing = (await browser.tabs.query({})).find(
           (tab) => tab.url === url.href && tab.title && tab.title !== url.href,
         );
@@ -46,18 +80,23 @@ export default defineBackground(() => {
           respond({ title: existing.title });
           return;
         }
+        const metadata = await remoteMetadata(url.href);
+        if (metadata.title) {
+          respond({ title: metadata.title });
+          return;
+        }
         if (
           !['http:', 'https:'].includes(url.protocol) ||
           url.username ||
           url.password
         )
-          throw new Error();
+          throw new Error('请输入有效的 http:// 或 https:// 网址');
         if (
           !(await browser.permissions.contains({
             origins: [url.origin + '/*'],
           }))
         )
-          throw new Error();
+          throw new Error('网站访问权限未开启，请在扩展管理中允许访问该网站');
         const response = await fetch(url.href, {
           credentials: 'omit',
           signal: AbortSignal.timeout(8000),
@@ -69,11 +108,17 @@ export default defineBackground(() => {
           error:
             '网站可能需要执行脚本或完成访问校验，请先打开该网页，再点击获取标题',
         });
-      } catch {
+      } catch (error) {
         respond({
           title: '',
           error:
-            '无法读取网页，请确认已重新加载扩展并授权网站访问；也可先在浏览器打开该网址后重试',
+            error instanceof Error && error.name === 'TimeoutError'
+              ? '读取网页超时，请检查网络后重试，或手动填写名称'
+              : error instanceof TypeError
+                ? '无法连接网站，可能是网络、代理或 HTTPS 证书异常；请检查该网址能否正常打开，或手动填写名称'
+                : error instanceof Error && error.message
+                  ? error.message
+                  : '读取网页失败，可手动填写名称后保存',
         });
       }
     })();
@@ -287,11 +332,16 @@ export default defineBackground(() => {
           }
           const path = String(message.path || '');
           if (
-            !/^\/v1\/(sync\/(snapshot|changes\?after=\d+(?:&epoch=[0-9a-f-]{36})?|operations|conflicts(?:\/[0-9a-f-]{36}\/resolve)?)|assets\/[0-9a-f]{64}|catalog\/(templates|widgets|wallpapers)|templates\/[0-9a-f-]{36}\/apply)$/.test(
+            !/^\/api\/v1\/(sync\/(snapshot|changes\?after=\d+(?:&epoch=[0-9a-f-]{36})?|operations|conflicts(?:\/[0-9a-f-]{36}\/resolve)?)|assets\/[0-9a-f]{64}|catalog\/(templates|widgets|wallpapers)|templates\/[0-9a-f-]{36}\/apply)$/.test(
               path,
             )
-          )
-            throw new Error('invalid sync path');
+          ) {
+            respond({
+              status: 400,
+              error: '云同步接口路径不匹配，请重新加载扩展后重试',
+            });
+            return;
+          }
           const endpoint = import.meta.env.VITE_SYNC_URL;
           if (!endpoint || !endpoint.startsWith('https://')) {
             respond({ status: 503, error: '云同步服务尚未配置' });
