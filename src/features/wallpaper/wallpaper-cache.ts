@@ -1,3 +1,4 @@
+import { activeDesktop, saveDesktopChoice } from './desktops';
 import { rememberWallpaperChoice } from './wallpaper-intent';
 import {
   downloadWallpaper,
@@ -235,6 +236,7 @@ export async function refreshWallpaper(
 export async function importWallpaper(blob: Blob, selection = 'upload') {
   if (!blob.type.startsWith('image/') || blob.size > 20 * 1024 * 1024)
     throw new Error('请选择不超过 20 MB 的图片');
+  const desktopId = activeDesktop.value;
   const prepared = await prepareWallpaperImage(blob);
   try {
     await navigator.locks.request('duoyu:daily-wallpaper', async () => {
@@ -247,12 +249,26 @@ export async function importWallpaper(blob: Blob, selection = 'upload') {
         contentHash: await fingerprint(blob),
       };
       const asset = await cacheAsset(blob);
+      if (desktopId !== 'default') {
+        await database.transaction('rw', database.preferences, async () => {
+          await saveDesktopChoice(desktopId, selection, asset);
+          await database.preferences.put({
+            id:
+              selection === 'upload'
+                ? 'savedWallpaper:upload'
+                : 'savedWallpaper:store',
+            value: { selection, blob: asset, contentHash: record.contentHash },
+          });
+        });
+        return;
+      }
       await database.transaction(
         'rw',
         database.wallpapers,
         database.preferences,
         async () => {
           await database.wallpapers.put(record);
+          await saveDesktopChoice(desktopId, selection, asset);
           await database.preferences.put({
             id:
               selection === 'upload'
@@ -292,6 +308,18 @@ export async function importWallpaper(blob: Blob, selection = 'upload') {
 /** Explicit deletion of the selected local upload. The captured row deletion
  * releases its cloud reference; shared images remain until their final use ends. */
 export async function removeUploadedWallpaper() {
+  const desktopId = activeDesktop.value;
+  if (desktopId !== 'default') {
+    await database.transaction('rw', database.preferences, async () => {
+      const choice = (
+        await database.preferences.get('wallpaperDesktop:' + desktopId)
+      )?.value as { selection?: string } | undefined;
+      if (choice?.selection === 'upload')
+        await saveDesktopChoice(desktopId, 'daily');
+      await database.preferences.delete('savedWallpaper:upload');
+    });
+    return;
+  }
   const current = await database.wallpapers.get('daily');
   const selection =
     current?.selection ||
@@ -307,6 +335,7 @@ export async function removeUploadedWallpaper() {
       database.preferences,
       async () => {
         await database.preferences.delete('savedWallpaper:upload');
+        await saveDesktopChoice('default', 'daily');
         const current = await database.wallpapers.get('daily');
         if (current?.sourceUrl.startsWith('local:'))
           await database.wallpapers.delete('daily');
@@ -327,6 +356,14 @@ export async function removeUploadedWallpaper() {
 export async function selectDailyWallpaper(
   onProgress?: (value: WallpaperProgress) => void,
 ) {
+  const desktopId = activeDesktop.value;
+  if (desktopId !== 'default') {
+    await database.transaction('rw', database.preferences, async () => {
+      await saveDesktopChoice(desktopId, 'daily');
+      await database.preferences.put({id:'savedWallpaper:store',value:{selection:'daily'}});
+    });
+    return;
+  }
   // Prepare the original before changing selection, retaining the old wallpaper on failure.
   let prepared: WallpaperRecord | undefined;
   if (onProgress) {
@@ -356,6 +393,7 @@ export async function selectDailyWallpaper(
       database.wallpapers,
       async () => {
         if (prepared) await database.wallpapers.put(prepared);
+        await saveDesktopChoice('default', 'daily');
         await database.preferences.put({
           id: 'savedWallpaper:store',
           value: { selection: 'daily' },

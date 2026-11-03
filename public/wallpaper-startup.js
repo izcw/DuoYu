@@ -49,11 +49,13 @@
     // Match accountStorage before the app and database have initialized.
     const account = localStorage.getItem('duoyu-sync-account');
     const prefix = account ? `account:${account}:` : '';
-    const raw = localStorage.getItem(`${prefix}duoyu:wallpaper-preview`);
+    const desktop = localStorage.getItem(`${prefix}duoyu-device-desktop`) || 'default';
+    const key = desktop === 'default' ? 'duoyu:wallpaper-preview' : 'duoyu:desktop-preview:' + desktop;
+    const raw = localStorage.getItem(prefix + key);
     if (!raw || raw.length > 180000) return;
     const preview = JSON.parse(raw);
     if (
-      localStorage.getItem(`${prefix}duoyu-wallpaper-mode`) === 'custom' &&
+      desktop === 'default' && localStorage.getItem(`${prefix}duoyu-wallpaper-mode`) === 'custom' &&
       !preview.sourceUrl?.startsWith('local:')
     )
       return;

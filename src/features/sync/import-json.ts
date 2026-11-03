@@ -282,7 +282,8 @@ export async function planJsonImport(
           'savedWallpaper:store',
           'savedWallpaper:upload',
         ].includes(r.id) ||
-          String(r.id).startsWith('layout:'))
+          String(r.id).startsWith('layout:') ||
+          String(r.id).startsWith('wallpaperDesktop:'))
       )
         tables.preferences!.push({ id: r.id, value: r.value });
     }

@@ -54,7 +54,7 @@ onUnmounted(() => {
 });
 </script>
 <template>
-  <Teleport to="body">
+
     <button
       class="account-entry"
       type="button"
@@ -75,13 +75,11 @@ onUnmounted(() => {
         @error="imageFailed = true"
       />
     </button>
-  </Teleport>
+
 </template>
 <style scoped>
 .account-entry {
-  position: fixed;
-  top: 16px;
-  right: 22px;
+
   z-index: 2147483001;
   width: 36px;
   height: 36px;

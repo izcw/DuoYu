@@ -28,6 +28,8 @@ const useSelection = new Function(
   'database',
   'accountStorage',
   'window',
+  'prefix',
+  'activeDesktop',
   code + '; return useWallpaperSelection;',
 )(
   ref,
@@ -37,6 +39,8 @@ const useSelection = new Function(
   database,
   { getItem: () => 'custom' },
   events,
+  'wallpaperDesktop:',
+  ref('default'),
 );
 // Real Vue mount/unmount lifecycle and real Dexie transactions/notifications.
 const renderer = createRenderer({

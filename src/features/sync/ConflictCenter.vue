@@ -7,7 +7,7 @@ import { database } from '../../shared/storage/database';
 import type { SyncConflict } from './capture';
 import type { Entity } from './model';
 import { conflictChanges, discardConflict, retryConflict } from './conflicts';
-import { formatSyncTime, syncNow, syncState } from './client';
+import { formatSyncTime, syncNow, refreshConflictPreview } from './client';
 import ConflictDesktopPreview from './ConflictDesktopPreview.vue';
 import {
   groupPreviewMenus,
@@ -71,6 +71,9 @@ const local = computed(() => localLayout.value.entities),
 const views = computed(() =>
   previewConflictViews(changes.value, [local.value, cloud.value]),
 );
+const chosenView = ref('');
+watch(selected, () => { chosenView.value = ''; });
+const view = computed(() => views.value.includes(chosenView.value) ? chosenView.value : (views.value[0] ?? ''));
 const highlightedIds = computed(() =>
   changes.value.flatMap((c) => [
     c.id,
@@ -83,7 +86,6 @@ const highlightedIds = computed(() =>
   ]),
 );
 watch(selected, () => {
-  error.value = '';
   message.value = '';
 });
 function menuIcon(menu: string) {
@@ -117,8 +119,7 @@ watch(
 async function refreshLatest() {
   latestReady.value = false;
   await run(async () => {
-    await syncNow();
-    if (syncState.value.error) throw Error(syncState.value.error);
+    await refreshConflictPreview();
     shadow.value = (await database.syncShadow.toArray()).map((e) => ({
       table: e.table,
       id: e.entityId,
@@ -147,7 +148,21 @@ async function run(action: () => Promise<unknown>) {
 async function apply(side: 'local' | 'cloud') {
   if (side === 'local' && localLayout.value.overflow) return;
   const group = current.value;
-  if (!group || !latestReady.value || busy.value || resolving.value) return;
+  if (!group || busy.value) return;
+  if (!latestReady.value) {
+    await refreshLatest();
+    if (!latestReady.value || current.value?.id !== group.id) return;
+  }
+  if (resolving.value) {
+    await run(async () => {
+      await syncNow();
+      await refreshConflictPreview();
+      const pending = await database.syncOutbox.toArray();
+      if (pending.some(op => group.records.some(record => record.id === op.resolutionOf)))
+        throw Error('上次选择仍在待上传队列，请检查云同步状态后重试');
+    });
+    return;
+  }
   const members = [...group.records].reverse();
   const map = new Map(
     shadow.value.map((e) => [e.table + ':' + e.id, e.revision]),
@@ -167,6 +182,9 @@ async function apply(side: 'local' | 'cloud') {
       // Stage the complete menu version durably before acknowledging redundant records.
       // A failed upload remains in the outbox (or a new conflict), never only in this UI.
       await retryConflict(members[0]!.id, {}, expected, true, resolved);
+      if ((await database.syncOutbox.toArray()).some(op => op.resolutionOf === members[0]!.id)) throw Error('本机版本已保存，仍在等待上传。可重试上次处理。');
+      const failure = (await database.syncConflicts.toArray()).find(record => !record.resolvedAt && (record.operation as {resolutionOf?: string})?.resolutionOf === members[0]!.id);
+      if (failure) throw Error('云端未接受这次处理：' + failure.reason);
       for (const record of members.slice(1)) await discardConflict(record.id);
     } else {
       for (const record of members) await discardConflict(record.id, expected);
@@ -189,6 +207,8 @@ async function apply(side: 'local' | 'cloud') {
           刷新预览
         </button>
       </div>
+      <p v-if="error" class="error" role="alert">{{ error }}。请点击「刷新预览」重试。</p>
+      <p v-else-if="!latestReady" role="status">正在读取最新云端版本，完成后即可选择。</p>
       <div v-if="records.length" class="conflict-layout">
         <aside class="conflict-list" aria-label="冲突菜单">
           <button
@@ -218,6 +238,9 @@ async function apply(side: 'local' | 'cloud') {
             <strong>{{ current.name }}</strong>
             <span class="frame-legend"><i />{{ changes.length }} 个冲突项</span>
           </div>
+          <nav v-if="views.length > 1" class="preview-views" aria-label="预览区域">
+            <button v-for="region in views" :key="region" :aria-pressed="region === view" @click="chosenView = region">{{ previewPages([local,cloud]).find(page => page.id === region)?.name || region }}</button>
+          </nav>
           <div class="version-panels">
             <article
               v-for="side in ['local', 'cloud'] as const"
@@ -225,22 +248,9 @@ async function apply(side: 'local' | 'cloud') {
               class="version-panel"
               :data-version="side"
             >
-              <header>
-                <span
-                  class="version-dot"
-                  :class="{ 'cloud-dot': side === 'cloud' }"
-                />
-                <h3>{{ side === 'local' ? '本机版本' : '云端版本' }}</h3>
-                <small>{{
-                  side === 'local'
-                    ? changes.length + ' 项更改'
-                    : '当前已同步数据'
-                }}</small>
-              </header>
-              <template v-for="view in views" :key="view">
-                <div class="version-location">
-                  {{ versionLabel(side === 'local' ? local : cloud, view) }}
-                </div>
+
+              <template v-if="view">
+
                 <ConflictDesktopPreview
                   :entities="side === 'local' ? local : cloud"
                   :view="view"
@@ -256,18 +266,19 @@ async function apply(side: 'local' | 'cloud') {
                 />
               </template>
               <footer>
-                <span v-if="resolving">正在同步处理结果</span
-                ><button
+                <span class="version-dot" :class="{ 'cloud-dot': side === 'cloud' }" aria-hidden="true" />
+                <h3>{{ side === 'local' ? '本机版本' : '云端版本' }}</h3>
+                <span class="version-location" :title="versionLabel(side === 'local' ? local : cloud, view)">{{ versionLabel(side === 'local' ? local : cloud, view) }}</span>
+                <small>{{ resolving ? '正在同步处理结果' : side === 'local' ? changes.length + ' 项更改' : '当前已同步数据' }}</small>
+                <button
                   class="apply-version"
                   :disabled="
                     busy ||
-                    !latestReady ||
-                    resolving ||
                     (side === 'local' && localLayout.overflow > 0)
                   "
                   @click="apply(side)"
                 >
-                  {{ side === 'local' ? '应用本机版本' : '应用云端版本' }}
+                  {{ resolving ? '重试上次处理' : side === 'local' ? '应用本机版本' : '应用云端版本' }}
                 </button>
               </footer>
             </article>
@@ -281,7 +292,6 @@ async function apply(side: 'local' | 'cloud') {
         <span>✓</span><strong>更改已处理</strong>
         <p>没有需要处理的更改。</p>
       </div>
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
       <p v-if="message" class="success" role="status">{{ message }}</p>
     </div></BaseDialog
   >
@@ -395,6 +405,9 @@ async function apply(side: 'local' | 'cloud') {
   margin-bottom: 16px;
   font-size: 14px;
 }
+.preview-views { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 12px; }
+.preview-views button { padding:5px 10px; border:0; border-radius:6px; background:#f5f5f7; cursor:pointer; }
+.preview-views button[aria-pressed=true] { background:#222; color:white; }
 .version-panels {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -409,49 +422,15 @@ async function apply(side: 'local' | 'cloud') {
   flex-direction: column;
   background: #fff;
 }
-.version-panel > header {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 16px;
-}
-.version-panel h3 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-}
-.version-location {
-  padding: 0 16px 12px;
-  color: #82858e;
-  font-size: 12px;
-}
-.version-panel header small {
-  font-size: 11px;
-  color: #939aa5;
-  margin-left: auto;
-}
-.version-dot {
-  width: 7px;
-  height: 7px;
-  background: #222;
-  border-radius: 50%;
-}
-.cloud-dot {
-  background: #939aa5;
-}
 .version-panel > footer {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 12px;
-  padding: 16px;
-  margin-top: auto;
-  min-height: 68px;
+  display:flex; align-items:center; gap:8px; padding:12px 14px;
+  margin-top:auto; border-top:1px solid #eeeef1;
 }
-.version-panel footer span {
-  font-size: 11px;
-  color: #82858e;
-}
+.version-panel h3 { margin:0; flex:none; font-size:14px; font-weight:600; }
+.version-dot { flex:0 0 7px; height:7px; border-radius:50%; background:#222; }
+.cloud-dot { background:#939aa5; }
+.version-location { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#747782; font-size:12px; }
+.version-panel footer small { flex:none; font-size:11px; color:#747782; }
 .apply-version,
 .secondary {
   white-space: nowrap;

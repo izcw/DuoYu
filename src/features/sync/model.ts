@@ -126,6 +126,59 @@ export function overlay(remote: Map<string, Entity>, changes: Change[]) {
     });
   }
 }
+/** Project only the still-current edits from this device's unresolved writes.
+ * Unrelated cloud fields and superseding edits keep their latest values. */
+export function preserveLocalConflict(
+  view: Map<string, Entity>,
+  changes: Change[],
+  current: Map<string, Row>,
+) {
+  for (const c of changes) {
+    if (c.table === 'wallpapers') continue; // Binary hydration has its own guard.
+    const key = c.table + ':' + c.id;
+    const local = current.get(key);
+    if (!c.value) {
+      if (!local) view.delete(key);
+      continue;
+    }
+    if (!local) continue;
+    const remote = view.get(key);
+    if (!remote) {
+      view.set(key, {
+        table: c.table,
+        id: c.id,
+        payload: { ...local },
+        deleted: false,
+        revision: '0',
+      });
+      continue;
+    }
+    const payload = { ...remote.payload };
+    for (const field of Object.keys({ ...c.base, ...c.value })) {
+      if (
+        same(c.base?.[field], c.value[field]) ||
+        !same(local[field], c.value[field])
+      )
+        continue;
+      if (field in local) payload[field] = local[field];
+      else delete payload[field];
+    }
+    view.set(key, { ...remote, payload });
+  }
+}
+export function pendingDesktopChanges(
+  records: { resolvedAt?: number; changes: Change[] }[],
+) {
+  return records
+    .filter((record) => !record.resolvedAt)
+    .flatMap((record) =>
+      record.changes.filter(
+        (change) =>
+          change.table === 'preferences' &&
+          change.id.startsWith('wallpaperDesktop:'),
+      ),
+    );
+}
 // A rejected creation moves from the outbox to the conflict store. Keep its
 // local projection until resolution, without recording it as cloud data.
 export function pendingCollectionCreates(

@@ -5,7 +5,7 @@ import { accountStorage } from '../../shared/storage/account';
 import { nextTick, ref, watch } from 'vue';
 import { useDesktopPages } from '../../features/desktop/useDesktopPages';
 import WorkspaceOverlay from '../../features/workspace/WorkspaceOverlay.vue';
-import WallpaperBackground from '../../features/wallpaper/WallpaperBackground.vue';
+import DesktopSwitcher from '../../features/wallpaper/DesktopSwitcher.vue';
 import ClockWidget from '../../features/clock/ClockWidget.vue';
 import SearchBox from '../../features/search/SearchBox.vue';
 import GlassModeSwitch from '../../features/desktop/GlassModeSwitch.vue';
@@ -97,8 +97,20 @@ function stepPage(direction: number) {
 </script>
 
 <template>
-  <WallpaperBackground />
-  <AccountButton />
+  <Teleport to="body">
+    <div class="desktop-top-actions">
+      <GlassModeSwitch />
+      <span id="desktop-switch-slot"></span>
+      <AccountButton />
+    </div>
+  </Teleport>
+  <DesktopSwitcher
+    @selected="
+      workspaceOpen = false;
+      homeQuiet = false;
+      go(0);
+    "
+  />
   <SettingsDialog />
   <Teleport to="body">
     <div
@@ -131,7 +143,6 @@ function stepPage(direction: number) {
     :style="{ '--page-exit-y': slideDirection > 0 ? '-40vh' : '40vh' }"
     :inert="workspaceOpen"
   >
-    <GlassModeSwitch />
     <LibraryPageMenu
       v-model="libraryPage"
       :visible="page === 1 || pageDragActive"
@@ -190,6 +201,19 @@ function stepPage(direction: number) {
 </template>
 
 <style scoped>
+.desktop-top-actions {
+  position: fixed;
+  top: 16px;
+  right: 22px;
+  z-index: 2147483001;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+#desktop-switch-slot {
+  display: flex;
+}
+
 .desktop-pages {
   width: 100%;
   min-width: 0;

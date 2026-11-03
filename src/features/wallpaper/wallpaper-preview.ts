@@ -7,9 +7,10 @@ export function saveWallpaperPreview(
   image: HTMLImageElement,
   version: string,
   sourceUrl: string,
+  key = PREVIEW_KEY,
 ) {
   try {
-    const stored = accountStorage.getItem(PREVIEW_KEY);
+    const stored = accountStorage.getItem(key);
     if (stored) {
       try {
         const preview = JSON.parse(stored);
@@ -38,14 +39,14 @@ export function saveWallpaperPreview(
       const data = canvas.toDataURL('image/jpeg', quality);
       const preview = JSON.stringify({ version, sourceUrl, data });
       if (preview.length <= MAX_PREVIEW_LENGTH) {
-        accountStorage.setItem(PREVIEW_KEY, preview);
+        accountStorage.setItem(key, preview);
         return;
       }
     }
-    accountStorage.removeItem(PREVIEW_KEY);
+    accountStorage.removeItem(key);
   } catch {
     try {
-      accountStorage.removeItem(PREVIEW_KEY);
+      accountStorage.removeItem(key);
     } catch {
       /* Storage unavailable. */
     }

@@ -87,7 +87,8 @@ export function installSyncCapture(database: Dexie, enabled: boolean) {
                 });
                 states.set(tx, state);
                 tx.addEventListener('complete', () => {
-                  globalThis.dispatchEvent?.(new Event('duoyu-local-write'));
+                  if (Object.keys(state!.op.rows).length)
+                    globalThis.dispatchEvent?.(new Event('duoyu-local-write'));
                 });
               }
               const current = state;
@@ -126,15 +127,23 @@ export function installSyncCapture(database: Dexie, enabled: boolean) {
                   )
                     continue;
                   const k = name + ':' + id;
-                  current.op.rows[k] = {
-                    table: name,
-                    id,
-                    base: k in current.op.rows ? current.op.rows[k]!.base : old,
-                    value,
-                  };
+                  const base =
+                    k in current.op.rows ? current.op.rows[k]!.base : old;
+                  if (
+                    name !== 'wallpapers' &&
+                    JSON.stringify(base) === JSON.stringify(value)
+                  ) {
+                    delete current.op.rows[k];
+                  } else {
+                    current.op.rows[k] = { table: name, id, base, value };
+                  }
                 }
                 if (Object.keys(current.op.rows).length)
                   await request(tx.objectStore('syncOutbox').put(current.op));
+                else
+                  await request(
+                    tx.objectStore('syncOutbox').delete(current.op.id),
+                  );
                 return result;
               });
               current.tail = task.catch(() => {});

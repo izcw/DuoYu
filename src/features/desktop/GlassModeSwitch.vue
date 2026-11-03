@@ -65,9 +65,6 @@ function setGlassMode(mode: GlassMode) {
 </template>
 <style scoped>
 .glass-mode-switch {
-  position: absolute;
-  top: 18px;
-  right: 76px;
   z-index: 20;
   display: flex;
   width: max-content;

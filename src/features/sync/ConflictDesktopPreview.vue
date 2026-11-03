@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch, nextTick, onUnmounted } from 'vue';
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
+import WorkspaceCardMain from '../workspace/WorkspaceCardMain.vue';
+import '../workspace/workspace.css';
+import { collectionColor,collectionColors } from '../../shared/collection-colors';
 import LibraryGrid from '../library/LibraryGrid.vue';
 import WallpaperSurface from '../wallpaper/WallpaperSurface.vue';
 import { getDailyWallpaperUrl } from '../wallpaper/wallpaper';
@@ -13,26 +16,32 @@ const props = defineProps<{
   highlightIds?: string[];
   highlightRegion?: boolean;
 }>();
+const workspace = computed(()=>/^(space|tabs):/.test(props.view));
+const groups = computed(()=>{
+  const tabs = props.view.startsWith('tabs:'), id = props.view.slice(props.view.indexOf(':')+1);
+  const entities = props.entities.filter(e=>!e.deleted);
+  const ordered = (a:Entity,b:Entity)=>Number(a.payload.position || 0)-Number(b.payload.position || 0) || a.id.localeCompare(b.id);
+  return entities.filter(e=>e.table==='tabCollections' && (tabs ? e.id===id : (e.payload.spaceId || '')===id)).sort(ordered).map(group=>({
+    ...group, tabs:entities.filter(e=>e.table==='savedTabs' && e.payload.collectionId===group.id).sort(ordered)
+  }));
+});
 const content = computed(() => previewItems(props.entities, props.view));
 const viewport = ref<HTMLElement>();
-let scrollFrame = 0;
-watch(
-  () => props.view,
-  async () => {
-    await nextTick();
-    cancelAnimationFrame(scrollFrame);
-    scrollFrame = requestAnimationFrame(() => {
-      if (viewport.value) {
-        viewport.value.scrollLeft = 0;
-        viewport.value.scrollTop =
-          props.view === 'page:home'
-            ? viewport.value.scrollHeight - viewport.value.clientHeight
-            : 0;
-      }
-    });
-  },
-  { immediate: true },
-);
+const desktopWidth = ref(window.innerWidth);
+const desktopHeight = ref(window.innerHeight);
+const scale = ref(0);
+let observer: ResizeObserver;
+function measure() {
+  desktopWidth.value = Math.max(1, window.innerWidth);
+  desktopHeight.value = Math.max(1, window.innerHeight);
+  scale.value = (viewport.value?.clientWidth || 0) / desktopWidth.value;
+}
+onMounted(() => {
+  observer = new ResizeObserver(measure);
+  observer.observe(viewport.value!);
+  window.addEventListener('resize', measure);
+  measure();
+});
 const home = computed(() => props.view === 'page:home');
 const source = ref(''),
   loaded = ref(false),
@@ -94,20 +103,22 @@ watch(
   { immediate: true },
 );
 onUnmounted(() => {
-  cancelAnimationFrame(scrollFrame);
+  observer?.disconnect();
+  window.removeEventListener('resize', measure);
   request++;
   if (ownedUrl) URL.revokeObjectURL(ownedUrl);
 });
 </script>
 <template>
-  <div ref="viewport" class="preview-viewport">
+  <div ref="viewport" class="preview-viewport" :style="{ aspectRatio: desktopWidth + ' / ' + desktopHeight }">
     <div
       class="preview-desktop glass-material-scope"
       :class="{ 'conflict-region': highlightRegion }"
       :data-glass-mode="material"
       :style="{
-        width: '100%',
-        height: '420px',
+        width: desktopWidth + 'px',
+        height: desktopHeight + 'px',
+        transform: 'scale(' + scale + ')',
       }"
     >
       <WallpaperSurface
@@ -118,7 +129,15 @@ onUnmounted(() => {
         @error="error = '壁纸预览加载失败'"
       />
       <div v-if="!home" class="preview-focus glass-focus-layer" />
-      <div
+      <section v-if="workspace" class="workspace-board workspace-preview">
+        <article v-for="group in groups" :key="group.id" class="workspace-collection">
+          <header class="workspace-collection-heading"><strong class="workspace-collection-name" :style="{color:collectionColors[collectionColor(group.payload.color)][1]}">{{ group.payload.name }}</strong></header>
+          <div class="workspace-saved-tabs"><div v-for="tab in group.tabs" :key="tab.id" class="workspace-saved-tab glass-surface" :class="{'conflict-region':highlightIds?.includes(tab.id)}">
+            <WorkspaceCardMain readonly :title="tab.payload.title || tab.payload.url || '标签页'" :url="tab.payload.url || ''" :icon="tab.payload.icon"><span v-if="tab.payload.starred" aria-label="已标记">★</span></WorkspaceCardMain>
+          </div></div>
+        </article>
+      </section>
+      <div v-else
         class="preview-grid"
         :class="{ 'preview-folder glass-surface': view.startsWith('folder:') }"
       >
@@ -134,7 +153,7 @@ onUnmounted(() => {
           disabled
         />
       </div>
-      <span v-if="!content.items.length" class="preview-empty"
+      <span v-if="workspace ? !groups.length : !content.items.length" class="preview-empty"
         >此版本在这里没有项目</span
       >
     </div>
@@ -143,17 +162,19 @@ onUnmounted(() => {
 </template>
 <style scoped>
 .preview-viewport {
-  height: 420px;
-  overflow: auto;
+  position: relative;
+  width: 100%;
+  overflow: hidden;
   overscroll-behavior: contain;
   background: var(--wallpaper-fallback, #dedfe1);
 }
 .preview-desktop {
-  position: relative;
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
   isolation: isolate;
   color: white;
-  min-width: 100%;
-  min-height: 100%;
   overflow: hidden;
 }
 .conflict-region {
@@ -170,6 +191,7 @@ onUnmounted(() => {
   inset: 22px 18px 26px;
   z-index: 2;
 }
+.preview-desktop .workspace-preview { position:absolute; inset:0; z-index:2; display:block; width:auto; height:auto; padding:32px; overflow:auto; background:transparent; }
 .preview-folder {
   border: 1px solid #ffffff70;
   border-radius: 24px;

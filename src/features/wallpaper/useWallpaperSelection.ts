@@ -1,3 +1,4 @@
+import { activeDesktop, prefix, type Desktop } from './desktops';
 import { ref, onUnmounted, onActivated } from 'vue';
 import { liveQuery } from 'dexie';
 import { database } from '../../shared/storage/database';
@@ -16,6 +17,11 @@ export function useWallpaperSelection() {
       database.wallpapers,
       database.preferences,
       async () => {
+        const profile = (
+          await database.preferences.get(prefix + activeDesktop.value)
+        )?.value as Desktop | undefined;
+        if (profile && profile.selection !== 'legacy') return profile.selection;
+        if (activeDesktop.value !== 'default') return 'daily';
         const selection = (await database.preferences.get('wallpaperSelection'))
           ?.value;
         if (

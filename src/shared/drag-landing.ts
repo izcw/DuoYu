@@ -32,9 +32,9 @@ export function createDragLanding() {
     options: { transparentSurface?: boolean } = {},
   ) {
     dispose();
-    root = source.closest<HTMLElement>('.desktop-dock')
+    root = source.closest<HTMLDialogElement>('dialog[open]') ?? (source.closest<HTMLElement>('.desktop-dock')
       ? document.body
-      : source.closest<HTMLElement>('.workspace-board') || document.body;
+      : source.closest<HTMLElement>('.workspace-board') || document.body);
     selector = targetSelector;
     const bounds = source.getBoundingClientRect();
     offsetX = event.clientX - bounds.left;

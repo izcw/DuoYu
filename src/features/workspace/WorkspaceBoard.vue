@@ -22,6 +22,7 @@ import {
 import { useWorkspace, type BrowserTab } from './useWorkspace';
 import { createDragLanding } from '../../shared/drag-landing';
 import ReorderTransition from '../../shared/components/base/ReorderTransition.vue';
+import WorkspaceCardMain from "./WorkspaceCardMain.vue";
 import WorkspaceFavicon from './WorkspaceFavicon.vue';
 import MenuEditorDialog from '../../shared/components/base/MenuEditorDialog.vue';
 import DesktopMenu from '../../shared/components/base/DesktopMenu.vue';
@@ -1233,13 +1234,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                     @dragover.stop="over($event, tab.id)"
                     @drop.prevent.stop="drop(group.id, tab.id, $event)"
                   >
-                    <div class="workspace-card-main">
-                      <span class="workspace-icon-slot">
-                        <WorkspaceFavicon
-                          :src="tab.icon"
-                          :page-url="tab.url"
-                          :title="tab.title"
-                        />
+                    <WorkspaceCardMain :title="tab.title" :url="tab.url" :icon="tab.icon" @open="run(() => openSaved([tab]))"><template #checkbox>
                         <input
                           class="workspace-card-checkbox"
                           type="checkbox"
@@ -1249,17 +1244,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                           @dragstart.prevent.stop
                           @change="toggleSelected(tab.id)"
                         />
-                      </span>
-                      <button
-                        class="workspace-link glass-control"
-                        :title="tab.url"
-                        @click="run(() => openSaved([tab]))"
-                      >
-                        <span
-                          ><strong>{{ tab.title }}</strong
-                          ><small>{{ hostname(tab.url) }}</small></span
-                        >
-                      </button>
+                      </template>
                       <button
                         class="workspace-bookmark"
                         :aria-label="`标记收藏 ${tab.title}`"
@@ -1282,7 +1267,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                           />
                         </svg>
                       </button>
-                    </div>
+                    </WorkspaceCardMain>
                     <div
                       class="workspace-card-actions"
                       @click.stop

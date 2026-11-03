@@ -15,7 +15,7 @@ for (const name of ['capture', 'model'])
     }).outputText,
   );
 const { installSyncCapture } = await import('../work/sync-test/capture.mjs');
-const { rowChanges, denormalized, overlay } =
+const { rowChanges, denormalized, overlay, preserveLocalConflict, pendingDesktopChanges } =
   await import('../work/sync-test/model.mjs');
 const db = new Dexie('sync-capture-test-' + crypto.randomUUID());
 db.version(1).stores({
@@ -95,6 +95,32 @@ try {
       value: { id: 'x', name: 'local', url: 'https://old.example' },
     },
   ]);
+  const pendingBefore = await db.syncOutbox.count();
+  await db.transaction('rw',db.libraryItems,async () => {
+    await db.libraryItems.put({id:'temporary'});
+    await db.libraryItems.delete('temporary');
+  });
+  assert.equal(await db.syncOutbox.count(),pendingBefore);
+  const desktop = { id:'wallpaperDesktop:test', value:{id:'test',selection:'daily'} };
+  const desktopChanges = rowChanges({desktop:{table:'preferences',id:desktop.id,base:null,value:desktop}});
+  const rejected = {changes:desktopChanges};
+  const rebuilt = new Map();
+  overlay(rebuilt, pendingDesktopChanges([rejected]));
+  assert.deepEqual(denormalized([...rebuilt.values()]).preferences,[desktop]);
+  assert.deepEqual(pendingDesktopChanges([{...rejected,resolvedAt:1}]),[]);
+  const local = new Map([['libraryItems:x', {id:'x',name:'mine',url:'old'}]]);
+  const change = {table:'libraryItems',id:'x',base:{id:'x',name:'base',url:'old'},value:{id:'x',name:'mine',url:'old'}};
+  const cloud = {table:'libraryItems',id:'x',revision:'3',payload:{id:'x',name:'cloud',url:'new'},deleted:false};
+  const projected = new Map([['libraryItems:x',cloud]]);
+  preserveLocalConflict(projected,[change],local);
+  assert.deepEqual(projected.get('libraryItems:x').payload,{id:'x',name:'mine',url:'new'});
+  assert.equal(cloud.payload.name,'cloud');
+  local.get('libraryItems:x').name='later';
+  projected.set('libraryItems:x',{...cloud,payload:{...cloud.payload,name:'later'}});
+  preserveLocalConflict(projected,[change],local);
+  assert.equal(projected.get('libraryItems:x').payload.name,'later');
+  preserveLocalConflict(projected,[{...change,value:null}],new Map());
+  assert.equal(projected.size,0);
   assert.equal(view.get('libraryItems:x').payload.url, 'https://new.example');
   console.log(
     'PASS atomic capture, rollback, concurrent mutations, remote suppression, clear deletes, tab-level changes and pending overlay',

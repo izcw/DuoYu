@@ -25,8 +25,11 @@ import {
 import { fetchRemoteConflicts, conflictChanges } from './conflicts';
 import { pendingWallpaperChanges } from './pending-wallpaper';
 import {
+  normalized,
+  preserveLocalConflict,
   denormalized,
   pendingCollectionCreates,
+  pendingDesktopChanges,
   overlay,
   rowChanges,
   same,
@@ -192,13 +195,42 @@ export async function applyRemote(
     }
     const view = new Map([...next].filter(([, e]) => !e.deleted));
     const wallpaper = await database.wallpapers.get('daily');
-    const unresolved = (
+    const conflicts = (
       await database.syncConflicts.orderBy('createdAt').toArray()
-    ).map((record) => ({
-      resolvedAt: record.resolvedAt,
+    ).flatMap((record) => {
+      const op = record.operation as Partial<CapturedOperation> | null;
+      return !record.resolvedAt &&
+        record.reason !== 'epoch_changed' &&
+        record.reason !== 'epoch_required' &&
+        op?.rows
+        ? [{ ...record, rows: op.rows }]
+        : [];
+    });
+    const unresolved = conflicts.map((record) => ({
       changes: conflictChanges(record),
     }));
+    // Recover creations hidden by older clients; newer operations take precedence.
     overlay(view, pendingCollectionCreates(next, unresolved));
+    overlay(
+      view,
+      pendingDesktopChanges(unresolved).filter(
+        (c) => !next.has(c.table + ':' + c.id),
+      ),
+    );
+    const local = new Map<string, Row>();
+    const visited = new Set<string>();
+    for (const record of conflicts) {
+      for (const row of Object.values(record.rows)) {
+        const key = row.table + ':' + row.id;
+        if (visited.has(key) || row.table === 'wallpapers') continue;
+        visited.add(key);
+        const current = await database.table(row.table).get(row.id);
+        for (const entity of normalized(row.table, current ?? null))
+          local.set(entity.table + ':' + entity.id, entity.payload);
+      }
+    }
+    for (const record of conflicts)
+      preserveLocalConflict(view, rowChanges(record.rows), local);
     overlay(view, pendingWallpaperChanges(wallpaper?.contentHash, unresolved));
     for (const op of await database.syncOutbox.orderBy('createdAt').toArray())
       overlay(view, rowChanges(op.rows));
@@ -396,6 +428,21 @@ async function quarantine(op: CapturedOperation, reason: string) {
       });
   });
 }
+export async function refreshConflictPreview() {
+  await navigator.locks.request('duoyu:sync:' + activeAccountKey(), async () => {
+    if (!account || switched()) throw Error('请先登录当前同步账号');
+    if (!(await database.syncMeta.get('initialized'))?.value) await refreshSnapshot();
+    else await pull();
+    await fetchRemoteConflicts(rpc);
+    // Old clients could leave a resolving flag after its queued operation disappeared.
+    await remoteTransaction(async () => {
+      const pending = new Set((await database.syncOutbox.toArray()).map(op => op.resolutionOf));
+      for (const record of await database.syncConflicts.toArray())
+        if (!record.resolvedAt && record.state === 'resolving' && !pending.has(record.id))
+          await database.syncConflicts.update(record.id, { state: 'conflict' });
+    });
+  });
+}
 export async function syncNow() {
   if (!account || switched()) return;
   if (running) return running;
@@ -459,7 +506,7 @@ export async function syncNow() {
         downloadError = error;
       }
       await remoteTransaction(async () => {
-        if (!downloadError) {
+        if (!downloadError && !uploadError) {
           const now = Date.now();
           await database.syncMeta.put({ id: 'lastSyncedAt', value: now });
           syncState.value.lastSyncedAt = now;
@@ -497,7 +544,7 @@ export async function syncNow() {
       retry
         ? Math.max(retryAfter, Math.min(120000, 1000 * 2 ** retry)) +
             Math.random() * 1000
-        : syncState.value.pending
+        : syncState.value.pending || firstWrite
           ? 800
           : 30000,
     );

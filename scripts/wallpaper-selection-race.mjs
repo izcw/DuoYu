@@ -28,6 +28,8 @@ const cache = compile(
   {
     setTimeout: (fn, delay) => setTimeout(fn, delay === 3000 ? 25 : delay),
     getAsset: async () => new Blob(['saved'],{type:'image/png'}),
+    activeDesktop: {value:'default'},
+    saveDesktopChoice: async (id,selection,asset) => preferences.set('wallpaperDesktop:'+id,{id,selection,asset}),
     rememberWallpaperChoice:()=>{},
     cacheAsset: async () => 'duoyu-asset:' + 'a'.repeat(64),
     accountStorage: {

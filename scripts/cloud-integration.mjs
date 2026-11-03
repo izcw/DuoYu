@@ -68,6 +68,7 @@ if (!navigator.locks)
 await mkdir('work/sync-integration', { recursive: true });
 const replacements = {
   "'../wallpaper/wallpaper-intent'": "'./wallpaper-intent.mjs'",
+  "'../../shared/collection-colors'": "'./collection-colors.mjs'",
   "'./pending-wallpaper'": "'./pending-wallpaper.mjs'",
   "'../../shared/storage/database'": "'./database.mjs'",
   "'../../shared/storage/account'": "'./account.mjs'",
@@ -84,6 +85,7 @@ const replacements = {
 };
 for (const [name, path] of Object.entries({
   'pending-wallpaper': 'src/features/sync/pending-wallpaper.ts',
+  'collection-colors': 'src/shared/collection-colors.ts',
   'wallpaper-intent': 'src/features/wallpaper/wallpaper-intent.ts',
   client: 'src/features/sync/client.ts',
   capture: 'src/features/sync/capture.ts',
@@ -191,7 +193,8 @@ try {
   });
   await database.libraryItems.update('i', { name: 'local-conflict' });
   await client.syncNow();
-  assert.equal((await database.libraryItems.get('i')).name, 'cloud-wins');
+  assert.equal((await database.libraryItems.get('i')).name, 'local-conflict');
+  assert.equal((await database.syncShadow.get('libraryItems:i')).payload.name, 'cloud-wins');
   assert.equal(await database.syncConflicts.count(), 1);
   await database.libraryItems.update('i', { name: 'uncertain' });
   __syncTest.drop = true;
@@ -254,7 +257,7 @@ try {
   });
   await client.syncNow();
   assert.equal(await database.syncOutbox.count(), 0);
-  assert(!(await database.libraryItems.get(rejectedId)));
+  assert(await database.libraryItems.get(rejectedId));
   assert(await database.libraryItems.get('after-rejected'));
   assert(
     (await database.syncConflicts.toArray()).some((c) => c.state === 'blocked'),
@@ -511,7 +514,7 @@ try {
   }
 
   console.log(
-    'PASS full client ↔ PostgreSQL: cloud bootstrap, durable queue, offline recovery, field merge, cloud-priority conflict copy, lost-response idempotent retry',
+    'PASS full client ↔ PostgreSQL: cloud bootstrap, durable queue, offline recovery, field merge, local conflict retention, lost-response idempotent retry',
   );
 } finally {
   client.stopCloud();
