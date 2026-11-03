@@ -11,12 +11,12 @@ export async function ensureDefaultSpace() {
       });
   });
 }
-export async function saveSpace(name = '', id?: string) {
+export async function saveSpace(name = '', id?: string, icon?: string) {
   let trimmed = name.trim().slice(0, 40);
   if (id && !trimmed) throw new Error('请输入空间名称');
   return database.transaction('rw', database.workspaceSpaces, async () => {
     if (id) {
-      if (!(await database.workspaceSpaces.update(id, { name: trimmed })))
+      if (!(await database.workspaceSpaces.update(id, { name: trimmed, ...(icon ? {icon} : {}) })))
         throw new Error('空间已不存在');
       return id;
     }
@@ -37,6 +37,7 @@ export async function saveSpace(name = '', id?: string) {
     await database.workspaceSpaces.add({
       id: key,
       name: trimmed,
+      ...(icon ? {icon} : {}),
       order: lastOrder + 1,
     });
     return key;
@@ -56,4 +57,11 @@ export async function deleteSpace(id: string) {
       await database.workspaceSpaces.delete(id);
     },
   );
+}
+
+export async function orderSpaces(ids: string[]) {
+  await database.transaction('rw', database.workspaceSpaces, async () => {
+    for (const [order, id] of ids.entries())
+      await database.workspaceSpaces.update(id, { order });
+  });
 }

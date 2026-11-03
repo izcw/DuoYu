@@ -37,7 +37,7 @@ watch(libraryPage, (value) =>
 const libraryPageTitle = ref('常用收藏');
 const libraryPages = ref<LibraryPage[]>([]);
 const homeQuiet = ref(false);
-const menuHovered = ref(false);
+
 const slideDirection = ref(1);
 async function clickClock() {
   if (page.value !== 0) {
@@ -132,23 +132,15 @@ function stepPage(direction: number) {
     :inert="workspaceOpen"
   >
     <GlassModeSwitch />
-    <div
-      class="desktop-menu"
-      :class="{ 'is-hovered': menuHovered }"
-      @mouseenter="menuHovered = true"
-      @mouseleave="menuHovered = false"
-    >
-      <LibraryPageMenu
-        v-model="libraryPage"
-        :inert="page === 0 && !pageDragActive && !menuHovered"
-        :aria-hidden="page === 0 && !pageDragActive && !menuHovered"
-        @title="libraryPageTitle = $event"
-        @home="go(0)"
-        :home-active="page === 0"
-        @pages="libraryPages = $event"
-        @navigate="go(1)"
-      />
-    </div>
+    <LibraryPageMenu
+      v-model="libraryPage"
+      :visible="page === 1 || pageDragActive"
+      @title="libraryPageTitle = $event"
+      @home="go(0)"
+      :home-active="page === 0"
+      @pages="libraryPages = $event"
+      @navigate="go(1)"
+    />
     <section class="start-panel" aria-label="桌面">
       <div class="desktop-header">
         <div
@@ -280,36 +272,6 @@ function stepPage(direction: number) {
   opacity: 0;
   pointer-events: none;
 }
-.desktop-menu {
-  position: fixed;
-  z-index: 10;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 107px;
-  padding: 0 5px 0 17px;
-  display: flex;
-  align-items: center;
-  border-radius: 24px;
-}
-.desktop-menu > :deep(nav) {
-  width: 100%;
-  padding: 10px 0;
-  opacity: 0;
-  transform: translateX(-100px);
-  pointer-events: none;
-  transition:
-    opacity 300ms ease,
-    transform 500ms cubic-bezier(0.22, 0.8, 0.22, 1);
-}
-.is-apps-page .desktop-menu > :deep(nav),
-.is-desktop-dragging .desktop-menu > :deep(nav),
-.desktop-menu.is-hovered > :deep(nav),
-.desktop-menu:focus-within > :deep(nav) {
-  opacity: 1;
-  transform: translateX(0);
-  pointer-events: auto;
-}
 .clock-action {
   cursor: pointer;
   border-radius: 16px;
@@ -354,15 +316,10 @@ function stepPage(direction: number) {
   .desktop-pages {
     padding-inline: 12px;
   }
-  .desktop-menu {
-    width: 54px;
-    padding: 0 2px 0 6px;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .desktop-header,
   .desktop-header :deep(.clock-time),
-  .desktop-menu > :deep(nav),
   .desktop-content :deep(.bottom-widgets),
   .desktop-library,
   .desktop-library-backdrop {

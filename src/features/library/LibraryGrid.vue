@@ -65,7 +65,7 @@ const size = (item: LibraryItem) =>
   normalizeSize(
     item.width || (item.kind === 'link' ? 1 : 3),
     Math.min(item.height || 1, props.rows),
-    item.kind,
+    item.kind,item.widgetSize,
   );
 // Keep each icon and caption together; a vertical run meets both outer edges.
 function linkOffset(item: LibraryItem) {
@@ -147,10 +147,10 @@ function syncGrid(grid: GridStack) {
       autoPosition: false,
       w: dimensions.width,
       h: dimensions.height,
-      minW: 1,
-      minH: 1,
-      maxW: itemMaxColumns(item.kind),
-      maxH: Math.min(props.rows, itemMaxRows(item.kind)),
+      minW: item.widgetSize?.minWidth ?? 1,
+      minH: item.widgetSize?.minHeight ?? 1,
+      maxW: item.widgetSize?.maxWidth ?? itemMaxColumns(item.kind),
+      maxH: Math.min(props.rows, item.widgetSize?.maxHeight ?? itemMaxRows(item.kind)),
       noResize: false,
       noMove: false,
     });
@@ -473,7 +473,7 @@ const { getGrid } = useWidgetGrid(gridElement, gridContainer, {
     const dimensions = normalizeSize(
       n.w || 1,
       n.h || 1,
-      props.items.find((i) => i.id === n.id)?.kind,
+      props.items.find((i) => i.id === n.id)?.kind,props.items.find((i) => i.id === n.id)?.widgetSize,
     );
     grid.update(el, { w: dimensions.width, h: dimensions.height });
   },
@@ -868,7 +868,7 @@ async function note(event: Event, id: string) {
 </template>
 <style scoped>
 .selection-locked .library-cell-grid > .grid-stack-item {
-  cursor: grab;
+  cursor: pointer;
 }
 /* Nested folder grids explicitly enable pointer events; override every child
    so the outer card owns the complete selection drag surface. */

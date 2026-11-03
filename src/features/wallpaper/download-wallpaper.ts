@@ -10,7 +10,9 @@ export async function downloadWallpaper(
 ): Promise<Blob> {
   const response = await fetch(url, {
     ...options,
-    signal: options.signal ?? AbortSignal.timeout(30_000),
+    signal: options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(30_000)])
+      : AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw Error('壁纸下载失败，请重试');
   const limit = 20 * 1024 * 1024;

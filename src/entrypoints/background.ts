@@ -179,6 +179,12 @@ export default defineBackground(() => {
   async function status(): Promise<AuthView> {
     let s = await read();
     if (!s) return { account: null };
+    if (navigator.onLine === false) {
+      return {
+        account: s.account,
+        warning: '当前离线，联网后自动恢复登录验证和同步',
+      };
+    }
     if (s.refreshPending) {
       await clear();
       return { account: null, warning: '上次登录续期结果不确定，请重新登录' };
@@ -332,7 +338,7 @@ export default defineBackground(() => {
           }
           const path = String(message.path || '');
           if (
-            !/^\/api\/v1\/(sync\/(snapshot|changes\?after=\d+(?:&epoch=[0-9a-f-]{36})?|operations|conflicts(?:\/[0-9a-f-]{36}\/resolve)?)|assets\/[0-9a-f]{64}|catalog\/(templates|widgets|wallpapers)|templates\/[0-9a-f-]{36}\/apply)$/.test(
+            !/^\/api\/v1\/(sync\/(snapshot|changes\?after=\d+(?:&epoch=[0-9a-f-]{36})?|operations|backups(?:\/[0-9a-f-]{36}\/restore)?|conflicts(?:\/[0-9a-f-]{36}\/resolve)?)|assets\/[0-9a-f]{64}|catalog\/(templates|widgets|wallpapers)|templates\/[0-9a-f-]{36}\/apply)$/.test(
               path,
             )
           ) {

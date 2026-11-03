@@ -1,12 +1,25 @@
 <script setup lang="ts">
-import { accountStorage } from '../../shared/storage/account';
+import { accountStorage, scopedKey } from '../../shared/storage/account';
 import { computed, ref, onUnmounted } from 'vue';
 import { liveQuery } from 'dexie';
 import { database, type LibraryItem } from '../../shared/storage/database';
 import WorkspaceFavicon from '../workspace/WorkspaceFavicon.vue';
-import { beginDockDrag, cancelPageDrag } from '../library/page-drag';
+import {
+  beginDockDrag,
+  cancelPageDrag,
+  dockIncomingItemId,
+  dockInsertBeforeId,
+  pageDragError,
+} from '../library/page-drag';
 import { browser } from 'wxt/browser';
 import { shortcutActions } from '../shortcuts/actions';
+import BaseDialog from '../../shared/components/base/BaseDialog.vue';
+import FolderIconGrid from '../library/FolderIconGrid.vue';
+import {
+  FOLDER_DIALOG_COLUMNS,
+  FOLDER_DIALOG_ROWS,
+} from '../library/grid-config';
+import { createDragLanding } from '../../shared/drag-landing';
 import ReorderTransition from '../../shared/components/base/ReorderTransition.vue';
 
 const props = defineProps<{
@@ -23,7 +36,7 @@ const defaults = [
   'duoyu-canvas',
 ];
 const pinned = ['duoyu-home', 'duoyu-workspace'];
-let dragImage: HTMLElement | undefined;
+const dragPreview = createDragLanding();
 const storageKey = 'duoyu-dock-order';
 function readOrder(): string[] {
   try {
@@ -43,29 +56,32 @@ function readOrder(): string[] {
   return [...defaults];
 }
 const order = ref(readOrder());
+const savingOrder = ref(false);
 function cloudOrder() {
+  if (dragged.value || savingOrder.value) return;
   order.value = readOrder();
 }
 window.addEventListener('duoyu-sync-preferences', cloudOrder);
 const links = ref<LibraryItem[]>([]);
 const subscription = liveQuery(() =>
-  database.libraryItems
-    .filter((item) => item.pageId === '__dock' && item.kind === 'link')
-    .toArray(),
+  database.libraryItems.filter((item) => item.pageId === '__dock').toArray(),
 ).subscribe((value) => {
   links.value = value;
+  if (value.some((item) => item.id === dockIncomingItemId.value))
+    dockIncomingItemId.value = '';
 });
 onUnmounted(() => {
   window.removeEventListener('duoyu-sync-preferences', cloudOrder);
+  stopGesture?.();
   subscription.unsubscribe();
-  dragImage?.remove();
+  dragPreview.dispose();
 });
 const items = computed(() =>
   [
     ...new Set([
       ...pinned,
       ...order.value,
-      ...links.value.map((item) => item.id),
+      ...links.value.filter((item) => !item.parent).map((item) => item.id),
     ]),
   ].flatMap((id) => {
     if (id === 'duoyu-home')
@@ -82,17 +98,59 @@ const items = computed(() =>
       ];
     const item =
       shortcutActions.find((item) => item.id === id) ||
-      links.value.find((item) => item.id === id);
+      links.value.find((item) => item.id === id && !item.parent);
     return item
       ? [{ id: item.id, name: item.name, icon: item.icon, url: item.url }]
       : [];
   }),
 );
-const dockEntries = computed(() => [
-  ...items.value.slice(0, pinned.length),
-  { id: '__dock-divider', name: '', icon: '', url: undefined },
-  ...items.value.slice(pinned.length),
-]);
+const dockEntries = computed(() => {
+  const entries = [...items.value];
+  if (
+    dockIncomingItemId.value &&
+    !entries.some((item) => item.id === dockIncomingItemId.value)
+  ) {
+    const index = entries.findIndex(
+      (item) => item.id === dockInsertBeforeId.value,
+    );
+    entries.splice(
+      index < 0 ? entries.length : Math.max(pinned.length, index),
+      0,
+      { id: '__dock-incoming', name: '', icon: '', url: undefined },
+    );
+  }
+  entries.splice(pinned.length, 0, {
+    id: '__dock-divider',
+    name: '',
+    icon: '',
+    url: undefined,
+  });
+  return entries;
+});
+const openedFolder = ref('');
+const folderPage = ref(0);
+const folder = computed(() =>
+  links.value.find(
+    (item) => item.id === openedFolder.value && item.kind === 'folder',
+  ),
+);
+const children = (id: string) =>
+  links.value
+    .filter((item) => item.parent === id)
+    .sort((a, b) => a.order - b.order);
+const folderChildren = computed(() => children(openedFolder.value));
+const folderPages = computed(() =>
+  Math.max(
+    1,
+    Math.ceil(
+      folderChildren.value.length /
+        (FOLDER_DIALOG_COLUMNS * FOLDER_DIALOG_ROWS),
+    ),
+  ),
+);
+function openFolderLink(item: LibraryItem) {
+  if (item.url) void browser.tabs.create({ url: item.url });
+}
 const dragged = ref('');
 let original: string[] = [];
 let slots: { id: string; center: number }[] = [];
@@ -106,65 +164,80 @@ function activate(item: (typeof items.value)[number]) {
   if (suppressClick || dragged.value) return;
   if (item.id === 'duoyu-home') emit('home');
   else if (item.id === 'duoyu-workspace') emit('workspace');
-  else if (item.url) void browser.tabs.create({ url: item.url });
+  else if (
+    links.value.some((link) => link.id === item.id && link.kind === 'folder')
+  ) {
+    openedFolder.value = item.id;
+    folderPage.value = 0;
+  } else if (item.url) void browser.tabs.create({ url: item.url });
 }
-function start(event: DragEvent, id: string) {
-  if (pinned.includes(id)) {
+let stopGesture: (() => void) | undefined;
+function press(event: MouseEvent, id: string) {
+  if (event.button !== 0 || savingOrder.value || pinned.includes(id)) return;
+  const source = event.currentTarget as HTMLElement;
+  const dock = source.closest('.desktop-dock')!;
+  stopGesture?.();
+  function move(e: MouseEvent) {
+    if (!dragged.value) {
+      if (Math.hypot(e.clientX - event.clientX, e.clientY - event.clientY) < 5)
+        return;
+      start(event, id, source);
+    }
+    if (dock.contains(document.elementFromPoint(e.clientX, e.clientY))) over(e);
+  }
+  function release(e: MouseEvent) {
+    cleanup();
+    if (!dragged.value) return;
+    if (dock.contains(document.elementFromPoint(e.clientX, e.clientY)))
+      void drop(e);
+    else finish();
+  }
+  function cancel() {
+    cleanup();
+    if (dragged.value) finish();
+  }
+  function key(e: KeyboardEvent) {
+    if (e.key === 'Escape') cancel();
+  }
+  function cleanup() {
+    window.removeEventListener('mousemove', move);
+    window.removeEventListener('mouseup', release);
+    window.removeEventListener('blur', cancel);
+    window.removeEventListener('keydown', key);
+    stopGesture = undefined;
+  }
+  stopGesture = cancel;
+  window.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', release);
+  window.addEventListener('blur', cancel);
+  window.addEventListener('keydown', key);
+}
+function start(event: MouseEvent, id: string, source: HTMLElement) {
+  if (savingOrder.value || pinned.includes(id)) {
     event.preventDefault();
     return;
   }
-  const source = event.currentTarget as HTMLElement;
   const tile = source.querySelector<HTMLElement>('.dock-tile')!;
-  const bounds = tile.getBoundingClientRect();
-  dragImage?.remove();
-  dragImage = tile.cloneNode(true) as HTMLElement;
-  dragImage.classList.add('dock-drag-image');
-  Object.assign(dragImage.style, {
-    position: 'fixed',
-    left: `${bounds.left}px`,
-    top: `${bounds.top}px`,
-    width: `${bounds.width}px`,
-    height: `${bounds.height}px`,
-    pointerEvents: 'none',
-    zIndex: '2147483647',
-    opacity: '1',
-    transform: 'none',
-    transition: 'none',
-    outline: 'none',
-    border: '0',
-    boxShadow: 'none',
-  });
-  document.body.append(dragImage);
-  event.dataTransfer?.setDragImage(
-    dragImage,
-    Math.max(0, event.clientX - bounds.left),
-    Math.max(0, event.clientY - bounds.top),
-  );
-  // Keep the snapshot rendered until the browser has captured its drag image.
-  requestAnimationFrame(() => {
-    if (dragImage) dragImage.style.left = '-1000px';
-  });
+  const artwork =
+    tile.querySelector<HTMLElement>(
+      '.dock-folder-preview, .workspace-favicon, img',
+    ) ?? tile;
+  dragPreview.capture(event, artwork, '', { transparentSurface: true });
   source.blur();
   original = items.value.map((item) => item.id);
-  if (links.value.some((item) => item.id === id))
-    beginDockDrag(id, event.currentTarget as HTMLElement);
+  if (links.value.some((item) => item.id === id)) beginDockDrag(id, source);
   slots = [
-    ...(
-      event.currentTarget as HTMLElement
-    ).parentElement!.querySelectorAll<HTMLElement>('.dock-entry'),
+    ...source.parentElement!.querySelectorAll<HTMLElement>('.dock-entry'),
   ].map((el) => {
     const bounds = el.getBoundingClientRect();
     return { id: el.dataset.dockId!, center: bounds.left + bounds.width / 2 };
   });
   dragged.value = id;
   suppressClick = true;
-  event.dataTransfer?.setData('application/x-duoyu-dock', id);
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
 }
-function over(event: DragEvent) {
+function over(event: MouseEvent) {
   if (!dragged.value) return;
   event.preventDefault();
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
   // Frozen slot positions prevent animated siblings from changing the target.
   const index = slots.filter(
     (slot) => slot.id !== dragged.value && event.clientX > slot.center,
@@ -174,8 +247,7 @@ function over(event: DragEvent) {
   if (next.some((id, i) => id !== order.value[i])) order.value = next;
 }
 function finish() {
-  dragImage?.remove();
-  dragImage = undefined;
+  dragPreview.dispose();
   cancelPageDrag();
   if (dragged.value) order.value = original;
   dragged.value = '';
@@ -184,16 +256,29 @@ function finish() {
     suppressClick = false;
   }, 0);
 }
-function drop(event: DragEvent) {
-  if (!dragged.value) return;
-  over(event);
-  try {
-    accountStorage.setItem(storageKey, JSON.stringify(order.value));
-  } catch {
-    /* Keep the current session order. */
-  }
+async function drop(event: MouseEvent) {
+  if (!dragged.value || savingOrder.value) return;
+  event.preventDefault();
+  // Commit the position already shown by dragover, not a second hit test against
+  // siblings which may still be animating underneath the pointer.
+  const next = [...order.value];
+  const previous = [...original];
+  savingOrder.value = true;
   dragged.value = '';
   finish();
+  try {
+    // Persist the sync source before publishing the local projection. An
+    // asynchronous preference event used to leave a window for stale resets.
+    await database.preferences.put({ id: 'dockOrder', value: next });
+    localStorage.setItem(scopedKey(storageKey), JSON.stringify(next));
+    order.value = next;
+  } catch (error) {
+    order.value = previous;
+    pageDragError.value =
+      error instanceof Error ? error.message : 'Dock 排序保存失败';
+  } finally {
+    savingOrder.value = false;
+  }
 }
 </script>
 <template>
@@ -220,6 +305,11 @@ function drop(event: DragEvent) {
             class="dock-divider"
             aria-hidden="true"
           />
+          <span
+            v-else-if="item.id === '__dock-incoming'"
+            class="dock-incoming"
+            aria-hidden="true"
+          />
           <button
             v-else
             :key="item.id"
@@ -228,17 +318,34 @@ function drop(event: DragEvent) {
               'dock-dragging': dragged === item.id,
             }"
             :data-dock-id="item.id"
-            :draggable="!pinned.includes(item.id)"
+            :draggable="false"
+            :data-drag-handle="!pinned.includes(item.id) && !savingOrder || undefined"
             :aria-label="item.name"
             :title="item.name"
             :aria-current="isActive(item.id) ? 'page' : undefined"
-            @dragstart.stop="start($event, item.id)"
-            @dragend="finish"
+            @mousedown.left="press($event, item.id)"
+            @dragstart.prevent
             @click="activate(item)"
           >
-            <span class="dock-tile"
-              ><WorkspaceFavicon
-                v-if="links.some((link) => link.id === item.id)"
+            <span class="dock-tile">
+              <span
+                v-if="
+                  links.some(
+                    (link) => link.id === item.id && link.kind === 'folder',
+                  )
+                "
+                class="dock-folder-preview"
+              >
+                <WorkspaceFavicon
+                  v-for="child in children(item.id).slice(0, 9)"
+                  :key="child.id"
+                  :src="child.icon"
+                  :page-url="child.url"
+                  :title="child.name"
+                />
+              </span>
+              <WorkspaceFavicon
+                v-else-if="links.some((link) => link.id === item.id)"
                 :src="item.icon"
                 :page-url="item.url"
                 :title="item.name" /><img
@@ -253,6 +360,39 @@ function drop(event: DragEvent) {
       </ReorderTransition>
     </nav>
   </Teleport>
+  <BaseDialog
+    :open="!!folder"
+    folder
+    :title="folder?.name || '文件夹'"
+    @update:open="openedFolder = ''"
+  >
+    <div class="dock-folder-content">
+      <FolderIconGrid
+        :items="folderChildren"
+        :columns="FOLDER_DIALOG_COLUMNS"
+        :rows="FOLDER_DIALOG_ROWS"
+        :page="Math.min(folderPage, folderPages - 1)"
+        labels
+        :disabled="false"
+        @open="openFolderLink"
+        @escape="openedFolder = ''"
+      />
+    </div>
+    <nav
+      v-if="folderPages > 1"
+      class="dock-folder-pages"
+      aria-label="文件夹翻页"
+    >
+      <button
+        v-for="n in folderPages"
+        :key="n"
+        :aria-pressed="folderPage === n - 1"
+        @click="folderPage = n - 1"
+      >
+        {{ n }}
+      </button>
+    </nav>
+  </BaseDialog>
 </template>
 <style scoped>
 .desktop-dock {
@@ -286,12 +426,19 @@ function drop(event: DragEvent) {
     visibility 0s 260ms;
 }
 .dock-items {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
 }
+.dock-incoming {
+  flex: 0 0 46px;
+  width: 46px;
+  height: 55px;
+  pointer-events: none;
+}
 .dock-dragging {
-  opacity: 0.3;
+  opacity: 0;
 }
 .dock-entry {
   user-select: none;
@@ -337,6 +484,43 @@ function drop(event: DragEvent) {
   outline: 2px solid white;
   outline-offset: 3px;
   border-radius: 12px;
+}
+.dock-folder-preview {
+  width: 46px;
+  height: 46px;
+  box-sizing: border-box;
+  padding: 5px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  border-radius: 10px;
+  background: #ffffff30;
+  overflow: hidden;
+}
+.dock-folder-preview :deep(.workspace-favicon),
+.dock-folder-preview :deep(.workspace-favicon img) {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  border-radius: 2px;
+}
+.dock-folder-content {
+  display: grid;
+  height: min(480px, calc(100svh - 180px));
+}
+.dock-folder-pages {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+.dock-folder-pages button {
+  background: #ffffff30;
+  color: white;
+  border: 0;
+  border-radius: 8px;
+  padding: 4px 10px;
 }
 .dock-dot {
   width: 4px;

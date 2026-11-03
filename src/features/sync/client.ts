@@ -1,3 +1,7 @@
+import {
+  restoreWallpaperChoice,
+  settleWallpaperChoice,
+} from '../wallpaper/wallpaper-intent';
 import { ref } from 'vue';
 import Dexie from 'dexie';
 import { browser } from 'wxt/browser';
@@ -22,6 +26,7 @@ import { fetchRemoteConflicts, conflictChanges } from './conflicts';
 import { pendingWallpaperChanges } from './pending-wallpaper';
 import {
   denormalized,
+  pendingCollectionCreates,
   overlay,
   rowChanges,
   same,
@@ -193,6 +198,7 @@ export async function applyRemote(
       resolvedAt: record.resolvedAt,
       changes: conflictChanges(record),
     }));
+    overlay(view, pendingCollectionCreates(next, unresolved));
     overlay(view, pendingWallpaperChanges(wallpaper?.contentHash, unresolved));
     for (const op of await database.syncOutbox.orderBy('createdAt').toArray())
       overlay(view, rowChanges(op.rows));
@@ -224,6 +230,8 @@ export async function applyRemote(
     await database.syncMeta.put({ id: 'initialized', value: true });
     if (epoch) await database.syncMeta.put({ id: 'epoch', value: epoch });
   });
+  await settleWallpaperChoice();
+  await restoreWallpaperChoice();
   await projectPreferences();
   void hydrateWallpaper();
   window.dispatchEvent(new Event('duoyu-assets-retry'));
@@ -252,6 +260,27 @@ async function hydrateWallpaper() {
       )
         return;
       const p = current!.payload as Row;
+      const selected = (await database.preferences.get('wallpaperSelection'))
+        ?.value;
+      if (
+        typeof selected === 'string' &&
+        (selected === 'daily' || p.selection !== selected)
+      )
+        return;
+      const saved = (
+        await database.preferences.get(
+          selected === 'upload'
+            ? 'savedWallpaper:upload'
+            : 'savedWallpaper:store',
+        )
+      )?.value as Row | undefined;
+      if (
+        saved &&
+        saved.selection === selected &&
+        saved.contentHash &&
+        p.contentHash !== saved.contentHash
+      )
+        return;
       const existing = await database.wallpapers.get('daily');
       const unresolved = (
         await database.syncConflicts.orderBy('createdAt').toArray()
@@ -510,6 +539,7 @@ export async function initializeCloud() {
     });
     if (response?.view && !(await chooseAccount(response.view.account)))
       return false;
+    await restoreWallpaperChoice();
     if (account) {
       await syncNow();
       await projectPreferences();
@@ -583,6 +613,14 @@ async function projectPreferences() {
     if (p.id === 'glassMode')
       document.documentElement.dataset.glassMode = String(p.value);
   }
+  // Explicit selection is authoritative; a legacy mode can arrive independently.
+  const selection = (await database.preferences.get('wallpaperSelection'))
+    ?.value;
+  if (typeof selection === 'string') {
+    const key = `account:${activeAccountKey()}:duoyu-wallpaper-mode`;
+    if (selection === 'daily') localStorage.removeItem(key);
+    else localStorage.setItem(key, 'custom');
+  }
   window.dispatchEvent(new Event('duoyu-sync-preferences'));
   if (
     oldWallpaperMode !==
@@ -599,4 +637,53 @@ export function formatSyncTime(time: number) {
   const date = new Date(time),
     pad = (v: number) => String(v).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+export async function restoreCloudBackup(
+  id: string,
+  expected: { epoch: string; revision: string },
+  requestId: string,
+) {
+  if (!account || switched()) throw Error('请先登录账号');
+  await syncNow();
+  if (syncState.value.error) throw Error(syncState.value.error);
+  await navigator.locks.request(
+    'duoyu:sync:' + activeAccountKey(),
+    async () => {
+      if (await database.syncOutbox.count())
+        throw Error('还有未同步的修改，请先完成同步');
+      if (await database.syncConflicts.filter((r) => !r.resolvedAt).count())
+        throw Error('请先处理同步更改，再恢复备份');
+      const deviceId = String(
+        (await database.syncMeta.get('device'))?.value || crypto.randomUUID(),
+      );
+      const result = await rpc(
+        '/api/v1/sync/backups/' + id + '/restore',
+        'POST',
+        {
+          id: requestId,
+          deviceId,
+          ...expected,
+        },
+      );
+      if (result.status !== 'applied') throw Error('备份未恢复，请刷新后重试');
+      await refreshSnapshot();
+    },
+  );
+}
+
+export async function backupCloudNow() {
+  if (!account || switched()) throw Error('请先登录账号再创建云端备份');
+  await syncNow();
+  if (syncState.value.error) throw Error(syncState.value.error);
+  await navigator.locks.request(
+    'duoyu:sync:' + activeAccountKey(),
+    async () => {
+      if (await database.syncOutbox.count())
+        throw Error('还有未同步的修改，请先完成同步');
+      if (await database.syncConflicts.filter((row) => !row.resolvedAt).count())
+        throw Error('请先处理同步更改，再创建云端备份');
+      await rpc('/api/v1/sync/backups', 'POST', {});
+    },
+  );
 }

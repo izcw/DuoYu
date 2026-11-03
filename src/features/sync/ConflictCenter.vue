@@ -6,14 +6,8 @@ import BaseDialog from '../../shared/components/base/BaseDialog.vue';
 import { database } from '../../shared/storage/database';
 import type { SyncConflict } from './capture';
 import type { Entity } from './model';
-import {
-  conflictChanges,
-  discardConflict,
-  retryConflict,
-  fieldLabels,
-  conflictValue,
-} from './conflicts';
-import { formatSyncTime, syncNow } from './client';
+import { conflictChanges, discardConflict, retryConflict } from './conflicts';
+import { formatSyncTime, syncNow, syncState } from './client';
 import ConflictDesktopPreview from './ConflictDesktopPreview.vue';
 import {
   groupPreviewMenus,
@@ -28,6 +22,7 @@ const records = ref<SyncConflict[]>([]),
   shadow = ref<Entity[]>([]),
   selected = ref(''),
   busy = ref(false),
+  latestReady = ref(false),
   error = ref(''),
   message = ref('');
 let subscription: ReturnType<ReturnType<typeof liveQuery>['subscribe']>;
@@ -76,7 +71,17 @@ const local = computed(() => localLayout.value.entities),
 const views = computed(() =>
   previewConflictViews(changes.value, [local.value, cloud.value]),
 );
-const highlightedIds = computed(() => changes.value.map((change) => change.id));
+const highlightedIds = computed(() =>
+  changes.value.flatMap((c) => [
+    c.id,
+    ...(c.table === 'tabCollections' ? ['preview-group-' + c.id] : []),
+    ...(c.table === 'savedTabs'
+      ? [c.value?.collectionId, c.base?.collectionId]
+          .filter(Boolean)
+          .map((id) => 'preview-group-' + id)
+      : []),
+  ]),
+);
 watch(selected, () => {
   error.value = '';
   message.value = '';
@@ -101,29 +106,30 @@ function versionLabel(entities: Entity[], view: string) {
     '此版本没有该区域'
   );
 }
-const settings = computed(() =>
-  changes.value
-    .filter((c) => c.table === 'preferences')
-    .map((c) => ({
-      id: c.id,
-      label:
-        (
-          {
-            glassMode: '玻璃材质',
-            wallpaperMode: '壁纸模式',
-            searchEngine: '搜索引擎',
-            dockOrder: 'Dock 顺序',
-          } as Record<string, string>
-        )[c.id] ||
-        fieldLabels[c.id] ||
-        '布局设置',
-      local: conflictValue(c.value?.value),
-      cloud: conflictValue(
-        cloud.value.find((e) => e.table === 'preferences' && e.id === c.id)
-          ?.payload.value,
-      ),
-    })),
+watch(
+  open,
+  async (value) => {
+    latestReady.value = false;
+    if (value) await refreshLatest();
+  },
+  { immediate: true },
 );
+async function refreshLatest() {
+  latestReady.value = false;
+  await run(async () => {
+    await syncNow();
+    if (syncState.value.error) throw Error(syncState.value.error);
+    shadow.value = (await database.syncShadow.toArray()).map((e) => ({
+      table: e.table,
+      id: e.entityId,
+      payload: e.payload as Record<string, any>,
+      revision: e.revision,
+      deleted: e.deleted,
+    }));
+    latestReady.value = true;
+  });
+  message.value = '';
+}
 async function run(action: () => Promise<unknown>) {
   if (busy.value) return;
   busy.value = true;
@@ -141,7 +147,7 @@ async function run(action: () => Promise<unknown>) {
 async function apply(side: 'local' | 'cloud') {
   if (side === 'local' && localLayout.value.overflow) return;
   const group = current.value;
-  if (!group || busy.value || resolving.value) return;
+  if (!group || !latestReady.value || busy.value || resolving.value) return;
   const members = [...group.records].reverse();
   const map = new Map(
     shadow.value.map((e) => [e.table + ':' + e.id, e.revision]),
@@ -179,7 +185,7 @@ async function apply(side: 'local' | 'cloud') {
     ><div class="conflict-content">
       <div class="conflict-heading">
         <span class="menu-summary">{{ groups.length }} 个待处理菜单</span>
-        <button class="secondary" :disabled="busy" @click="run(syncNow)">
+        <button class="secondary" :disabled="busy" @click="refreshLatest">
           刷新预览
         </button>
       </div>
@@ -249,18 +255,13 @@ async function apply(side: 'local' | 'cloud') {
                   "
                 />
               </template>
-              <div v-if="settings.length" class="version-settings">
-                <p v-for="setting in settings" :key="setting.id">
-                  <span>{{ setting.label }}</span
-                  >{{ setting[side] }}
-                </p>
-              </div>
               <footer>
                 <span v-if="resolving">正在同步处理结果</span
                 ><button
                   class="apply-version"
                   :disabled="
                     busy ||
+                    !latestReady ||
                     resolving ||
                     (side === 'local' && localLayout.overflow > 0)
                   "

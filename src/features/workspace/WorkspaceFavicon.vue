@@ -64,7 +64,9 @@ watch(
   () => [props.pageUrl, props.refreshKey, props.src] as const,
   async ([url, refresh], _, cleanup) => {
     let current = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     cleanup(() => {
+      clearTimeout(timer);
       current = false;
     });
     discoveredIcon.value = '';
@@ -75,8 +77,10 @@ watch(
       (!appearance.value && props.src)
     )
       return;
-    const icon = await automaticIcon(url, refresh);
-    if (current) discoveredIcon.value = icon;
+    timer = setTimeout(async () => {
+      const icon = await automaticIcon(url, refresh);
+      if (current) discoveredIcon.value = icon;
+    }, 450);
   },
   { immediate: true },
 );

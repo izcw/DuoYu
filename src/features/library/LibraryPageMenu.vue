@@ -5,10 +5,9 @@ import { connectPageDrag, pageDragError } from './page-drag';
 import { seedLibraryDemo } from './library';
 import { database, type LibraryPage } from '../../shared/storage/database';
 import '../../shared/side-menu.css';
-import PageIcon from '../../shared/components/base/PageIcon.vue';
-import PageIconPicker from '../../shared/components/base/PageIconPicker.vue';
-import BaseDialog from '../../shared/components/base/BaseDialog.vue';
-import ReorderTransition from '../../shared/components/base/ReorderTransition.vue';
+import DesktopMenu from '../../shared/components/base/DesktopMenu.vue';
+import MenuEditorDialog from '../../shared/components/base/MenuEditorDialog.vue';
+
 import {
   ensureLibraryPage,
   addLibraryPage,
@@ -17,7 +16,7 @@ import {
 } from './pages';
 defineOptions({ inheritAttrs: false });
 const active = defineModel<string>({ default: 'default' });
-const props = defineProps<{ homeActive?: boolean }>();
+const props = defineProps<{ homeActive?: boolean; visible?: boolean }>();
 const emit = defineEmits<{
   title: [value: string];
   home: [];
@@ -25,7 +24,7 @@ const emit = defineEmits<{
   pages: [value: LibraryPage[]];
 }>();
 const pages = ref<LibraryPage[]>([]);
-const hoveredIcon = ref<string>();
+
 const error = ref('');
 const editing = ref('');
 const name = ref('');
@@ -40,7 +39,7 @@ function outsideContext(event: PointerEvent) {
   if (!contextPanel.value?.contains(event.target as Node)) closeContext();
 }
 async function showContext(event: MouseEvent, page: LibraryPage) {
-  if (dragged.value || busy.value) return;
+  if (busy.value) return;
   context.value = {
     page,
     x: Math.max(8, Math.min(event.clientX, window.innerWidth - 188)),
@@ -65,14 +64,7 @@ function deletePage() {
 let disconnectDrag: (() => void) | undefined;
 let disposed = false;
 let subscription: { unsubscribe(): void } | undefined;
-const menu = ref<HTMLElement>();
-const dragged = ref('');
-let slots: { id: string; center: number }[] = [];
-let startScroll = 0;
 let savingOrder = false;
-let original: LibraryPage[] = [];
-let preview: LibraryPage[] = [];
-let dropped = false;
 function select(page: LibraryPage) {
   active.value = page.id;
   emit('title', page.name);
@@ -121,67 +113,23 @@ function rename() {
     editing.value = '';
   });
 }
-function start(event: DragEvent, id: string) {
-  closeContext();
-  if (editing.value || busy.value) {
-    event.preventDefault();
-    return;
+function choose(id: string) {
+  if (id === 'home') return emit('home');
+  const page = pages.value.find((p) => p.id === id);
+  if (page) {
+    select(page);
+    emit('navigate');
   }
-  dragged.value = id;
-  original = [...pages.value];
-  preview = original;
-  startScroll = menu.value?.scrollTop || 0;
-  // Read once, before FLIP transforms move rows under a stationary pointer.
-  slots = [
-    ...(menu.value?.querySelectorAll<HTMLElement>('.library-page-row') || []),
-  ].map((row) => {
-    const rect = row.getBoundingClientRect();
-    return {
-      id: row.dataset.libraryPageId!,
-      center: rect.top + rect.height / 2,
-    };
-  });
-  dropped = false;
-  event.dataTransfer?.setData('application/x-duoyu-library-page', id);
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
 }
-function over(event: DragEvent) {
-  if (!dragged.value) return;
-  event.preventDefault();
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-  const item = original.find((page) => page.id === dragged.value);
-  if (!item) return;
-  const y = event.clientY + (menu.value?.scrollTop || 0) - startScroll;
-  const index = slots.filter(
-    (slot) => slot.id !== dragged.value && y > slot.center,
-  ).length;
-  const next = original.filter((page) => page.id !== dragged.value);
-  next.splice(index, 0, item);
-  preview = next;
-  // Reuse the menu's FLIP transition: nearby rows make room for the dragged
-  // icon, while its translucent row shows the exact destination slot.
-  if (next.some((page, index) => page.id !== pages.value[index]?.id))
-    pages.value = next;
-}
-function end() {
-  if (!dropped && dragged.value) pages.value = original;
-  dragged.value = '';
-  slots = [];
-}
-function drop() {
-  if (!dragged.value) return;
-  dropped = true;
-  pages.value = preview;
-  dragged.value = '';
-  const order = pages.value.map((page) => page.id);
-  const fallback = original;
-  slots = [];
+function reorder(ids: string[]) {
+  const original = pages.value;
+  pages.value = ids.flatMap((id) => original.filter((p) => p.id === id));
   savingOrder = true;
   void run(async () => {
     try {
-      await orderLibraryPages(order);
+      await orderLibraryPages(ids);
     } catch (e) {
-      pages.value = fallback;
+      pages.value = original;
       throw e;
     } finally {
       savingOrder = false;
@@ -216,7 +164,7 @@ onMounted(async () => {
     database.libraryPages.orderBy('order').toArray(),
   ).subscribe({
     next(value) {
-      if (!dragged.value && !savingOrder) pages.value = value;
+      if (!savingOrder) pages.value = value;
       emit('pages', value);
       const selected = value.find((p) => p.id === active.value) || value[0];
       if (selected) select(selected);
@@ -237,209 +185,74 @@ onUnmounted(() => {
 });
 </script>
 <template>
-  <nav
+  <DesktopMenu
     v-bind="$attrs"
-    ref="menu"
-    class="library-page-menu side-menu"
-    aria-label="收藏页面"
-    @pointerdown.stop
-    @click.stop
-    @dragend="end"
-    @drop.prevent="drop"
-    @dragover="over"
-    @keydown.esc="end"
+    library
+    label="收藏页面"
+    add-label="添加收藏页"
+    :pinned="{ id: 'home', name: '首页', icon: 'Home' }"
+    :items="pages"
+    :active="homeActive ? 'home' : active"
+    :visible="visible || !!context"
+    :disabled="!!editing || busy"
+    @select="choose"
+    @add="add"
+    @context="
+      (event, id) => {
+        const p = pages.find((p) => p.id === id);
+        if (p) showContext(event, p);
+      }
+    "
+    @reorder="reorder"
   >
-    <p v-if="pageDragError" class="glass-surface" role="alert">
-      {{ pageDragError }}
-    </p>
-    <button
-      class="library-page-choice side-menu-choice library-home"
-      data-library-page-id="home"
-      aria-label="首页"
-      :aria-pressed="!!props.homeActive"
-      :aria-current="props.homeActive ? 'page' : undefined"
-      @mouseenter="hoveredIcon = 'home'"
-      @mouseleave="hoveredIcon = undefined"
-      @click="emit('home')"
+    <template #notice
+      ><p v-if="pageDragError || error" role="alert">
+        {{ pageDragError || error }}
+      </p></template
     >
-      <PageIcon
-        name="Home"
-        :active="props.homeActive || hoveredIcon === 'home'"
-      />
-      <small>首页</small>
-    </button>
-    <ReorderTransition class="library-page-list">
-      <div
-        v-for="item in pages"
-        :key="item.id"
-        class="library-page-row"
-        :class="{
-          'is-dragging': dragged === item.id,
-        }"
-        :data-library-page-id="item.id"
-        :draggable="!editing && !busy"
-        @dragstart.stop="start($event, item.id)"
-        @contextmenu.prevent.stop="showContext($event, item)"
+  </DesktopMenu>
+  <Teleport to="body">
+    <div
+      v-if="context"
+      ref="contextPanel"
+      class="page-context-menu side-menu-context glass-surface"
+      role="menu"
+      aria-label="收藏页操作"
+      tabindex="-1"
+      :style="{ left: context.x + 'px', top: context.y + 'px' }"
+      @contextmenu.prevent.stop
+      @pointerdown.stop
+      @click.stop
+      @keydown.esc.stop="closeContext"
+    >
+      <button
+        role="menuitem"
+        class="glass-control glass-interactive"
+        :disabled="busy"
+        @click="editPage"
       >
-        <button
-          class="library-page-choice side-menu-choice"
-          @mouseenter="hoveredIcon = item.id"
-          @mouseleave="hoveredIcon = undefined"
-          :aria-pressed="!props.homeActive && active === item.id"
-          :aria-current="
-            !props.homeActive && active === item.id ? 'page' : undefined
-          "
-          @click="
-            select(item);
-            emit('navigate');
-          "
-        >
-          <PageIcon
-            :name="item.icon"
-            :active="
-              (!props.homeActive && active === item.id) ||
-              hoveredIcon === item.id
-            "
-          />
-          <small>{{ item.name }}</small>
-        </button>
-      </div>
-    </ReorderTransition>
-    <button
-      class="library-page-add side-menu-add"
-      :disabled="busy"
-      aria-label="添加收藏页"
-      @mouseenter="hoveredIcon = 'add'"
-      @mouseleave="hoveredIcon = undefined"
-      @click="add"
-    >
-      <PageIcon name="Add" :active="hoveredIcon === 'add'" />
-    </button>
-    <p v-if="error" role="alert">{{ error }}</p>
-    <Teleport to="body">
-      <div
-        v-if="context"
-        ref="contextPanel"
-        class="page-context-menu side-menu-context glass-surface"
-        role="menu"
-        aria-label="收藏页操作"
-        tabindex="-1"
-        :style="{ left: context.x + 'px', top: context.y + 'px' }"
-        @contextmenu.prevent.stop
-        @pointerdown.stop
-        @click.stop
-        @keydown.esc.stop="closeContext"
+        修改名称和图标
+      </button>
+      <button
+        role="menuitem"
+        class="glass-control glass-interactive"
+        :disabled="pages.length < 2 || busy"
+        title="删除页面，收藏移至其他页面"
+        @click="deletePage"
       >
-        <button
-          role="menuitem"
-          class="glass-control glass-interactive"
-          :disabled="busy"
-          @click="editPage"
-        >
-          修改名称和图标
-        </button>
-        <button
-          role="menuitem"
-          class="glass-control glass-interactive"
-          :disabled="pages.length < 2 || busy"
-          title="删除页面，收藏移至其他页面"
-          @click="deletePage"
-        >
-          删除页面
-        </button>
-      </div>
-    </Teleport>
-    <BaseDialog
-      :open="!!editing"
-      :title="editing === '__new' ? '添加收藏页' : '编辑收藏页'"
-      :width="460"
-      @update:open="editing = ''"
-    >
-      <form class="page-editor-form" @submit.prevent="rename">
-        <label
-          >页面名称<input
-            v-model="name"
-            maxlength="30"
-            aria-label="收藏页名称"
-            placeholder="输入页面名称"
-            required
-        /></label>
-        <span>页面图标</span>
-        <PageIconPicker v-model="icon" />
-        <p v-if="error" role="alert">{{ error }}</p>
-        <div class="page-editor-actions">
-          <button
-            type="button"
-            class="glass-control glass-interactive"
-            @click="editing = ''"
-          >
-            取消
-          </button>
-          <button
-            class="glass-control glass-interactive"
-            :disabled="busy || !name.trim()"
-            type="submit"
-          >
-            {{ editing === '__new' ? '添加' : '保存' }}
-          </button>
-        </div>
-      </form>
-    </BaseDialog>
-  </nav>
+        删除页面
+      </button>
+    </div>
+  </Teleport>
+  <MenuEditorDialog
+    :open="!!editing"
+    :title="editing === '__new' ? '添加收藏页' : '编辑收藏页'"
+    :adding="editing === '__new'"
+    v-model:name="name"
+    v-model:icon="icon"
+    :busy="busy"
+    :error="error"
+    @close="editing = ''"
+    @submit="rename"
+  />
 </template>
-<style scoped>
-.page-editor-form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.page-editor-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.page-editor-form input {
-  padding: 10px 12px;
-  border: 1px solid #ffffff30;
-  background: #ffffff12;
-  color: inherit;
-  border-radius: 10px;
-}
-.page-editor-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 6px;
-}
-.page-editor-actions button {
-  padding: 10px 18px;
-  color: inherit;
-  border-radius: 10px;
-}
-.library-page-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.library-page-row {
-  position: relative;
-  border-radius: 14px;
-  cursor: grab;
-}
-.library-page-row.is-dragging {
-  opacity: 0.3;
-}
-input {
-  width: 100%;
-  box-sizing: border-box;
-}
-p {
-  font-size: 11px;
-}
-</style>
-
-<style scoped>
-.library-home {
-  margin-bottom: 6px;
-}
-</style>

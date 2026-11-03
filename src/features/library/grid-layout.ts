@@ -8,6 +8,7 @@ export function normalizeSize(
   width: number,
   height: number,
   kind: LibraryItem['kind'] = 'folder',
+  bounds?: LibraryItem['widgetSize'],
 ) {
   let w = Math.max(
       1,
@@ -23,6 +24,7 @@ export function normalizeSize(
         Math.round(Number.isFinite(height) ? height : 1),
       ),
     );
+  if (bounds) return {width:Math.min(bounds.maxWidth, Math.max(bounds.minWidth,w)),height:Math.min(bounds.maxHeight,Math.max(bounds.minHeight,h))};
   if (kind !== 'link' && w * h < 3) {
     if (h > w) h = 3;
     else w = 3;
@@ -49,7 +51,7 @@ export function layoutLibraryItems(
     const { width: w, height: h } = normalizeSize(
       item.width || (item.kind === 'link' ? 1 : 3),
       Math.min(item.height || 1, rows),
-      item.kind,
+      item.kind,item.widgetSize,
     );
     const fits = (x: number, y: number) =>
       x >= 0 &&

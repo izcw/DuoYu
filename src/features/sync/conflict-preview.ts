@@ -316,6 +316,27 @@ export function previewConflictViews(changes: Change[], versions: Entity[][]) {
     }
     if (payloads.every((p) => !p)) views.add(previewDefaultPage([change]));
   }
+  // A workspace preview already contains its collections. Resolve tab-level
+  // views to their owning spaces on both sides before grouping or rendering.
+  for (const view of [...views]) {
+    if (!view.startsWith('tabs:')) continue;
+    const id = view.slice(5);
+    const owners = [
+      ...versions.flatMap((version) =>
+        version
+          .filter(
+            (e) => !e.deleted && e.table === 'tabCollections' && e.id === id,
+          )
+          .map((e) => e.payload),
+      ),
+      ...changes
+        .filter((c) => c.table === 'tabCollections' && c.id === id)
+        .flatMap((c) => [c.base, c.value]),
+    ].filter((p): p is Row => !!p);
+    if (!owners.length) continue;
+    views.delete(view);
+    for (const owner of owners) views.add('space:' + (owner.spaceId || ''));
+  }
   return views.size ? [...views] : ['page:home'];
 }
 /** Merge chronological edits field by field so a later icon edit cannot erase an earlier rename. */

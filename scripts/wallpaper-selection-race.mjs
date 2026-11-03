@@ -16,6 +16,7 @@ function compile(source, bindings, exports) {
     code + '\nreturn {' + exports + '};',
   )(...Object.values(bindings));
 }
+let decodeCount = 0, stallDecode = false;
 const storage = new Map();
 const preferences = new Map();
 let record,
@@ -25,6 +26,9 @@ let record,
 const cache = compile(
   await readFile('src/features/wallpaper/wallpaper-cache.ts', 'utf8'),
   {
+    setTimeout: (fn, delay) => setTimeout(fn, delay === 3000 ? 25 : delay),
+    getAsset: async () => new Blob(['saved'],{type:'image/png'}),
+    rememberWallpaperChoice:()=>{},
     cacheAsset: async () => 'duoyu-asset:' + 'a'.repeat(64),
     accountStorage: {
       getItem: (k) => storage.get(k),
@@ -43,6 +47,7 @@ const cache = compile(
         },
       },
       preferences: {
+        get: async id => ({value:preferences.get(id)}),
         put: async (value) => {
           assert(transaction);
           preferences.set(value.id, value.value);
@@ -69,7 +74,7 @@ const cache = compile(
     Image: class {
       naturalWidth = 10;
       naturalHeight = 10;
-      async decode() {}
+      decode() { decodeCount++; return stallDecode ? new Promise(() => {}) : Promise.resolve(); }
     },
     saveWallpaperPreview: () => {},
     window: { dispatchEvent: () => {} },
@@ -78,12 +83,13 @@ const cache = compile(
       throw Error('Unexpected daily download');
     },
   },
-  'importWallpaper, refreshWallpaper, selectDailyWallpaper',
+  'importWallpaper, refreshWallpaper, selectDailyWallpaper, readWallpaperForDisplay',
 );
 await cache.importWallpaper(
   new Blob(['chosen'], { type: 'image/png' }),
   'bing:test',
 );
+assert.equal(decodeCount, 1, 'saving must reuse the already decoded original');
 assert.equal(preferences.get('wallpaperMode'), 'custom');
 assert.equal(preferences.get('wallpaperSelection'), 'bing:test');
 assert.equal(record.selection, 'bing:test');
@@ -105,6 +111,33 @@ assert.equal(storage.has('duoyu-wallpaper-mode'), false);
 console.log(
   'PASS atomic wallpaper/selection save, queued daily refresh cannot overwrite custom choice',
 );
+stallDecode = true;
+await cache.readWallpaperForDisplay();
+stallDecode = false;
+await cache.importWallpaper(new Blob(['after-timeout'], {type:'image/png'}), 'cloud:after-timeout');
+assert.equal(record.selection, 'cloud:after-timeout');
+preferences.set('wallpaperMode', null);
+storage.delete('duoyu-wallpaper-mode');
+record = {...record, selection: undefined, sourceUrl:'old-daily'};
+await cache.readWallpaperForDisplay();
+assert.equal(record.selection, 'cloud:after-timeout');
+assert.equal(storage.get('duoyu-wallpaper-mode'),'custom');
+console.log('PASS persisted selection restores the selected original before daily refresh');
+console.log('PASS stalled startup preview releases the wallpaper lock and subsequent saving completes');
+
+const cloudSource = (await readFile('src/features/desktop/CloudCatalog.vue','utf8')).match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1].replaceAll('import.meta.env.VITE_SYNC_URL', JSON.stringify('https://sync.duoyu.link'));
+let finishSave;
+const cloud = compile(cloudSource, {
+  ref:value=>({value}),watch:()=>{},defineProps:()=>({kind:'wallpapers'}),defineEmits:()=>()=>{},useWallpaperSelection:()=>({value:''}),
+  downloadWallpaper:async (_url,progress)=>{progress({loaded:10,total:10,complete:true});return new Blob(['image'],{type:'image/png'})},
+  importWallpaper:()=>new Promise(resolve=>{finishSave=resolve}),
+},'apply,busy,applying,progress,error');
+const saving=cloud.apply({id:'test',payload:{url:'https://sync.duoyu.link/catalog-assets/'+'a'.repeat(64)}});
+await new Promise(resolve=>setTimeout(resolve,0));
+assert.equal(cloud.busy.value,true);assert.equal(cloud.progress.value.complete,true);
+finishSave();await saving;
+assert.equal(cloud.busy.value,false);assert.equal(cloud.applying.value,undefined);assert.equal(cloud.progress.value,undefined);
+console.log('PASS featured wallpaper saving clears its progress state after local persistence');
 let resolveOld;
 const oldUrl = new Promise((resolve) => {
   resolveOld = resolve;

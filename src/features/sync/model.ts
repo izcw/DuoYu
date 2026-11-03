@@ -126,6 +126,41 @@ export function overlay(remote: Map<string, Entity>, changes: Change[]) {
     });
   }
 }
+// A rejected creation moves from the outbox to the conflict store. Keep its
+// local projection until resolution, without recording it as cloud data.
+export function pendingCollectionCreates(
+  shadow: Map<string, Entity>,
+  conflicts: { resolvedAt?: number; changes: Change[] }[],
+): Change[] {
+  const changes = conflicts
+    .filter((record) => !record.resolvedAt)
+    .flatMap((record) => record.changes);
+  const ids = new Set(
+    changes
+      .filter(
+        (c) =>
+          c.table === 'tabCollections' &&
+          c.base === null &&
+          c.value &&
+          !shadow.has('tabCollections:' + c.id),
+      )
+      .map((c) => c.id),
+  );
+  const spaces = new Set(
+    changes
+      .filter((c) => c.table === 'tabCollections' && ids.has(c.id))
+      .map((c) => c.value?.spaceId || 'default'),
+  );
+  return changes.filter(
+    (c) =>
+      (c.table === 'tabCollections' && ids.has(c.id)) ||
+      (c.table === 'savedTabs' &&
+        ids.has(c.value?.collectionId ?? c.base?.collectionId)) ||
+      (c.table === 'workspaceSpaces' &&
+        spaces.has(c.id) &&
+        !shadow.has('workspaceSpaces:' + c.id)),
+  );
+}
 export function denormalized(entities: Entity[]): Record<string, Row[]> {
   const tables: Record<string, Row[]> = {
     libraryPages: [],

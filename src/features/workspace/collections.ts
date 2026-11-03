@@ -1,3 +1,4 @@
+import type { CollectionColor } from '../../shared/collection-colors';
 import {
   database,
   type SavedTab,
@@ -29,9 +30,16 @@ export async function createCollection(
     database.tabCollections,
     database.workspaceSpaces,
     async () => {
-      if (!(await database.workspaceSpaces.get(spaceId)))
-        throw new Error('空间已不存在，请重新选择');
-      const last = await database.tabCollections.orderBy('order').last();
+      if (!(await database.workspaceSpaces.get(spaceId))) {
+        if (spaceId !== 'default') throw new Error('空间已不存在，请重新选择');
+        // A signed-in workspace can be empty after its first cloud snapshot.
+        await database.workspaceSpaces.add({
+          id: 'default',
+          name: '个人空间',
+          order: 0,
+        });
+      }
+      const first = await database.tabCollections.orderBy('order').first();
       const existing = await database.tabCollections.toArray();
       const nextNumber =
         existing
@@ -46,7 +54,7 @@ export async function createCollection(
         name:
           name.trim().slice(0, 80) ||
           `集合${String(nextNumber).padStart(2, '0')}`,
-        order: (last?.order ?? -1) + 1,
+        order: (first?.order ?? 1) - 1,
         updatedAt: Date.now(),
         tabs,
         spaceId,
@@ -103,15 +111,17 @@ export async function moveSavedTab(
     if (source !== target) await database.tabCollections.put(to);
   });
 }
-export async function reorderCollection(id: string, before: string) {
+export async function reorderCollection(id: string, before?: string) {
   if (id === before) return;
   await database.transaction('rw', database.tabCollections, async () => {
     const all = await database.tabCollections.orderBy('order').toArray();
     const item = all.find((c) => c.id === id);
-    if (!item || !all.some((c) => c.id === before)) return;
+    if (!item || (before && !all.some((c) => c.id === before))) return;
     const rest = all.filter((c) => c.id !== id);
     rest.splice(
-      rest.findIndex((c) => c.id === before),
+      before
+        ? rest.findIndex((c) => c.id === before)
+        : rest.findLastIndex((c) => c.spaceId === item.spaceId) + 1,
       0,
       item,
     );
@@ -144,4 +154,14 @@ export async function updateSavedTab(
     group.updatedAt = Date.now();
     await database.tabCollections.put(group);
   });
+}
+
+export async function setCollectionColor(id: string, color: CollectionColor) {
+  if (
+    !(await database.tabCollections.update(id, {
+      color,
+      updatedAt: Date.now(),
+    }))
+  )
+    throw Error('集合已不存在');
 }

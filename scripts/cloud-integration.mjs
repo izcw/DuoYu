@@ -24,7 +24,9 @@ const account = {
   picture: '',
 };
 const backend = { ...account, id: accountId(account.issuer, account.sub) };
+let rateClock = Date.now();
 const server = createSyncServer({
+  clock:()=>rateClock+=1000,
   pool,
   origins: [],
   authenticate: async () => backend,
@@ -65,6 +67,8 @@ if (!navigator.locks)
   });
 await mkdir('work/sync-integration', { recursive: true });
 const replacements = {
+  "'../wallpaper/wallpaper-intent'": "'./wallpaper-intent.mjs'",
+  "'./pending-wallpaper'": "'./pending-wallpaper.mjs'",
   "'../../shared/storage/database'": "'./database.mjs'",
   "'../../shared/storage/account'": "'./account.mjs'",
   "'../auth/config'": "'./auth.mjs'",
@@ -79,6 +83,8 @@ const replacements = {
   "'wxt/browser'": "'./browser.mjs'",
 };
 for (const [name, path] of Object.entries({
+  'pending-wallpaper': 'src/features/sync/pending-wallpaper.ts',
+  'wallpaper-intent': 'src/features/wallpaper/wallpaper-intent.ts',
   client: 'src/features/sync/client.ts',
   capture: 'src/features/sync/capture.ts',
   model: 'src/features/sync/model.ts',
@@ -299,6 +305,18 @@ try {
   )
     await new Promise((r) => setTimeout(r, 20));
   assert((await database.wallpapers.get('daily')).blob instanceof Blob);
+  const wallpaperIntent = await import('../work/sync-integration/wallpaper-intent.mjs');
+  wallpaperIntent.rememberWallpaperChoice({selection:'cloud:chosen',contentHash:pngSha,asset:'duoyu-asset:'+pngSha,sourceUrl:'local:'+pngSha});
+  await client.refreshSnapshot();
+  assert.equal((await database.wallpapers.get('daily')).selection,'cloud:chosen');
+  assert.equal((await database.preferences.get('wallpaperSelection')).value,'cloud:chosen');
+  assert(await database.syncOutbox.count(), 'old startup snapshot must queue the explicit choice for upload');
+  await client.syncNow();
+  assert.equal((await database.syncShadow.get('wallpapers:daily')).payload.selection,'cloud:chosen');
+  await client.refreshSnapshot();
+  assert.equal((await database.wallpapers.get('daily')).selection,'cloud:chosen');
+  console.log('PASS explicit wallpaper survives stale startup snapshot, uploads and remains selected after the next refresh');
+
   console.log(
     'PASS bad-operation quarantine, continuing uploads/downloads, timestamp, in-app conflict resolution, nonblocking image failure and retry',
   );
@@ -448,7 +466,7 @@ try {
           if (action === 'online') __syncTest.offline = false;
           if (action === 'add') await database.libraryItems.put(extra.item);
           if (action === 'sync') await client.syncNow();
-          return { items: await database.libraryItems.toArray() };
+          return { items: await database.libraryItems.toArray(), state:client.syncState.value, pending:await database.syncOutbox.count() };
         },
       },
       ...peers,
@@ -481,7 +499,7 @@ try {
         for (const id of expected)
           assert(
             view.items.some((r) => r.id === id),
-            'Missing ' + id,
+            'Missing ' + id + ' state=' + JSON.stringify(view.state) + ' pending=' + view.pending,
           );
       }
     }

@@ -62,10 +62,10 @@ onUnmounted(() => clearInterval(timer));
 
 <template>
   <div class="clock">
-    <time class="clock-time">{{ time }}</time>
     <p class="clock-date">
       <span>{{ date }}</span>
       <span class="clock-lunar">农历{{ lunarDate }}</span>
     </p>
+    <time class="clock-time">{{ time }}</time>
   </div>
 </template>

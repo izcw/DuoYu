@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { WidgetSize } from '../../shared/storage/database';
 import MenuAdd from '@icon-park/vue-next/es/icons/Add';
 import MenuFolder from '@icon-park/vue-next/es/icons/Folder';
 import MenuAllApplication from '@icon-park/vue-next/es/icons/AllApplication';
@@ -24,6 +25,7 @@ import {
 import './library.css';
 import { isWallpaperBlank } from '../wallpaper/blank-area';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
+import { backupCloudNow } from '../sync/client';
 import { openSettings } from '../desktop/settings-state';
 import DesktopTools from '../desktop/DesktopTools.vue';
 import LibraryGrid from './LibraryGrid.vue';
@@ -135,8 +137,12 @@ function contextAction(
 ) {
   context.value = undefined;
   if (action === 'layout') automatic.value = !automatic.value;
-  else if (action === 'backup' || action === 'settings')
-    openSettings(action === 'backup' ? 'backup' : 'general', props.pageId);
+  else if (action === 'backup')
+    void run(async () => {
+      await backupCloudNow();
+      openSettings('account', props.pageId);
+    });
+  else if (action === 'settings') openSettings('general', props.pageId);
   else if (action === 'link' || action === 'folder')
     void edit(undefined, action);
   else tool.value = action;
@@ -155,9 +161,14 @@ onUnmounted(() => {
   window.removeEventListener('resize', dismissContext);
   document.removeEventListener('wheel', dismissContext);
 });
-async function addWidget(widget: 'calendar' | 'weather' | 'note') {
+async function addWidget(
+  widget: 'calendar' | 'weather' | 'note',
+  size?: WidgetSize,
+) {
+  const width = size?.width ?? 3,
+    height = size?.height ?? (widget === 'weather' ? 1 : 2);
   await database.libraryItems.add({
-    ...newPosition(3, widget === 'weather' ? 1 : 2),
+    ...newPosition(width, height),
     id: crypto.randomUUID(),
     kind: 'widget',
     widget,
@@ -167,8 +178,9 @@ async function addWidget(widget: 'calendar' | 'weather' | 'note') {
     parent: '',
     url: '',
     icon: '',
-    width: 3,
-    height: widget === 'weather' ? 1 : 2,
+    width,
+    height,
+    ...(size ? { widgetSize: size } : {}),
     order: Math.max(-1, ...items.value.map((i) => i.order)) + 1,
     updatedAt: Date.now(),
   });
@@ -258,13 +270,25 @@ async function edit(item?: LibraryItem, kind: 'link' | 'folder' = 'link') {
   error.value = '';
   removing.value = undefined;
   await nextTick();
-  nameInput.value?.focus({ preventScroll: true });
+  if (!item) urlInput.value?.focus({ preventScroll: true });
+  else nameInput.value?.focus({ preventScroll: true });
 }
 function truncateName(event: Event) {
   if ((event as InputEvent).isComposing) return;
   const input = event.target as HTMLInputElement;
   input.value = truncateLinkTitle(input.value);
   draft.value.name = input.value;
+}
+const urlInput = ref<HTMLInputElement>();
+let metadataTimer: ReturnType<typeof setTimeout> | undefined;
+onUnmounted(() => clearTimeout(metadataTimer));
+function urlChanged() {
+  clearTimeout(metadataTimer);
+  metadataTimer = setTimeout(() => {
+    if (!editing.value) return;
+    void fetchTitle();
+    void iconEditor.value?.refreshAutomatic(false);
+  }, 450);
 }
 const titleNotice = ref('');
 const fetchingTitle = ref(false);
@@ -532,7 +556,9 @@ onUnmounted(() => subscription?.unsubscribe());
               ><input
                 v-model="draft.url"
                 aria-label="收藏网址"
-                @input="fetchTitle()"
+                ref="urlInput"
+                :autofocus="!editingId"
+                @input="urlChanged"
                 placeholder="https://"
                 type="url"
                 required /></span
@@ -656,10 +682,11 @@ onUnmounted(() => subscription?.unsubscribe());
       @close="tool = ''"
       @layout="automatic = $event"
       @add="
-        run(async () => {
-          await addWidget($event);
-          tool = '';
-        })
+        (kind, size) =>
+          run(async () => {
+            await addWidget(kind, size);
+            tool = '';
+          })
       "
       @folder="
         tool = '';

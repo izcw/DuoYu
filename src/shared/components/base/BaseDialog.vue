@@ -54,9 +54,11 @@ watch(
       await nextTick();
       if (props.open)
         (
+          panel.value?.querySelector<HTMLElement>('[autofocus]') ??
           panel.value?.querySelector<HTMLElement>(
             'input,button,[tabindex="0"]',
-          ) ?? panel.value
+          ) ??
+          panel.value
         )?.focus();
     } else if (previous?.isConnected) previous.focus();
   },

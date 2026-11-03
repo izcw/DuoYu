@@ -1,3 +1,7 @@
+import {
+  collectionColor,
+  type CollectionColor,
+} from '../../shared/collection-colors';
 import { accountStorage } from '../../shared/storage/account';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { liveQuery } from 'dexie';
@@ -237,16 +241,25 @@ export function useWorkspace() {
   }
   async function saveBrowserGroup(id: number) {
     const targetSpace = isMarkedSpace.value ? 'default' : activeSpace.value;
-    const group = await browser.tabGroups.get(id);
-    const members = await browser.tabs.query({ groupId: id });
+    const group = browserGroups.value.find((group) => group.id === id);
+    const windowId =
+      group?.windowId ?? tabs.value.find((tab) => tab.groupId === id)?.windowId;
+    if (windowId === undefined) throw Error('群组已关闭，请重新选择');
+    const members = (await browser.tabs.query({ windowId })).filter(
+      (tab) => tab.groupId === id,
+    );
     const entries = members
       .sort((a, b) => a.index - b.index)
       .map(snapshot)
       .filter((tab): tab is SavedTab => !!tab);
     if (!entries.length) throw new Error('此群组没有可保存的网页');
-    const name = group.title?.trim() || '未命名群组';
-    await createCollection(name, entries, targetSpace);
-    notice.value = `已保存为集合「${name}」${isMarkedSpace.value ? '（个人空间）' : ''}`;
+    const name = group?.title?.trim() || '未命名群组';
+    const collectionId = await createCollection(name, entries, targetSpace);
+    activeSpace.value = targetSpace;
+    query.value = '';
+    await syncAfterDrop();
+    destination.value = collectionId;
+    notice.value = `已保存为集合「${name}」，共 ${entries.length} 个标签页`;
   }
   async function activate(tab: BrowserTab) {
     if (tab.id === undefined) return;
@@ -257,19 +270,39 @@ export function useWorkspace() {
     if (tab.id !== undefined && tab.id !== owner?.id)
       await browser.tabs.remove(tab.id);
   }
-  async function openSaved(entries: SavedTab[]) {
-    let opened = 0;
+  async function openSaved(
+    entries: SavedTab[],
+    groupName?: string,
+    color: CollectionColor = 'grey',
+  ) {
+    const ids: number[] = [];
     for (const tab of entries) {
       const url = webUrl(tab.url);
       if (!url) continue;
-      await browser.tabs.create({
+      const opened = await browser.tabs.create({
         url,
         active: false,
         windowId: owner?.windowId,
       });
-      opened++;
+      if (opened.id !== undefined) ids.push(opened.id);
     }
-    notice.value = `已在后台打开 ${opened} 个标签页`;
+    if (groupName !== undefined && ids.length) {
+      const groupId = await browser.tabs.group({
+        tabIds: ids as [number, ...number[]],
+        createProperties: { windowId: owner?.windowId },
+      });
+      await browser.tabGroups.update(groupId, { title: groupName, color });
+      notice.value = `已在「${groupName}」标签组中打开 ${ids.length} 个标签页`;
+    } else notice.value = `已在后台打开 ${ids.length} 个标签页`;
+  }
+  async function openCollection(id: string) {
+    const collection = await database.tabCollections.get(id);
+    if (!collection) throw Error('集合已不存在');
+    await openSaved(
+      collection.tabs,
+      collection.name,
+      collectionColor(collection.color),
+    );
   }
   async function removeGroup(id: string) {
     const previous = await database.tabCollections.get(id);
@@ -420,6 +453,7 @@ export function useWorkspace() {
     saveBrowserGroup,
     close,
     openSaved,
+    openCollection,
     removeGroup,
     removeTab,
     undoDelete,

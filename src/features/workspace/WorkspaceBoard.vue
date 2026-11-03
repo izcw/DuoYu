@@ -1,4 +1,13 @@
 <script setup lang="ts">
+import { useMouseSort } from '../../shared/useMouseSort';
+const pressSort = useMouseSort();
+import PageIcon from '../../shared/components/base/PageIcon.vue';
+import {
+  collectionColors,
+  collectionColor,
+} from '../../shared/collection-colors';
+import Search from '@icon-park/vue-next/es/icons/Search';
+import { accountStorage } from '../../shared/storage/account';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { browser } from 'wxt/browser';
 import {
@@ -7,17 +16,20 @@ import {
   hostname,
   moveSavedTab,
   renameCollection,
+  setCollectionColor,
   reorderCollection,
 } from './collections';
 import { useWorkspace, type BrowserTab } from './useWorkspace';
 import { createDragLanding } from '../../shared/drag-landing';
 import ReorderTransition from '../../shared/components/base/ReorderTransition.vue';
 import WorkspaceFavicon from './WorkspaceFavicon.vue';
+import MenuEditorDialog from '../../shared/components/base/MenuEditorDialog.vue';
+import DesktopMenu from '../../shared/components/base/DesktopMenu.vue';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
 import type { SavedTab, TabCollection } from '../../shared/storage/database';
 import './workspace.css';
 import '../../shared/side-menu.css';
-import { saveSpace, deleteSpace } from './spaces';
+import { saveSpace, deleteSpace, orderSpaces } from './spaces';
 
 const {
   spaces,
@@ -30,7 +42,6 @@ const {
   visibleTabs,
   windowOptions,
   tabGroups,
-  savedCount,
   loading,
   tabsLoading,
   needsTabPermission,
@@ -48,6 +59,7 @@ const {
   toggleBrowserGroup,
   saveBrowserGroup,
   openSaved,
+  openCollection,
   removeGroup,
   removeTab,
   undoDelete,
@@ -119,6 +131,22 @@ const selectedEntries = computed(() =>
       .map((tab) => ({ group: group.id, tab })),
   ),
 );
+const allSelectedMarked = computed(
+  () =>
+    selectedEntries.value.length > 0 &&
+    selectedEntries.value.every(({ tab }) => tab.starred),
+);
+function toggleSelectedMarks() {
+  const entries = [...selectedEntries.value];
+  const starred = !allSelectedMarked.value;
+  return run(async () => {
+    for (const { group, tab } of entries) {
+      if (!!tab.starred !== starred)
+        await updateSavedTab(group, tab.id, { starred });
+    }
+  });
+}
+
 watch(activeSpace, () => {
   selected.value.clear();
   menu.value = '';
@@ -166,7 +194,46 @@ function submitTab() {
     }
   });
 }
-const viewMode = ref<'grid' | 'list'>('grid');
+const emit = defineEmits<{ close: [] }>();
+const searchInput = ref<HTMLInputElement>();
+const viewKey = 'duoyu-workspace-view';
+const viewMode = ref<'grid' | 'list'>(
+  accountStorage.getItem(viewKey) === 'list' ? 'list' : 'grid',
+);
+watch(viewMode, (mode) => accountStorage.setItem(viewKey, mode));
+const sortingSpaces = ref(false);
+function switchSpace(id: string) {
+  activeSpace.value = id;
+  spaceForm.value = false;
+  deletingSpace.value = false;
+  closeSpaceMenu();
+}
+async function reorderSpaces(ids: string[]) {
+  sortingSpaces.value = true;
+  try {
+    await run(() => orderSpaces(ids));
+  } finally {
+    sortingSpaces.value = false;
+  }
+}
+function workspaceKey(event: KeyboardEvent) {
+  if (event.key.toLowerCase() === 'f' && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    searchInput.value?.focus();
+    searchInput.value?.select();
+  } else if (
+    event.key === 'Escape' &&
+    (menu.value || spaceMenu.value || query.value)
+  ) {
+    event.stopPropagation();
+    if (spaceMenu.value) closeSpaceMenu();
+    else if (menu.value) menu.value = '';
+    else {
+      query.value = '';
+      searchInput.value?.focus();
+    }
+  }
+}
 const spaceMenu = ref<{ id: string; x: number; y: number }>();
 const spaceMenuPanel = ref<HTMLElement>();
 function closeSpaceMenu() {
@@ -206,26 +273,32 @@ onUnmounted(() => {
 const spaceForm = ref(false);
 const spaceEditing = ref<string>();
 const spaceName = ref('');
-const spaceInput = ref<HTMLInputElement>();
 const deletingSpace = ref(false);
-function addSpace() {
-  void run(async () => {
-    activeSpace.value = await saveSpace();
-    spaceForm.value = false;
-    deletingSpace.value = false;
-  });
+const spaceIcon = ref('Bookmark');
+async function addSpace() {
+  spaceEditing.value = undefined;
+  spaceIcon.value = 'Bookmark';
+  let n = 1;
+  while (spaces.value.some((s) => s.name === '新空间' + n)) n++;
+  spaceName.value = '新空间' + n;
+  spaceForm.value = true;
+  await nextTick();
 }
 async function editSpace() {
   spaceEditing.value = activeSpace.value;
+  spaceIcon.value = currentSpace.value?.icon || 'Bookmark';
   spaceName.value = currentSpace.value?.name || '';
   spaceForm.value = true;
   deletingSpace.value = false;
   await nextTick();
-  spaceInput.value?.focus();
 }
 function submitSpace() {
   void run(async () => {
-    activeSpace.value = await saveSpace(spaceName.value, spaceEditing.value);
+    activeSpace.value = await saveSpace(
+      spaceName.value,
+      spaceEditing.value,
+      spaceIcon.value,
+    );
     spaceForm.value = false;
   });
 }
@@ -234,6 +307,18 @@ const editName = ref('');
 const editInput = ref<HTMLInputElement[]>();
 const deleting = ref('');
 const collapsed = ref(new Set<string>());
+const allCollapsed = computed(() =>
+  collections.value.every((group) => collapsed.value.has(group.id)),
+);
+const collapseAction = computed(() =>
+  allCollapsed.value ? '展开全部' : '收起全部',
+);
+function toggleAllCollections() {
+  collapsed.value = allCollapsed.value
+    ? new Set()
+    : new Set(collections.value.map((group) => group.id));
+}
+
 type Drag =
   | { kind: 'tab'; id: number }
   | { kind: 'saved'; group: string; id: string }
@@ -271,6 +356,35 @@ const groupDrop = ref<{
   end?: boolean;
   after: boolean;
 }>();
+type GroupAnchor = { id?: number; tabId?: number; center: number };
+let groupAnchors: GroupAnchor[] = [];
+let groupScroll = 0;
+const previewBrowserGroups = computed(() => {
+  const groups = tabGroups.value,
+    target = groupDrop.value;
+  const source = groups.find((g) => g.id === draggedGroup.value);
+  if (!source || !target) return groups;
+  const rest = groups.filter((g) => g !== source);
+  if (target.end) return [...rest, source];
+  const index = rest.findIndex((g) =>
+    target.tabId === undefined
+      ? g.id === target.id
+      : g.tabs.some((t) => t.id === target.tabId),
+  );
+  if (index < 0) return groups;
+  const g = rest[index]!;
+  if (target.tabId === undefined)
+    rest.splice(index + Number(target.after), 0, source);
+  else {
+    const cut =
+      g.tabs.findIndex((t) => t.id === target.tabId) + Number(target.after);
+    const sections = [g.tabs.slice(0, cut), g.tabs.slice(cut)].map((tabs) =>
+      tabs.length ? [{ ...g, key: 'ungrouped-' + tabs[0]!.id, tabs }] : [],
+    );
+    rest.splice(index, 1, ...sections[0]!, source, ...sections[1]!);
+  }
+  return rest;
+});
 function startGroupDrag(event: DragEvent, id: number) {
   if (landing.committing || busy.value || !event.dataTransfer) {
     event.preventDefault();
@@ -280,42 +394,55 @@ function startGroupDrag(event: DragEvent, id: number) {
     '.workspace-browser-group',
   );
   if (source) landing.capture(event, source, `[data-group-id="${id}"]`);
+  const panel = source?.closest<HTMLElement>('.workspace-open-tabs');
+  if (!panel) return;
+  groupScroll = panel.scrollTop;
+  const win = tabGroups.value.find((g) => g.id === id)?.tabs[0]?.windowId;
+  groupAnchors = [];
+  for (const section of panel.querySelectorAll<HTMLElement>(
+    '[data-group-id]',
+  )) {
+    const gid = Number(section.dataset.groupId);
+    if (gid === id) continue;
+    for (const row of gid === -1
+      ? section.querySelectorAll<HTMLElement>('[data-browser-tab-id]')
+      : [section]) {
+      const tabId = Number(row.dataset.browserTabId);
+      const tab = visibleTabs.value.find((t) =>
+        gid === -1 ? t.id === tabId : t.groupId === gid,
+      );
+      if (!tab || tab.windowId !== win || tab.pinned) continue;
+      const r = row.getBoundingClientRect();
+      groupAnchors.push({
+        ...(gid === -1 ? { tabId } : { id: gid }),
+        center: r.top + r.height / 2,
+      });
+    }
+  }
   draggedGroup.value = id;
   hideDragSource();
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('application/x-duoyu-group', String(id));
 }
-function overGroup(event: DragEvent, id: number) {
-  if (
-    draggedGroup.value === undefined ||
-    draggedGroup.value === id ||
-    id === -1
-  )
-    return;
-  event.preventDefault();
-  const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
-  groupDrop.value = {
-    id,
-    after: event.clientY > bounds.top + bounds.height / 2,
-  };
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-}
-function overUngroupedTab(event: DragEvent, tab: BrowserTab) {
-  if (draggedGroup.value === undefined || (tab.groupId ?? -1) !== -1) return;
-  event.preventDefault();
-  event.stopPropagation();
-  const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
-  groupDrop.value = {
-    tabId: tab.id,
-    after: event.clientY > bounds.top + bounds.height / 2,
-  };
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-}
-function overGroupEnd(event: DragEvent) {
+function trackGroup(event: DragEvent) {
   if (draggedGroup.value === undefined) return;
   event.preventDefault();
-  groupDrop.value = { end: true, after: true };
+  event.stopPropagation();
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  const panel = event.currentTarget as HTMLElement;
+  const y = event.clientY + panel.scrollTop - groupScroll;
+  const before = groupAnchors.find((a) => y < a.center);
+  const last = groupAnchors.at(-1);
+  groupDrop.value = before
+    ? { ...before, after: false }
+    : last
+      ? { ...last, after: true }
+      : undefined;
+}
+function finishGroup(event: DragEvent) {
+  if (draggedGroup.value === undefined) return;
+  trackGroup(event);
+  dropGroup();
 }
 function dropGroup() {
   const source = draggedGroup.value,
@@ -351,24 +478,63 @@ function dropGroup() {
   });
 }
 const dropTarget = ref('');
-function previewTabs(
-  group: TabCollection,
-): (SavedTab & { placeholder?: boolean })[] {
-  const items: (SavedTab & { placeholder?: boolean })[] = [...group.tabs];
-  if (!drag.value || drag.value.kind === 'collection') return items;
-  const index = items.findIndex((tab) => tab.id === dropTarget.value);
-  if (dropTarget.value !== group.id && index < 0) return items;
-  if (drag.value.kind === 'saved' && dropTarget.value === drag.value.id)
-    return items;
-  items.splice(index < 0 ? items.length : index, 0, {
-    id: 'drop-placeholder',
-    title: '松开以放置',
-    url: '',
-    icon: '',
-    savedAt: 0,
-    placeholder: true,
-  });
-  return items;
+const insertion = ref<{ group: string; before?: string }>();
+let collectionSlots: { id: string; center: number }[] = [];
+let initialScroll = 0;
+const previewGroups = computed(() => {
+  const groups = [...visibleCollections.value];
+  const d = drag.value;
+  if (d?.kind !== 'collection' || !insertion.value) return groups;
+  const rest = groups.filter((g) => g.id !== d.id);
+  const item = groups.find((g) => g.id === d.id);
+  if (item) {
+    const i = rest.findIndex((g) => g.id === insertion.value?.before);
+    rest.splice(i < 0 ? rest.length : i, 0, item);
+  }
+  return rest;
+});
+function previewTabs(group: TabCollection): SavedTab[] {
+  const d = drag.value,
+    slot = insertion.value;
+  if (d?.kind !== 'saved' || slot?.group !== group.id) return group.tabs;
+  const item = collections.value
+    .find((g) => g.id === d.group)
+    ?.tabs.find((t) => t.id === d.id);
+  if (!item) return group.tabs;
+  const rest = group.tabs.filter((t) => t.id !== d.id);
+  const i = rest.findIndex((t) => t.id === slot.before);
+  rest.splice(i < 0 ? rest.length : i, 0, item);
+  return rest;
+}
+const openTabSlot = ref<number>();
+let openTabSlots: { id: number; center: number }[] = [];
+let openTabScroll = 0;
+function previewOpenTabs(tabs: BrowserTab[]) {
+  const d = drag.value;
+  if (d?.kind !== 'tab' || openTabSlot.value === undefined) return tabs;
+  const source = tabs.findIndex((tab) => tab.id === d.id);
+  const target = tabs.findIndex((tab) => tab.id === openTabSlot.value);
+  if (source < 0 || target < 0 || source === target) return tabs;
+  const next = [...tabs];
+  next.splice(target, 0, next.splice(source, 1)[0]!);
+  return next;
+}
+function overOpenTab(event: DragEvent, tab: BrowserTab) {
+  if (drag.value?.kind !== 'tab') return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  const el = event.currentTarget as HTMLElement;
+  if (!openTabSlots.some((slot) => slot.id === tab.id)) {
+    openTabSlot.value = tab.id;
+    return;
+  }
+  const y =
+    event.clientY +
+    (el.closest('.workspace-open-tabs')?.scrollTop || 0) -
+    openTabScroll;
+  openTabSlot.value = openTabSlots.reduce((best, slot) =>
+    Math.abs(slot.center - y) < Math.abs(best.center - y) ? slot : best,
+  ).id;
 }
 function startDrag(event: DragEvent, value: Drag) {
   if (
@@ -390,7 +556,34 @@ function startDrag(event: DragEvent, value: Drag) {
   const source = (event.currentTarget as HTMLElement).closest<HTMLElement>(
     selector,
   );
+  if (value.kind === 'tab' && source) {
+    openTabScroll = source.closest('.workspace-open-tabs')?.scrollTop || 0;
+    openTabSlots = Array.from(
+      source.parentElement!.querySelectorAll<HTMLElement>(
+        '[data-browser-tab-id]',
+      ),
+      (el) => {
+        const r = el.getBoundingClientRect();
+        return {
+          id: Number(el.dataset.browserTabId),
+          center: r.top + r.height / 2,
+        };
+      },
+    );
+  }
   if (source) landing.capture(event, source, selector);
+  if (value.kind === 'collection' && source) {
+    initialScroll = source.closest('.workspace-collections')?.scrollTop || 0;
+    collectionSlots = Array.from(
+      source.parentElement!.querySelectorAll<HTMLElement>(
+        '[data-collection-id]',
+      ),
+      (el) => {
+        const r = el.getBoundingClientRect();
+        return { id: el.dataset.collectionId!, center: r.top + r.height / 2 };
+      },
+    );
+  }
   drag.value = value;
   hideDragSource();
   event.dataTransfer.effectAllowed = value.kind === 'tab' ? 'copyMove' : 'move';
@@ -398,11 +591,15 @@ function startDrag(event: DragEvent, value: Drag) {
 }
 function endDrag(force = false) {
   if (landing.committing && force !== true) return;
+  if (!landing.committing) landing.dispose();
   clearTimeout(dragVisualTimer);
   dragVisualActive.value = false;
   draggedGroup.value = undefined;
   groupDrop.value = undefined;
   drag.value = undefined;
+  insertion.value = undefined;
+  openTabSlot.value = undefined;
+  openTabSlots = [];
   dropTarget.value = '';
 }
 function over(event: DragEvent, target: string) {
@@ -410,14 +607,74 @@ function over(event: DragEvent, target: string) {
   event.preventDefault();
   if (event.dataTransfer)
     event.dataTransfer.dropEffect = drag.value.kind === 'tab' ? 'copy' : 'move';
+  const el = event.currentTarget as HTMLElement;
+  if (drag.value.kind === 'collection') {
+    const y =
+      event.clientY +
+      (el.closest('.workspace-collections')?.scrollTop || 0) -
+      initialScroll;
+    insertion.value = {
+      group: '',
+      before: collectionSlots.find(
+        (s) => s.id !== drag.value?.id && y < s.center,
+      )?.id,
+    };
+    return;
+  }
+  if (drag.value.kind === 'saved') {
+    const groupEl = el.closest<HTMLElement>('[data-collection-id]');
+    const group = groupEl?.dataset.collectionId;
+    if (!group || !groupEl) return;
+    const tabs =
+      visibleCollections.value
+        .find((g) => g.id === group)
+        ?.tabs.filter((t) => t.id !== drag.value?.id) || [];
+    const grid = groupEl.querySelector<HTMLElement>('.workspace-saved-tabs');
+    let index = tabs.length;
+    if (grid) {
+      const bounds = grid.getBoundingClientRect();
+      // Use layout coordinates. FLIP transforms move the painted card but do not
+      // change its slot, so a stationary pointer cannot alternate between targets.
+      const x = event.clientX - bounds.left,
+        y = event.clientY - bounds.top;
+      const cards = Array.from(
+        grid.querySelectorAll<HTMLElement>(
+          ':scope > [data-saved-id]:not(.transfer-out)',
+        ),
+      );
+      if (cards.length && y < bounds.height) {
+        const nearest = cards.reduce((best, card) => {
+          const distance = (c: HTMLElement) =>
+            Math.hypot(
+              x - c.offsetLeft - c.offsetWidth / 2,
+              y - c.offsetTop - c.offsetHeight / 2,
+            );
+          return distance(card) < distance(best) ? card : best;
+        });
+        index = cards.indexOf(nearest);
+        if (
+          !cards.some((c) => c.dataset.savedId === drag.value?.id) &&
+          (viewMode.value === 'list'
+            ? y > nearest.offsetTop + nearest.offsetHeight / 2
+            : x > nearest.offsetLeft + nearest.offsetWidth / 2)
+        )
+          index++;
+      }
+    }
+    const before = tabs[index]?.id;
+    if (insertion.value?.group !== group || insertion.value.before !== before)
+      insertion.value = { group, before };
+  }
   dropTarget.value = target;
 }
-function drop(group: string, before?: string) {
+function drop(group: string, before?: string, event?: DragEvent) {
   const value = drag.value;
   if (!value) {
     endDrag();
     return;
   }
+  if (event && value.kind === 'saved') over(event, before ?? group);
+  const slot = insertion.value;
   commitDrop(async () => {
     if (value.kind === 'tab') {
       const tab = await browser.tabs.get(value.id);
@@ -426,8 +683,13 @@ function drop(group: string, before?: string) {
         `[data-collection-id="${group}"] .workspace-saved-tab:has(.workspace-link[title="${CSS.escape(tab.pendingUrl || tab.url || '')}"])`,
       );
     } else if (value.kind === 'saved')
-      await moveSavedTab(value.group, value.id, group, before);
-    else await reorderCollection(value.id, group);
+      await moveSavedTab(
+        value.group,
+        value.id,
+        slot?.group ?? group,
+        slot ? slot.before : before,
+      );
+    else if (slot) await reorderCollection(value.id, slot.before);
   });
 }
 function dropOnTab(tab: BrowserTab) {
@@ -436,14 +698,19 @@ function dropOnTab(tab: BrowserTab) {
     return;
   }
   const value = drag.value;
-  if (value?.kind !== 'tab' || value.id === tab.id) {
+  const targetId = openTabSlot.value ?? tab.id;
+  if (
+    value?.kind !== 'tab' ||
+    targetId === undefined ||
+    value.id === targetId
+  ) {
     endDrag();
     return;
   }
   commitDrop(async () => {
     const [source, target] = await Promise.all([
       browser.tabs.get(value.id),
-      browser.tabs.get(tab.id!),
+      browser.tabs.get(targetId),
     ]);
     // Only specify a destination window when moving between windows.
     // Resolve fresh indices because browser tab events can arrive during a drag.
@@ -455,11 +722,18 @@ function dropOnTab(tab: BrowserTab) {
     });
   });
 }
+const collectionList = ref<HTMLElement>();
+async function revealNewestCollection() {
+  await nextTick();
+  collectionList.value?.scrollTo({ top: 0 });
+}
 function showCreate() {
   if (isMarkedSpace.value) return;
   void run(async () => {
     destination.value = await createCollection('', [], activeSpace.value);
     query.value = '';
+    await syncAfterDrop();
+    await revealNewestCollection();
   });
 }
 async function edit(group: TabCollection) {
@@ -469,12 +743,20 @@ async function edit(group: TabCollection) {
   editInput.value?.[0]?.focus();
   editInput.value?.[0]?.select();
 }
-function rename(id: string) {
-  if (!editName.value.trim()) return;
-  void run(async () => {
-    await renameCollection(id, editName.value);
-    editing.value = '';
-  });
+async function rename(id: string) {
+  if (editing.value !== id) return;
+  const name = editName.value.trim();
+  editing.value = '';
+  if (
+    !name ||
+    collections.value.find((group) => group.id === id)?.name === name
+  )
+    return;
+  try {
+    await renameCollection(id, name);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '集合名称保存失败';
+  }
 }
 function collapse(id: string) {
   if (collapsed.value.has(id)) collapsed.value.delete(id);
@@ -486,21 +768,12 @@ function moveWithSelect(event: Event, group: string, id: string) {
   select.value = '';
   if (target) void run(() => moveSavedTab(group, id, target));
 }
-function shiftCollection(index: number, direction: -1 | 1) {
-  const current = collections.value[index];
-  const next = collections.value[index + direction];
-  if (!current || !next) return;
-  void run(() =>
-    direction < 0
-      ? reorderCollection(current.id, next.id)
-      : reorderCollection(next.id, current.id),
-  );
-}
 </script>
 
 <template>
   <section
     class="workspace-board"
+    @mousedown="pressSort"
     :class="{ 'is-list-view': viewMode === 'list' }"
     aria-label="标签页管理"
     @click.stop="menu = ''"
@@ -508,169 +781,128 @@ function shiftCollection(index: number, direction: -1 | 1) {
     @contextmenu.stop
     @drop.capture="landing.track($event)"
     @dragend="endDrag()"
+    @keydown="workspaceKey"
     @keydown.esc="endDrag()"
   >
-    <aside class="workspace-spaces side-menu" aria-label="空间切换">
-      <h2>我的空间</h2>
-      <nav aria-label="选择空间">
-        <button
-          class="workspace-space side-menu-choice"
-          :aria-pressed="isMarkedSpace"
-          :disabled="busy"
-          @click="
-            activeSpace = 'marked';
-            spaceForm = false;
-            deletingSpace = false;
-          "
-        >
-          <svg
-            class="workspace-space-symbol side-menu-icon"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8-6.2-3.2L5.8 21 7 14.2 2 9.3l6.9-1Z"
-            /></svg
-          ><small>标记</small>
-        </button>
-        <button
-          v-for="space in spaces"
-          :key="space.id"
-          class="workspace-space side-menu-choice"
-          :aria-pressed="activeSpace === space.id"
-          @contextmenu.prevent.stop="showSpaceMenu($event, space.id)"
-          :disabled="busy"
-          @click="
-            activeSpace = space.id;
-            spaceForm = false;
-            deletingSpace = false;
-          "
-        >
-          <svg
-            class="workspace-space-symbol side-menu-icon"
-            viewBox="0 0 28 28"
-            aria-hidden="true"
-          >
-            <rect x="3" y="3" width="22" height="22" rx="6" />
-            <text
-              x="14"
-              y="14"
-              text-anchor="middle"
-              dominant-baseline="central"
-            >
-              {{ space.name.slice(0, 1) }}
-            </text></svg
-          ><small>{{ space.name }}</small>
-        </button>
-      </nav>
+    <DesktopMenu
+      label="我的空间"
+      add-label="新建空间"
+      :pinned="{ id: 'marked', name: '标记', icon: 'Star' }"
+      :items="spaces"
+      :active="activeSpace"
+      visible
+      :disabled="busy || loading || !!sortingSpaces"
+      @select="switchSpace"
+      @add="addSpace"
+      @context="showSpaceMenu"
+      @reorder="reorderSpaces"
+    />
+    <MenuEditorDialog
+      :open="spaceForm"
+      space
+      :title="spaceEditing ? '编辑空间' : '添加空间'"
+      :adding="!spaceEditing"
+      v-model:name="spaceName"
+      v-model:icon="spaceIcon"
+      :busy="busy"
+      :error="error"
+      @close="spaceForm = false"
+      @submit="submitSpace"
+    />
+    <div
+      v-if="spaceMenu"
+      ref="spaceMenuPanel"
+      class="workspace-space-menu side-menu-context glass-surface"
+      role="menu"
+      aria-label="空间操作"
+      tabindex="-1"
+      :style="{ left: spaceMenu.x + 'px', top: spaceMenu.y + 'px' }"
+      @click.stop
+      @pointerdown.stop
+      @contextmenu.prevent.stop
+      @keydown.esc.stop="closeSpaceMenu"
+    >
       <button
-        class="workspace-space-add side-menu-add"
-        aria-label="新建空间"
-        :disabled="busy || loading"
-        @click="addSpace()"
+        role="menuitem"
+        class="workspace-button glass-control glass-interactive"
+        @click="manageSpace('rename')"
       >
-        <img
-          src="/images/add.png"
-          width="28"
-          height="28"
-          alt=""
-          draggable="false"
-        />
+        重命名空间
       </button>
-      <BaseDialog v-model:open="spaceForm" title="重命名空间">
-        <form
-          class="workspace-space-form side-menu-form"
-          @submit.prevent="submitSpace"
-          @keydown.esc.stop="spaceForm = false"
-        >
-          <input
-            ref="spaceInput"
-            v-model="spaceName"
-            maxlength="40"
-            aria-label="空间名称"
-            placeholder="空间名称"
-          />
-          <button
-            class="workspace-button glass-control glass-interactive"
-            :disabled="busy || !spaceName.trim()"
-          >
-            保存空间</button
-          ><button
-            type="button"
-            class="workspace-button glass-control glass-interactive"
-            @click="spaceForm = false"
-          >
-            取消
-          </button>
-        </form>
-      </BaseDialog>
-      <div
-        v-if="spaceMenu"
-        ref="spaceMenuPanel"
-        class="workspace-space-menu side-menu-context glass-surface"
-        role="menu"
-        aria-label="空间操作"
-        tabindex="-1"
-        :style="{ left: spaceMenu.x + 'px', top: spaceMenu.y + 'px' }"
-        @click.stop
-        @pointerdown.stop
-        @contextmenu.prevent.stop
-        @keydown.esc.stop="closeSpaceMenu"
+      <button
+        role="menuitem"
+        class="workspace-button glass-control glass-interactive"
+        :disabled="spaceMenu.id === 'default' || busy"
+        @click="manageSpace('delete')"
       >
+        删除空间
+      </button>
+    </div>
+    <BaseDialog
+      solid
+      close-button
+      v-model:open="deletingSpace"
+      title="删除空间"
+    >
+      <div class="workspace-space-confirm" role="alert">
+        <p>删除此空间？集合会移回默认空间，保留其中的标签页。</p>
         <button
-          role="menuitem"
           class="workspace-button glass-control glass-interactive"
-          @click="manageSpace('rename')"
+          :disabled="busy"
+          @click="
+            run(async () => {
+              await deleteSpace(activeSpace);
+              activeSpace = 'default';
+              deletingSpace = false;
+            })
+          "
         >
-          重命名空间
-        </button>
-        <button
-          role="menuitem"
+          确认删除空间</button
+        ><button
           class="workspace-button glass-control glass-interactive"
-          :disabled="spaceMenu.id === 'default' || busy"
-          @click="manageSpace('delete')"
+          @click="deletingSpace = false"
         >
-          删除空间
+          取消
         </button>
       </div>
-      <BaseDialog v-model:open="deletingSpace" title="删除空间">
-        <div class="workspace-space-confirm" role="alert">
-          <p>删除此空间？集合会移回默认空间，保留其中的标签页。</p>
-          <button
-            class="workspace-button glass-control glass-interactive"
-            :disabled="busy"
-            @click="
-              run(async () => {
-                await deleteSpace(activeSpace);
-                activeSpace = 'default';
-                deletingSpace = false;
-              })
-            "
-          >
-            确认删除空间</button
-          ><button
-            class="workspace-button glass-control glass-interactive"
-            @click="deletingSpace = false"
-          >
-            取消
-          </button>
-        </div>
-      </BaseDialog>
-    </aside>
+    </BaseDialog>
     <header class="workspace-toolbar">
       <div class="workspace-heading">
-        <img src="/icons/32.png" width="28" height="28" alt="" />
-        <h1>{{ currentSpace?.name || '标签工作区' }}</h1>
-        <span>{{ collections.length }} 个集合 · {{ savedCount }} 个标签页</span>
+        <button
+          class="workspace-back glass-control glass-interactive"
+          aria-label="返回桌面"
+          title="返回桌面"
+          @click="emit('close')"
+        >
+          <img
+            src="/images/back.png"
+            alt=""
+            width="20"
+            height="20"
+            draggable="false"
+          />
+        </button>
+        <div class="workspace-heading-copy">
+          <PageIcon
+            :name="isMarkedSpace ? 'Star' : currentSpace?.icon || 'Bookmark'"
+            active
+            :size="24"
+          />
+          <h1>
+            {{ isMarkedSpace ? '标记' : currentSpace?.name || '我的空间' }}
+          </h1>
+        </div>
       </div>
       <label class="workspace-search glass-surface"
-        ><span aria-hidden="true">⌕</span
-        ><input
+        ><Search aria-hidden="true" size="18" />
+        <input
+          ref="searchInput"
           v-model="query"
           type="search"
           placeholder="搜索集合、标签页或网址"
           aria-label="搜索工作区"
-        /><button
+        /><kbd v-if="!query" aria-hidden="true">⌘ / Ctrl F</kbd
+        ><button
           v-if="query"
           class="workspace-icon glass-control glass-interactive"
           aria-label="清空工作区搜索"
@@ -683,41 +915,91 @@ function shiftCollection(index: number, direction: -1 | 1) {
     <div class="workspace-columns">
       <section class="workspace-library" aria-label="已保存的集合">
         <header class="workspace-section-heading">
-          <div>
-            <h2>
-              我的集合 <span>{{ collections.length }}</span>
-            </h2>
-          </div>
           <div
             class="workspace-view-controls"
             role="group"
             aria-label="集合视图"
           >
             <button
+              aria-label="网格"
+              title="网格"
               class="workspace-button glass-control glass-interactive"
               :aria-pressed="viewMode === 'grid'"
               @click="viewMode = 'grid'"
             >
-              网格
+              <img
+                class="workspace-action-icon"
+                src="/images/workspace/grid.png"
+                alt=""
+                draggable="false"
+              />
             </button>
             <button
+              aria-label="列表"
+              title="列表"
               class="workspace-button glass-control glass-interactive"
               :aria-pressed="viewMode === 'list'"
               @click="viewMode = 'list'"
             >
-              列表
+              <img
+                class="workspace-action-icon"
+                src="/images/workspace/list.png"
+                alt=""
+                draggable="false"
+              />
             </button>
             <button
               class="workspace-button glass-control glass-interactive"
-              @click="collapsed = new Set()"
+              :aria-label="collapseAction"
+              :title="collapseAction"
+              :disabled="!collections.length"
+              @click="toggleAllCollections"
             >
-              展开全部
+              <img
+                class="workspace-action-icon"
+                src="/images/workspace/chevron.png"
+                alt=""
+                draggable="false"
+                :style="{
+                  transform: allCollapsed ? undefined : 'rotate(180deg)',
+                }"
+              />
+            </button>
+          </div>
+          <div
+            v-if="selectedEntries.length"
+            class="workspace-selection glass-surface"
+          >
+            <span>选择 {{ selectedEntries.length }} 项</span>
+            <button
+              class="glass-control glass-interactive"
+              @click="
+                selected = new Set(
+                  visibleCollections.flatMap((c) => c.tabs.map((t) => t.id)),
+                )
+              "
+            >
+              全选
             </button>
             <button
-              class="workspace-button glass-control glass-interactive"
-              @click="collapsed = new Set(collections.map((c) => c.id))"
+              class="glass-control glass-interactive"
+              @click="selected.clear()"
             >
-              收起全部
+              取消选择
+            </button>
+            <button
+              class="glass-control glass-interactive"
+              :disabled="busy"
+              @click="run(() => copyLinks(selectedEntries.map((e) => e.tab)))"
+            >
+              复制所选链接
+            </button>
+            <button
+              class="glass-control glass-interactive"
+              :disabled="busy"
+              @click="toggleSelectedMarks"
+            >
+              {{ allSelectedMarked ? '取消标记所选' : '标记所选' }}
             </button>
           </div>
           <button
@@ -726,53 +1008,14 @@ function shiftCollection(index: number, direction: -1 | 1) {
             v-if="!isMarkedSpace"
             @click="showCreate"
           >
-            ＋ 新建集合
+            <PageIcon name="Add" :size="16" /> 新建集合
           </button>
         </header>
         <div
-          v-if="selectedEntries.length"
-          class="workspace-selection glass-surface"
+          ref="collectionList"
+          class="workspace-collections"
+          :aria-busy="loading"
         >
-          <span>已选择 {{ selectedEntries.length }} 项</span>
-          <button
-            class="glass-control glass-interactive"
-            @click="
-              selected = new Set(
-                visibleCollections.flatMap((c) => c.tabs.map((t) => t.id)),
-              )
-            "
-          >
-            全选
-          </button>
-          <button
-            class="glass-control glass-interactive"
-            :disabled="busy"
-            @click="run(() => copyLinks(selectedEntries.map((e) => e.tab)))"
-          >
-            复制所选链接
-          </button>
-          <button
-            class="glass-control glass-interactive"
-            :disabled="busy"
-            @click="
-              run(async () => {
-                for (const entry of selectedEntries)
-                  await updateSavedTab(entry.group, entry.tab.id, {
-                    starred: true,
-                  });
-              })
-            "
-          >
-            标记所选
-          </button>
-          <button
-            class="glass-control glass-interactive"
-            @click="selected.clear()"
-          >
-            取消选择
-          </button>
-        </div>
-        <div class="workspace-collections" :aria-busy="loading">
           <p v-if="loading" class="workspace-empty">正在读取收藏…</p>
           <div
             v-else-if="isMarkedSpace && !collections.length"
@@ -791,15 +1034,10 @@ function shiftCollection(index: number, direction: -1 | 1) {
             class="workspace-collection-order"
           >
             <article
-              v-for="group in visibleCollections"
+              v-for="group in previewGroups"
               :key="group.id"
               class="workspace-collection"
               :class="{
-                'is-drop-target': dropTarget === group.id,
-                'is-collection-drop':
-                  drag?.kind === 'collection' &&
-                  drag.id !== group.id &&
-                  dropTarget === group.id,
                 'is-drag-source':
                   dragVisualActive &&
                   drag?.kind === 'collection' &&
@@ -808,7 +1046,7 @@ function shiftCollection(index: number, direction: -1 | 1) {
               :data-collection-id="group.id"
               @dragover="over($event, group.id)"
               @dragleave.self="dropTarget = ''"
-              @drop.prevent.stop="drop(group.id)"
+              @drop.prevent.stop="drop(group.id, undefined, $event)"
             >
               <header class="workspace-collection-heading">
                 <button
@@ -834,24 +1072,15 @@ function shiftCollection(index: number, direction: -1 | 1) {
                     v-model="editName"
                     maxlength="80"
                     aria-label="重命名集合"
-                  /><button
-                    class="workspace-icon glass-control glass-interactive"
-                    aria-label="保存集合名称"
-                    :disabled="busy || !editName.trim()"
-                  >
-                    ✓</button
-                  ><button
-                    type="button"
-                    class="workspace-icon glass-control glass-interactive"
-                    aria-label="取消重命名"
-                    @click="editing = ''"
-                  >
-                    ×
-                  </button>
+                    @blur="rename(group.id)"
+                  />
                 </form>
                 <button
                   v-else
                   class="workspace-collection-name"
+                  :style="{
+                    color: collectionColors[collectionColor(group.color)][1],
+                  }"
                   :aria-expanded="!collapsed.has(group.id)"
                   @click="collapse(group.id)"
                 >
@@ -860,67 +1089,91 @@ function shiftCollection(index: number, direction: -1 | 1) {
                       ? `${spaces.find((s) => s.id === (group.spaceId || 'default'))?.name || '个人空间'} / ${group.name}`
                       : group.name
                   }}</span
-                  ><small>{{ group.tabs.length }}</small
-                  ><span aria-hidden="true">{{
-                    collapsed.has(group.id) ? '▸' : '▾'
-                  }}</span>
+                  ><img
+                    class="workspace-action-icon"
+                    src="/images/workspace/chevron.png"
+                    alt=""
+                    draggable="false"
+                    :class="{ folded: collapsed.has(group.id) }"
+                  />
                 </button>
                 <div v-if="!isMarkedSpace" class="workspace-collection-actions">
+                  <small>{{ group.tabs.length }}</small>
                   <button
                     class="workspace-icon glass-control glass-interactive"
                     :disabled="busy || !group.tabs.length"
                     :aria-label="`打开集合 ${group.name} 的全部标签页`"
                     title="全部打开"
-                    @click="run(() => openSaved(group.tabs))"
+                    @click="run(() => openCollection(group.id))"
                   >
-                    ↗
+                    <img
+                      class="workspace-action-icon"
+                      src="/images/workspace/open-all.png"
+                      alt=""
+                      draggable="false"
+                    />
                   </button>
                   <button
                     class="workspace-icon glass-control glass-interactive"
-                    :disabled="busy"
-                    :aria-label="`重命名 ${group.name}`"
-                    title="重命名"
-                    @click="edit(group)"
-                  >
-                    ✎
-                  </button>
-                  <button
-                    class="workspace-icon glass-control glass-interactive"
-                    :disabled="busy || collections[0]?.id === group.id"
-                    :aria-label="`上移集合 ${group.name}`"
-                    title="上移"
-                    @click="
-                      shiftCollection(
-                        collections.findIndex((c) => c.id === group.id),
-                        -1,
-                      )
+                    aria-label="更多集合操作"
+                    title="更多集合操作"
+                    :aria-expanded="menu === 'collection:' + group.id"
+                    @click.stop="
+                      menu =
+                        menu === 'collection:' + group.id
+                          ? ''
+                          : 'collection:' + group.id
                     "
                   >
-                    ↑
+                    <img
+                      class="workspace-action-icon"
+                      src="/images/workspace/more.png"
+                      alt=""
+                      draggable="false"
+                    />
                   </button>
-                  <button
-                    class="workspace-icon glass-control glass-interactive"
-                    :disabled="busy || collections.at(-1)?.id === group.id"
-                    :aria-label="`下移集合 ${group.name}`"
-                    title="下移"
-                    @click="
-                      shiftCollection(
-                        collections.findIndex((c) => c.id === group.id),
-                        1,
-                      )
-                    "
+                  <div
+                    v-if="menu === 'collection:' + group.id"
+                    class="collection-more workspace-more-panel"
                   >
-                    ↓
-                  </button>
-                  <button
-                    class="workspace-icon glass-control glass-interactive"
-                    :disabled="busy"
-                    :aria-label="`删除集合 ${group.name}`"
-                    title="删除集合"
-                    @click="deleting = group.id"
-                  >
-                    ×
-                  </button>
+                    <div
+                      class="collection-palette"
+                      role="group"
+                      aria-label="集合颜色"
+                      @click.stop
+                    >
+                      <button
+                        v-for="(swatch, color) in collectionColors"
+                        :key="color"
+                        type="button"
+                        :title="swatch[0]"
+                        :aria-label="swatch[0]"
+                        :aria-pressed="collectionColor(group.color) === color"
+                        :style="{ backgroundColor: swatch[1] }"
+                        :disabled="busy"
+                        @click="run(() => setCollectionColor(group.id, color))"
+                      />
+                    </div>
+                    <button
+                      class="glass-control glass-interactive"
+                      @click="
+                        edit(group);
+                        menu = '';
+                      "
+                    >
+                      重命名
+                    </button>
+                    <button
+                      class="glass-control glass-interactive collection-delete"
+                      :disabled="busy"
+                      @click="
+                        deleting = group.id;
+                        menu = '';
+                      "
+                    >
+                      删除集合
+                    </button>
+                  </div>
                 </div>
               </header>
               <div
@@ -954,27 +1207,18 @@ function shiftCollection(index: number, direction: -1 | 1) {
               >
                 <template v-for="tab in previewTabs(group)" :key="tab.id">
                   <div
-                    v-if="tab.placeholder"
-                    class="workspace-drag-placeholder"
-                    aria-hidden="true"
-                    @dragover.prevent.stop
-                    @drop.prevent.stop="
-                      drop(
-                        group.id,
-                        dropTarget === group.id ? undefined : dropTarget,
-                      )
-                    "
-                  >
-                    <span>松开以放置</span>
-                  </div>
-                  <div
-                    v-else
                     class="workspace-saved-tab glass-surface"
                     :class="{
                       'is-drag-source':
                         dragVisualActive &&
                         drag?.kind === 'saved' &&
                         drag.id === tab.id,
+                      'transfer-out':
+                        drag?.kind === 'saved' &&
+                        drag.id === tab.id &&
+                        drag.group === group.id &&
+                        insertion &&
+                        insertion.group !== group.id,
                       'is-selected': selected.has(tab.id),
                     }"
                     :data-saved-id="tab.id"
@@ -987,43 +1231,43 @@ function shiftCollection(index: number, direction: -1 | 1) {
                       })
                     "
                     @dragover.stop="over($event, tab.id)"
-                    @drop.prevent.stop="drop(group.id, tab.id)"
+                    @drop.prevent.stop="drop(group.id, tab.id, $event)"
                   >
-                    <input
-                      class="workspace-card-checkbox"
-                      type="checkbox"
-                      :checked="selected.has(tab.id)"
-                      :aria-label="`选择标签页 ${tab.title}`"
-                      @click.stop
-                      @dragstart.prevent.stop
-                      @change="toggleSelected(tab.id)"
-                    />
-                    <button
-                      class="workspace-link glass-control"
-                      :title="tab.url"
-                      @click="run(() => openSaved([tab]))"
-                    >
-                      <WorkspaceFavicon
-                        :src="tab.icon"
-                        :page-url="tab.url"
-                        :title="tab.title"
-                      /><span
-                        ><strong>{{ tab.title }}</strong
-                        ><small>{{ hostname(tab.url) }}</small></span
-                      >
-                    </button>
-                    <div
-                      class="workspace-card-actions"
-                      @click.stop
-                      @dragstart.prevent.stop
-                    >
+                    <div class="workspace-card-main">
+                      <span class="workspace-icon-slot">
+                        <WorkspaceFavicon
+                          :src="tab.icon"
+                          :page-url="tab.url"
+                          :title="tab.title"
+                        />
+                        <input
+                          class="workspace-card-checkbox"
+                          type="checkbox"
+                          :checked="selected.has(tab.id)"
+                          :aria-label="`选择标签页 ${tab.title}`"
+                          @click.stop
+                          @dragstart.prevent.stop
+                          @change="toggleSelected(tab.id)"
+                        />
+                      </span>
                       <button
-                        class="glass-control glass-interactive"
+                        class="workspace-link glass-control"
+                        :title="tab.url"
+                        @click="run(() => openSaved([tab]))"
+                      >
+                        <span
+                          ><strong>{{ tab.title }}</strong
+                          ><small>{{ hostname(tab.url) }}</small></span
+                        >
+                      </button>
+                      <button
+                        class="workspace-bookmark"
                         :aria-label="`标记收藏 ${tab.title}`"
                         :aria-pressed="!!tab.starred"
                         :disabled="busy"
                         title="标记收藏"
-                        @click="
+                        @dragstart.prevent.stop
+                        @click.stop="
                           run(() =>
                             updateSavedTab(group.id, tab.id, {
                               starred: !tab.starred,
@@ -1033,11 +1277,17 @@ function shiftCollection(index: number, direction: -1 | 1) {
                       >
                         <svg viewBox="0 0 24 24" aria-hidden="true">
                           <path
-                            d="M6 4h12v17l-6-4-6 4Z"
+                            d="M6 4h12v16l-6-4-6 4Z"
                             :fill="tab.starred ? 'currentColor' : 'none'"
                           />
                         </svg>
                       </button>
+                    </div>
+                    <div
+                      class="workspace-card-actions"
+                      @click.stop
+                      @dragstart.prevent.stop
+                    >
                       <button
                         class="glass-control glass-interactive"
                         :aria-label="`复制链接 ${tab.title}`"
@@ -1057,11 +1307,16 @@ function shiftCollection(index: number, direction: -1 | 1) {
                         title="更多"
                         @click="menu = menu === tab.id ? '' : tab.id"
                       >
-                        ···
+                        <img
+                          class="workspace-action-icon"
+                          src="/images/workspace/more.png"
+                          alt=""
+                          draggable="false"
+                        />
                       </button>
                       <div
                         v-if="menu === tab.id"
-                        class="workspace-card-menu glass-surface"
+                        class="workspace-card-menu workspace-more-panel"
                         @keydown.esc.stop="menu = ''"
                       >
                         <button
@@ -1145,6 +1400,144 @@ function shiftCollection(index: number, direction: -1 | 1) {
           </button>
         </div>
         <div
+          class="workspace-open-tabs"
+          @dragover.capture="trackGroup"
+          @drop.capture="finishGroup"
+          :aria-busy="tabsLoading"
+        >
+          <div v-if="needsTabPermission" class="workspace-empty" role="status">
+            <p>请重新加载扩展并允许标签页权限，以读取网页标题和图标。</p>
+          </div>
+          <p v-if="tabsLoading" class="workspace-empty">正在读取标签页…</p>
+          <p v-else-if="!visibleTabs.length" class="workspace-empty">
+            {{ query ? '没有匹配的打开标签页' : '这个窗口暂无其他标签页' }}
+          </p>
+          <ReorderTransition class="workspace-browser-group-order">
+            <ReorderTransition
+              tag="section"
+              v-for="group in previewBrowserGroups"
+              :key="group.key"
+              class="workspace-browser-group"
+              :class="{
+                'is-drag-source': dragVisualActive && draggedGroup === group.id,
+              }"
+              :data-group-color="group.color"
+              :data-group-id="group.id"
+              :aria-label="group.label"
+            >
+              <h3 key="heading" class="workspace-window-label">
+                <button
+                  v-if="group.id !== -1"
+                  class="workspace-group-handle glass-control glass-interactive"
+                  draggable="true"
+                  :disabled="busy"
+                  :aria-label="`拖动群组 ${group.label}`"
+                  title="拖动群组排序"
+                  @dragstart.stop="startGroupDrag($event, group.id)"
+                >
+                  ⠿
+                </button>
+                <button
+                  v-if="group.id !== -1"
+                  class="workspace-group-toggle"
+                  :aria-label="`折叠群组 ${group.label}`"
+                  :aria-expanded="!group.collapsed"
+                  :disabled="busy"
+                  @click="run(() => toggleBrowserGroup(group.id))"
+                >
+                  {{ group.label }}
+                  <img
+                    class="workspace-action-icon"
+                    src="/images/workspace/chevron.png"
+                    alt=""
+                    draggable="false"
+                    :class="{ folded: group.collapsed }"
+                  />
+                </button>
+                <template v-else>{{ group.label }}</template>
+                <span>{{ group.tabs.length }}</span>
+                <button
+                  v-if="group.id !== -1"
+                  class="workspace-group-save glass-control glass-interactive"
+                  :aria-label="`保存群组 ${group.label} 为集合`"
+                  title="以群组名称保存为集合"
+                  :disabled="busy || loading"
+                  @click.stop="
+                    run(async () => {
+                      await saveBrowserGroup(group.id);
+                      await revealNewestCollection();
+                    })
+                  "
+                >
+                  <img
+                    class="workspace-action-icon"
+                    src="/images/workspace/save-group.png"
+                    alt=""
+                    draggable="false"
+                  />
+                </button>
+              </h3>
+              <div
+                v-for="tab in group.collapsed
+                  ? []
+                  : previewOpenTabs(group.tabs)"
+                :key="tab.id"
+                class="workspace-open-tab glass-surface"
+                :class="{
+                  'is-drag-source':
+                    dragVisualActive &&
+                    drag?.kind === 'tab' &&
+                    drag.id === tab.id,
+                  'is-selected':
+                    tab.id !== undefined && selectedBrowserTabs.has(tab.id),
+                }"
+                :data-browser-tab-id="tab.id"
+                :draggable="!isMarkedSpace"
+                @dragstart.stop="
+                  tab.id !== undefined &&
+                  startDrag($event, { kind: 'tab', id: tab.id })
+                "
+                @dragover="overOpenTab($event, tab)"
+                @drop.prevent.stop="dropOnTab(tab)"
+              >
+                <span class="workspace-icon-slot">
+                  <WorkspaceFavicon
+                    :src="tab.favIconUrl"
+                    :page-url="tab.pendingUrl || tab.url"
+                    :title="tabTitle(tab)"
+                  />
+                  <input
+                    class="workspace-card-checkbox"
+                    type="checkbox"
+                    :aria-label="`选择打开的标签页 ${tabTitle(tab)}`"
+                    :checked="
+                      tab.id !== undefined && selectedBrowserTabs.has(tab.id)
+                    "
+                    :disabled="busy || tab.id === undefined"
+                    @click.stop
+                    @pointerdown.stop
+                    @dragstart.prevent.stop
+                    @change="toggleBrowserTab(tab.id)"
+                  />
+                </span>
+                <button
+                  class="workspace-link glass-control"
+                  :title="tab.url || tab.pendingUrl"
+                  @click="run(() => activate(tab))"
+                >
+                  <span
+                    ><strong>{{ tabTitle(tab) }}</strong
+                    ><small
+                      >{{ tab.pinned ? '已固定 · ' : ''
+                      }}{{ hostname(tab.pendingUrl || tab.url || '') }}</small
+                    ></span
+                  >
+                </button>
+              </div>
+            </ReorderTransition>
+          </ReorderTransition>
+        </div>
+        <div
           v-if="selectedOpenTabs.length"
           class="workspace-browser-selection glass-surface"
           aria-label="所选浏览器标签页操作"
@@ -1198,147 +1591,14 @@ function shiftCollection(index: number, direction: -1 | 1) {
             取消选择标签页
           </button>
         </div>
-        <div class="workspace-open-tabs" :aria-busy="tabsLoading">
-          <div v-if="needsTabPermission" class="workspace-empty" role="status">
-            <p>请重新加载扩展并允许标签页权限，以读取网页标题和图标。</p>
-          </div>
-          <p v-if="tabsLoading" class="workspace-empty">正在读取标签页…</p>
-          <p v-else-if="!visibleTabs.length" class="workspace-empty">
-            {{ query ? '没有匹配的打开标签页' : '这个窗口暂无其他标签页' }}
-          </p>
-          <ReorderTransition class="workspace-browser-group-order">
-            <ReorderTransition
-              tag="section"
-              v-for="group in tabGroups"
-              :key="group.key"
-              class="workspace-browser-group"
-              :class="{
-                'is-drag-source': dragVisualActive && draggedGroup === group.id,
-                'group-drop-before':
-                  groupDrop?.id === group.id && !groupDrop.after,
-                'group-drop-after':
-                  groupDrop?.id === group.id && groupDrop.after,
-              }"
-              @dragover="overGroup($event, group.id)"
-              @drop.prevent="dropGroup"
-              :data-group-color="group.color"
-              :data-group-id="group.id"
-              :aria-label="group.label"
-            >
-              <h3 key="heading" class="workspace-window-label">
-                <button
-                  v-if="group.id !== -1"
-                  class="workspace-group-handle glass-control glass-interactive"
-                  draggable="true"
-                  :disabled="busy"
-                  :aria-label="`拖动群组 ${group.label}`"
-                  title="拖动群组排序"
-                  @dragstart.stop="startGroupDrag($event, group.id)"
-                >
-                  ⠿
-                </button>
-                <button
-                  v-if="group.id !== -1"
-                  class="workspace-group-toggle"
-                  :aria-label="`折叠群组 ${group.label}`"
-                  :aria-expanded="!group.collapsed"
-                  :disabled="busy"
-                  @click="run(() => toggleBrowserGroup(group.id))"
-                >
-                  <span aria-hidden="true">{{
-                    group.collapsed ? '▸' : '▾'
-                  }}</span
-                  >{{ group.label }}
-                </button>
-                <template v-else>{{ group.label }}</template>
-                <span>{{ group.tabs.length }}</span>
-                <button
-                  v-if="group.id !== -1"
-                  class="workspace-group-save glass-control glass-interactive"
-                  :aria-label="`保存群组 ${group.label} 为集合`"
-                  title="以群组名称保存为集合"
-                  :disabled="busy || loading"
-                  @click="run(() => saveBrowserGroup(group.id))"
-                >
-                  ＋
-                </button>
-              </h3>
-              <div
-                v-for="tab in group.collapsed ? [] : group.tabs"
-                :key="tab.id"
-                class="workspace-open-tab glass-surface"
-                :class="{
-                  'is-drop-before': dropTarget === `tab-${tab.id}`,
-                  'group-tab-before':
-                    groupDrop?.tabId === tab.id && !groupDrop?.after,
-                  'group-tab-after':
-                    groupDrop?.tabId === tab.id && groupDrop?.after,
-                  'is-drag-source':
-                    dragVisualActive &&
-                    drag?.kind === 'tab' &&
-                    drag.id === tab.id,
-                  'is-selected':
-                    tab.id !== undefined && selectedBrowserTabs.has(tab.id),
-                }"
-                :data-browser-tab-id="tab.id"
-                :draggable="!isMarkedSpace"
-                @dragstart.stop="
-                  tab.id !== undefined &&
-                  startDrag($event, { kind: 'tab', id: tab.id })
-                "
-                @dragover="
-                  draggedGroup !== undefined
-                    ? overUngroupedTab($event, tab)
-                    : drag?.kind === 'tab' && over($event, `tab-${tab.id}`)
-                "
-                @drop.prevent.stop="dropOnTab(tab)"
-              >
-                <input
-                  class="workspace-tab-checkbox"
-                  type="checkbox"
-                  :aria-label="`选择打开的标签页 ${tabTitle(tab)}`"
-                  :checked="
-                    tab.id !== undefined && selectedBrowserTabs.has(tab.id)
-                  "
-                  :disabled="busy || tab.id === undefined"
-                  @click.stop
-                  @pointerdown.stop
-                  @dragstart.prevent.stop
-                  @change="toggleBrowserTab(tab.id)"
-                />
-                <button
-                  class="workspace-link glass-control glass-interactive"
-                  :title="tab.url || tab.pendingUrl"
-                  @click="run(() => activate(tab))"
-                >
-                  <WorkspaceFavicon
-                    :src="tab.favIconUrl"
-                    :page-url="tab.pendingUrl || tab.url"
-                    :title="tabTitle(tab)"
-                  /><span
-                    ><strong>{{ tabTitle(tab) }}</strong
-                    ><small
-                      >{{ tab.pinned ? '已固定 · ' : ''
-                      }}{{ hostname(tab.pendingUrl || tab.url || '') }}</small
-                    ></span
-                  >
-                </button>
-              </div>
-            </ReorderTransition>
-          </ReorderTransition>
-          <div
-            v-if="draggedGroup !== undefined"
-            class="workspace-group-end"
-            :class="{ 'is-active': groupDrop?.end }"
-            @dragover="overGroupEnd"
-            @drop.prevent.stop="dropGroup"
-          >
-            移到列表末尾
-          </div>
-        </div>
       </aside>
     </div>
-    <BaseDialog v-model:open="editTabOpen" title="修改标签页">
+    <BaseDialog
+      solid
+      close-button
+      v-model:open="editTabOpen"
+      title="修改标签页"
+    >
       <form class="workspace-edit-tab" @submit.prevent="submitTab">
         <label
           >名称<input

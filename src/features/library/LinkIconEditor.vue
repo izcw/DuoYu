@@ -102,8 +102,10 @@ function automatic() {
   mode.value = 'auto';
   refresh.value++;
 }
-async function refreshAutomatic() {
-  automatic();
+async function refreshAutomatic(select = true) {
+  if (!/^https?:\/\/[^/]+\.[^/]+/i.test(props.url.trim())) return;
+  if (select) automatic();
+  else refresh.value++;
   await automaticIcon(props.url, refresh.value);
 }
 defineExpose({ refreshAutomatic });

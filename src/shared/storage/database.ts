@@ -40,6 +40,7 @@ export interface SavedTab {
   savedAt: number;
 }
 export interface TabCollection {
+  color?: import('../collection-colors').CollectionColor;
   spaceId?: string;
   id: string;
   name: string;
@@ -48,6 +49,7 @@ export interface TabCollection {
   tabs: SavedTab[];
 }
 export interface WorkspaceSpace {
+  icon?: string;
   id: string;
   name: string;
   order: number;
@@ -58,7 +60,9 @@ export interface LibraryPage {
   name: string;
   order: number;
 }
+export type WidgetSize = {minWidth:number;minHeight:number;maxWidth:number;maxHeight:number;width:number;height:number};
 export interface LibraryItem {
+  widgetSize?:WidgetSize;
   pageId?: string;
   id: string;
   kind: 'link' | 'folder' | 'widget';

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AccountBackups from './AccountBackups.vue';
 import { onMounted, onUnmounted, ref } from 'vue';
 import { browser } from 'wxt/browser';
 import { authConfig, AUTH_SESSION_KEY, type AuthView } from './config';
@@ -151,6 +152,7 @@ function accountCenter() {
           </button>
         </div>
       </section>
+      <AccountBackups />
       <div class="account-footer">
         <button
           class="logout"

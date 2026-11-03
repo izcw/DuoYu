@@ -155,7 +155,7 @@ export async function resizeLibraryItem(
     const item = await database.libraryItems.get(id);
     if (item)
       await database.libraryItems.update(id, {
-        ...normalizeSize(width, height, item.kind),
+        ...normalizeSize(width, height, item.kind,item.widgetSize),
         updatedAt: Date.now(),
       });
   });

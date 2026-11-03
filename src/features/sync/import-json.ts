@@ -1,3 +1,4 @@
+import { collectionColor } from '../../shared/collection-colors';
 import { database } from '../../shared/storage/database';
 import { activeAccountKey } from '../../shared/storage/account';
 import { cacheAsset, collectAssets, ASSET_PREFIX } from './assets';
@@ -247,6 +248,7 @@ export async function planJsonImport(
     tables.tabCollections!.push({
       id: groupIds.get(g.id),
       spaceId: importedSpace(g.spaceId || 'default'),
+      ...(g.color ? { color: collectionColor(g.color) } : {}),
       name: text(g.name, 200, '导入的集合'),
       order: finite(g.order, tables.tabCollections!.length),
       updatedAt: Date.now(),

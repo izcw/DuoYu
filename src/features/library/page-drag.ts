@@ -1,3 +1,4 @@
+import { accountStorage } from '../../shared/storage/account';
 import { ref } from 'vue';
 import {
   DESKTOP_GRID_COLUMNS,
@@ -9,6 +10,8 @@ import { BoundedWidgetEngine } from '../../shared/BoundedWidgetEngine';
 import { database } from '../../shared/storage/database';
 
 export const pageDragError = ref('');
+export const dockIncomingItemId = ref('');
+export const dockInsertBeforeId = ref('');
 export const pageDragActive = ref(false);
 export const folderDragItemId = ref('');
 let session:
@@ -24,6 +27,7 @@ let session:
       sourceBounds?: DOMRect;
       switched: boolean;
       fromFolder?: boolean;
+      dockEligible?: boolean;
     }
   | undefined;
 let hover = '';
@@ -143,6 +147,16 @@ export function beginPageDrag(
       .closest('.library-cell-grid')
       ?.getBoundingClientRect(),
   };
+  const started = session;
+  void database.libraryItems
+    .get(id)
+    .then((item) => {
+      if (session === started)
+        started.dockEligible =
+          (source !== '__dock' || !!item?.parent) &&
+          (item?.kind === 'link' || item?.kind === 'folder');
+    })
+    .catch(() => {});
   pageDragError.value = '';
   pageDragActive.value = true;
 }
@@ -180,6 +194,8 @@ export function beginDockDrag(id: string, element: HTMLElement) {
     'home';
 }
 export function cancelPageDrag() {
+  dockIncomingItemId.value = '';
+  dockInsertBeforeId.value = '';
   pageDragActive.value = false;
   folderDragItemId.value = '';
   clearTimeout(timer);
@@ -191,6 +207,32 @@ export function cancelPageDrag() {
 function move(event: MouseEvent | DragEvent) {
   if (!session) return;
   point = { x: event.clientX, y: event.clientY };
+  const overDock = document
+    .elementFromPoint(point.x, point.y)
+    ?.closest('.desktop-dock');
+  dockIncomingItemId.value = session.dockEligible && overDock ? session.id : '';
+  if (dockIncomingItemId.value && overDock) {
+    const container = overDock.querySelector<HTMLElement>('.dock-items');
+    if (container) {
+      const x = point.x - container.getBoundingClientRect().left;
+      const placeholder =
+        container.querySelector<HTMLElement>('.dock-incoming');
+      // Keep the slot stable while the pointer is inside its reserved space.
+      if (
+        !placeholder ||
+        x < placeholder.offsetLeft ||
+        x > placeholder.offsetLeft + placeholder.offsetWidth
+      ) {
+        const entries = [
+          ...container.querySelectorAll<HTMLElement>('.dock-entry'),
+        ].slice(2);
+        dockInsertBeforeId.value =
+          entries.find((el) => x < el.offsetLeft + el.offsetWidth / 2)?.dataset
+            .dockId || '';
+      }
+    }
+  } else dockInsertBeforeId.value = '';
+
   if (event.type === 'dragover') event.preventDefault();
   session.ghost.style.left = `${point.x - session.offsetX}px`;
   session.ghost.style.top = `${point.y - session.offsetY}px`;
@@ -249,14 +291,49 @@ async function finish(event: MouseEvent | DragEvent) {
   const dock = document
     .elementFromPoint(event.clientX, event.clientY)
     ?.closest('.desktop-dock');
-  if (dock && transfer.source !== '__dock') {
+  if (dock && (transfer.source !== '__dock' || transfer.dockEligible)) {
+    const before = dockInsertBeforeId.value;
+    const ordered = [...dock.querySelectorAll<HTMLElement>('.dock-entry')]
+      .map((el) => el.dataset.dockId!)
+      .filter((id) => id !== transfer.id);
+    const index = before ? ordered.indexOf(before) : ordered.length;
+    ordered.splice(
+      Math.max(2, index < 0 ? ordered.length : index),
+      0,
+      transfer.id,
+    );
     cancelPageDrag();
-    const item = await database.libraryItems.get(transfer.id);
-    if (item?.kind === 'link')
-      await database.libraryItems.update(item.id, {
-        pageId: '__dock',
-        parent: '',
-      });
+    dockIncomingItemId.value = transfer.dockEligible ? transfer.id : '';
+    dockInsertBeforeId.value = before;
+    try {
+      await database.transaction(
+        'rw',
+        database.libraryItems,
+        database.preferences,
+        async () => {
+          const item = await database.libraryItems.get(transfer.id);
+          if (!item || (item.kind !== 'link' && item.kind !== 'folder')) return;
+          await database.libraryItems.update(item.id, {
+            pageId: '__dock',
+            parent: '',
+          });
+          if (item.kind === 'folder')
+            await database.libraryItems
+              .where('parent')
+              .equals(item.id)
+              .modify({ pageId: '__dock' });
+          await database.preferences.put({ id: 'dockOrder', value: ordered });
+        },
+      );
+      accountStorage.setItem('duoyu-dock-order', JSON.stringify(ordered));
+      window.dispatchEvent(new Event('duoyu-sync-preferences'));
+    } catch (error) {
+      pageDragError.value =
+        error instanceof Error ? error.message : '移入 Dock 失败';
+    } finally {
+      dockIncomingItemId.value = '';
+      dockInsertBeforeId.value = '';
+    }
     return;
   }
   if (dock && transfer.source === '__dock') {

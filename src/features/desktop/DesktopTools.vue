@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type {WidgetSize} from "../../shared/storage/database";
 import WallpaperDownloadProgress from '../wallpaper/WallpaperDownloadProgress.vue';
 import type { WallpaperProgress } from '../wallpaper/download-wallpaper';
 import WallpaperSelectionMark from '../wallpaper/WallpaperSelectionMark.vue';
@@ -28,7 +29,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   close: [];
-  add: [kind: 'calendar' | 'weather' | 'note'];
+  add: [kind: 'calendar' | 'weather' | 'note', size?: WidgetSize];
   folder: [];
   layout: [value: boolean];
 }>();
@@ -165,7 +166,7 @@ async function open(item: LibraryItem) {
         <CloudCatalog
           v-if="widgetCategory === 'cloud' || widgetCategory === 'templates'"
           :kind="widgetCategory === 'cloud' ? 'widgets' : 'templates'"
-          @add="(kind) => emit('add', kind)"
+          @add="(kind,size) => emit('add', kind,size)"
         />
         <div v-else class="store-card-grid widget-card-grid">
           <button

@@ -45,7 +45,12 @@ watch(active, async (value) => {
   }
   document.documentElement.classList.toggle('workspace-active', value);
   await nextTick();
-  if (value && active.value) workspace.value?.focus({ preventScroll: true });
+  if (value && active.value)
+    (
+      workspace.value?.querySelector<HTMLInputElement>(
+        '.workspace-search input',
+      ) ?? workspace.value
+    )?.focus({ preventScroll: true });
 });
 function restoreFocus() {
   if (!active.value && previous?.isConnected)
@@ -71,7 +76,9 @@ onUnmounted(() => {
         @contextmenu.prevent.stop
         @keydown="key"
       >
-        <slot :close="() => (active = false)"><WorkspaceBoard /></slot>
+        <slot :close="() => (active = false)"
+          ><WorkspaceBoard @close="active = false"
+        /></slot>
       </div>
     </Transition>
   </Teleport>
@@ -83,7 +90,7 @@ onUnmounted(() => {
 body
   > :not(#app):not(.desktop-dock):not(.account-entry):not(
     .workspace-overlay
-  ):not(.base-dialog-backdrop):not(.library-context-menu) {
+  ):not(.base-dialog-backdrop):not(.library-context-menu):not(.drag-landing-preview) {
   transition:
     opacity 320ms ease,
     visibility 0s;
@@ -94,7 +101,7 @@ body
   body
   > :not(#app):not(.desktop-dock):not(.account-entry):not(
     .workspace-overlay
-  ):not(.base-dialog-backdrop):not(.library-context-menu) {
+  ):not(.base-dialog-backdrop):not(.library-context-menu):not(.drag-landing-preview) {
   visibility: hidden !important;
   opacity: 0 !important;
   pointer-events: none !important;

@@ -23,9 +23,9 @@ const current = computed(() => ({
 }));
 const displayed = computed(() => preview.value || current.value);
 const rows = computed(() =>
-  Math.min(props.maxRows || 9, itemMaxRows(props.item.kind)),
+  Math.min(props.maxRows || 9, props.item.widgetSize?.maxHeight ?? itemMaxRows(props.item.kind)),
 );
-const columns = computed(() => itemMaxColumns(props.item.kind));
+const columns = computed(() => props.item.widgetSize?.maxWidth ?? itemMaxColumns(props.item.kind));
 const menuWidth = computed(() =>
   Math.max(244, columns.value * 24 + (columns.value - 1) * 4 + 30),
 );
@@ -96,7 +96,7 @@ onUnmounted(() => {
           v-for="cell in cells"
           :key="cell.width + '-' + cell.height"
           :aria-label="cell.width + '列 × ' + cell.height + '行'"
-          :disabled="item.kind !== 'link' && cell.width * cell.height < 3"
+          :disabled="cell.width < (item.widgetSize?.minWidth ?? 1) || cell.height < (item.widgetSize?.minHeight ?? 1) || (item.kind !== 'link' && cell.width * cell.height < 3)"
           :class="{
             current:
               cell.width <= current.width && cell.height <= current.height,

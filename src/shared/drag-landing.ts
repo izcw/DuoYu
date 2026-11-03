@@ -13,6 +13,9 @@ export function createDragLanding() {
   let animation: Animation | undefined;
   let target: HTMLElement | undefined;
   function dispose() {
+    document.removeEventListener('dragover', track, true);
+    document.removeEventListener('mousemove', track, true);
+    window.removeEventListener('blur', dispose);
     animation?.cancel();
     animation = undefined;
     clone?.remove();
@@ -23,12 +26,15 @@ export function createDragLanding() {
     committing = false;
   }
   function capture(
-    event: DragEvent,
+    event: MouseEvent,
     source: HTMLElement,
     targetSelector: string,
+    options: { transparentSurface?: boolean } = {},
   ) {
     dispose();
-    root = source.closest<HTMLElement>('.workspace-board') || undefined;
+    root = source.closest<HTMLElement>('.desktop-dock')
+      ? document.body
+      : source.closest<HTMLElement>('.workspace-board') || document.body;
     selector = targetSelector;
     const bounds = source.getBoundingClientRect();
     offsetX = event.clientX - bounds.left;
@@ -68,21 +74,34 @@ export function createDragLanding() {
       zIndex: '2147483647',
       opacity: '1',
     });
-    // Use an isolated snapshot: native composited glass layers can include
-    // the surrounding group when the browser chooses the drag image itself.
-    if (root && event.dataTransfer) {
-      const image = clone;
-      root.append(image);
-      event.dataTransfer.setDragImage(image, offsetX, offsetY);
-      requestAnimationFrame(() => {
-        image.remove();
-        image.style.opacity = '0';
+    if (options.transparentSurface) {
+      Object.assign(clone.style, {
+        background: 'transparent',
+        backdropFilter: 'none',
+        boxShadow: 'none',
+        border: '0',
+        outline: 'none',
       });
     }
+    // Chromium fades native drag images. Track a DOM preview instead.
+    const blank = document.createElement('canvas');
+    blank.width = blank.height = 1;
+    blank.getContext('2d')?.clearRect(0, 0, 1, 1);
+    root.append(clone);
+    if (event instanceof DragEvent)
+      event.dataTransfer?.setDragImage(blank, 0, 0);
+    else document.addEventListener('mousemove', track, true);
+    document.addEventListener('dragover', track, true);
+    window.addEventListener('blur', dispose);
   }
-  function track(event: DragEvent) {
+  function track(event: MouseEvent) {
+    if (committing) return;
     x = event.clientX;
     y = event.clientY;
+    if (clone) {
+      clone.style.left = `${x - offsetX}px`;
+      clone.style.top = `${y - offsetY}px`;
+    }
   }
   async function commit(
     action: () => Promise<void>,

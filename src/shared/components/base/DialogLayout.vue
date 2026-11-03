@@ -54,7 +54,7 @@ const active = defineModel<T>({ required: true });
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
-  padding: 14px 12px;
+  padding: 0 12px;
   border: 0;
   border-radius: 10px;
   text-align: left;

@@ -124,8 +124,8 @@ html[data-wallpaper-preview='ready'] .wallpaper-shade,
   justify-content: center;
   flex-wrap: wrap;
   gap: 6px 14px;
-  margin: 12px 0 0;
-  font-size: 18px;
+  margin: 0 0 4px;
+  font-size: 16px;
   font-weight: 400;
   letter-spacing: 1px;
   white-space: pre-wrap;
@@ -358,9 +358,9 @@ html[data-wallpaper-preview='ready'] .wallpaper-shade,
 }
 
 /* Inputs retain a neutral border without a separate focus ring. */
-input:not([type='checkbox']):not([type='radio']):not(.search-form input):not(
-    .floating-editor input
-  ),
+input:not([type='checkbox']):not([type='radio']):not(
+    .workspace-search input
+  ):not(.search-form input):not(.floating-editor input),
 textarea {
   border: 1px solid #c9c9c9 !important;
 }
@@ -399,4 +399,37 @@ textarea:focus-visible {
 }
 *::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+:root {
+  --control-height: 36px;
+}
+
+/* Size form controls and action buttons without changing icon tiles or cards. */
+input:not([type]):not(.desktop-header .search-form input),
+input:is([type='text'], [type='url'], [type='email'], [type='password'], [type='number'], [type='search']):not(.desktop-header .search-form input),
+select,
+.select-trigger,
+.select-options [role='option'],
+.dialog-menu button,
+.account-panel button,
+.setting-row button,
+.workspace-button,
+.base-dialog :is(form button[type='submit'], .page-editor-actions button, .library-form-actions button, .title-input-row > button) {
+  box-sizing: border-box;
+  height: var(--control-height);
+}
+
+
+/* A clickable card may also be a drag handle; its nested link shares its cursor. */
+[draggable='true']:not(:disabled),
+[draggable='true'] :is(.side-menu-choice, .workspace-link),
+[data-drag-handle='true'],
+.grid-stack-item:not(.ui-draggable-disabled) :is(.cell-link, .folder-border, .folder-link, .widget-card) {
+  cursor: pointer !important;
+}
+html.mouse-sorting, html.mouse-sorting *,
+html:has(.drag-landing-preview, .ui-draggable-dragging, .grid-selection-dragging, .desktop-transfer-preview),
+html:has(.drag-landing-preview, .ui-draggable-dragging, .grid-selection-dragging, .desktop-transfer-preview) :is(*, #drag-cursor-priority) {
+  cursor: grabbing !important;
 }

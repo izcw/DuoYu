@@ -7,7 +7,7 @@
 .bottom-widget-grid > .grid-stack-item > .widget-card {
   overflow: hidden;
   border-radius: 22px;
-  cursor: grab;
+  cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
   transition:

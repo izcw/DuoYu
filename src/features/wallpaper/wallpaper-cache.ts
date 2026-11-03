@@ -1,19 +1,50 @@
+import { rememberWallpaperChoice } from './wallpaper-intent';
 import {
   downloadWallpaper,
   type WallpaperProgress,
 } from './download-wallpaper';
 import { getDailyWallpaperUrl } from './wallpaper';
-import { cacheAsset } from '../sync/assets';
+import { cacheAsset, getAsset } from '../sync/assets';
 import { accountStorage } from '../../shared/storage/account';
 import { database, type WallpaperRecord } from '../../shared/storage/database';
 import { saveWallpaperPreview } from './wallpaper-preview';
 
-async function syncPreview(record: WallpaperRecord) {
+async function decodeImage(image: HTMLImageElement, timeout = 15_000) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      image.decode(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('壁纸图片解码超时，请重试')),
+          timeout,
+        );
+      }),
+    ]);
+  } catch (error) {
+    image.src = '';
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function syncPreview(
+  record: WallpaperRecord,
+  prepared?: HTMLImageElement,
+) {
+  if (prepared) {
+    saveWallpaperPreview(
+      prepared,
+      record.contentHash || `${record.sourceUrl}:${record.savedAt}`,
+      record.sourceUrl,
+    );
+    return;
+  }
   const url = URL.createObjectURL(record.blob);
   try {
     const image = new Image();
     image.src = url;
-    await image.decode();
+    await decodeImage(image, 3_000);
     saveWallpaperPreview(
       image,
       record.contentHash || `${record.sourceUrl}:${record.savedAt}`,
@@ -27,7 +58,48 @@ async function syncPreview(record: WallpaperRecord) {
 /** Share the writer's lock: an old tab must never restore an older preview. */
 export async function readWallpaperForDisplay() {
   return navigator.locks.request('duoyu:daily-wallpaper', async () => {
-    const record = await readWallpaper();
+    let record = await readWallpaper();
+    const mode = (await database.preferences.get('wallpaperMode'))?.value;
+    const selection = (await database.preferences.get('wallpaperSelection'))
+      ?.value;
+    if (
+      typeof selection === 'string' ? selection !== 'daily' : mode === 'custom'
+    ) {
+      accountStorage.setItem('duoyu-wallpaper-mode', 'custom');
+      if (typeof selection === 'string') {
+        const saved = (
+          await database.preferences.get(
+            selection === 'upload'
+              ? 'savedWallpaper:upload'
+              : 'savedWallpaper:store',
+          )
+        )?.value as any;
+        if (
+          saved?.selection === selection &&
+          typeof saved.blob === 'string' &&
+          (record?.selection !== selection ||
+            record?.contentHash !== saved.contentHash)
+        ) {
+          try {
+            const blob = await getAsset(saved.blob);
+            const restored: WallpaperRecord = {
+              id: 'daily',
+              sourceUrl: 'local:' + saved.contentHash,
+              selection,
+              contentHash: saved.contentHash,
+              blob,
+              savedAt: Date.now(),
+            };
+            await database.transaction('rw', database.wallpapers, async () => {
+              await database.wallpapers.put(restored);
+            });
+            record = restored;
+          } catch {
+            /* Keep the selection; retry when its original becomes available. */
+          }
+        }
+      }
+    }
     if (record) {
       try {
         await syncPreview(record);
@@ -58,19 +130,22 @@ export async function readWallpaper() {
   }
 }
 
-export async function decodeWallpaper(blob: Blob): Promise<string> {
+async function prepareWallpaperImage(blob: Blob) {
   const url = URL.createObjectURL(blob);
   try {
     const image = new Image();
     image.src = url;
-    await image.decode();
+    await decodeImage(image);
     if (!image.naturalWidth || !image.naturalHeight)
       throw new Error('Empty image');
-    return url;
+    return { url, image };
   } catch (error) {
     URL.revokeObjectURL(url);
     throw error;
   }
+}
+export async function decodeWallpaper(blob: Blob): Promise<string> {
+  return (await prepareWallpaperImage(blob)).url;
 }
 
 export async function refreshWallpaper(
@@ -84,7 +159,15 @@ export async function refreshWallpaper(
     async () => {
       const cached = await readWallpaper();
       // A queued daily refresh must not overwrite a newer manual selection.
-      if (accountStorage.getItem('duoyu-wallpaper-mode') === 'custom') {
+      const selection = (await database.preferences.get('wallpaperSelection'))
+        ?.value;
+      if (
+        typeof selection === 'string'
+          ? selection !== 'daily'
+          : accountStorage.getItem('duoyu-wallpaper-mode') === 'custom' ||
+            (await database.preferences.get('wallpaperMode'))?.value ===
+              'custom'
+      ) {
         if (cached) return cached;
         throw new Error('Custom wallpaper is awaiting synchronization');
       }
@@ -112,10 +195,19 @@ export async function refreshWallpaper(
       const decoded = await decodeWallpaper(blob);
       URL.revokeObjectURL(decoded);
       signal.throwIfAborted();
-      if (accountStorage.getItem('duoyu-wallpaper-mode') === 'custom') {
+      const latestSelection = (
+        await database.preferences.get('wallpaperSelection')
+      )?.value;
+      if (
+        typeof latestSelection === 'string'
+          ? latestSelection !== 'daily'
+          : accountStorage.getItem('duoyu-wallpaper-mode') === 'custom' ||
+            (await database.preferences.get('wallpaperMode'))?.value ===
+              'custom'
+      ) {
         const current = await readWallpaper();
         if (current) return current;
-        throw new Error('Wallpaper selection changed');
+        throw new Error('Wallpaper latestSelection changed');
       }
       const record: WallpaperRecord = {
         id: 'daily',
@@ -143,48 +235,57 @@ export async function refreshWallpaper(
 export async function importWallpaper(blob: Blob, selection = 'upload') {
   if (!blob.type.startsWith('image/') || blob.size > 20 * 1024 * 1024)
     throw new Error('请选择不超过 20 MB 的图片');
-  const decoded = await decodeWallpaper(blob);
-  URL.revokeObjectURL(decoded);
-  await navigator.locks.request('duoyu:daily-wallpaper', async () => {
-    const record: WallpaperRecord = {
-      id: 'daily',
-      sourceUrl: 'local:' + (await fingerprint(blob)),
-      selection,
-      blob,
-      savedAt: Date.now(),
-      contentHash: await fingerprint(blob),
-    };
-    const asset = await cacheAsset(blob);
-    await database.transaction(
-      'rw',
-      database.wallpapers,
-      database.preferences,
-      async () => {
-        await database.wallpapers.put(record);
-        await database.preferences.put({
-          id:
-            selection === 'upload'
-              ? 'savedWallpaper:upload'
-              : 'savedWallpaper:store',
-          value: { selection, blob: asset, contentHash: record.contentHash },
-        });
-        await database.preferences.put({
-          id: 'wallpaperMode',
-          value: 'custom',
-        });
-        await database.preferences.put({
-          id: 'wallpaperSelection',
-          value: selection,
-        });
-      },
-    );
-    accountStorage.setItem('duoyu-wallpaper-mode', 'custom');
-    try {
-      await syncPreview(record);
-    } catch {
-      /* The full image is already safely stored. */
-    }
-  });
+  const prepared = await prepareWallpaperImage(blob);
+  try {
+    await navigator.locks.request('duoyu:daily-wallpaper', async () => {
+      const record: WallpaperRecord = {
+        id: 'daily',
+        sourceUrl: 'local:' + (await fingerprint(blob)),
+        selection,
+        blob,
+        savedAt: Date.now(),
+        contentHash: await fingerprint(blob),
+      };
+      const asset = await cacheAsset(blob);
+      await database.transaction(
+        'rw',
+        database.wallpapers,
+        database.preferences,
+        async () => {
+          await database.wallpapers.put(record);
+          await database.preferences.put({
+            id:
+              selection === 'upload'
+                ? 'savedWallpaper:upload'
+                : 'savedWallpaper:store',
+            value: { selection, blob: asset, contentHash: record.contentHash },
+          });
+          await database.preferences.put({
+            id: 'wallpaperMode',
+            value: 'custom',
+          });
+          await database.preferences.put({
+            id: 'wallpaperSelection',
+            value: selection,
+          });
+        },
+      );
+      rememberWallpaperChoice({
+        selection,
+        contentHash: record.contentHash,
+        sourceUrl: record.sourceUrl,
+        asset,
+      });
+      accountStorage.setItem('duoyu-wallpaper-mode', 'custom');
+      try {
+        await syncPreview(record, prepared.image);
+      } catch {
+        /* The full image is already safely stored. */
+      }
+    });
+  } finally {
+    URL.revokeObjectURL(prepared.url);
+  }
   window.dispatchEvent(new Event('duoyu-wallpaper-change'));
 }
 
@@ -217,6 +318,7 @@ export async function removeUploadedWallpaper() {
       },
     );
     accountStorage.removeItem('duoyu:wallpaper-preview');
+    rememberWallpaperChoice({ selection: 'daily' });
     accountStorage.removeItem('duoyu-wallpaper-mode');
   });
   window.dispatchEvent(new Event('duoyu-wallpaper-change'));
@@ -265,6 +367,7 @@ export async function selectDailyWallpaper(
         });
       },
     );
+    rememberWallpaperChoice({ selection: 'daily' });
     accountStorage.removeItem('duoyu-wallpaper-mode');
   });
   window.dispatchEvent(new Event('duoyu-wallpaper-change'));
