@@ -200,11 +200,9 @@ h2 {
   margin: 0 0 20px;
 }
 .folder-dialog-content {
-  --desktop-card-radius: 28px;
   position: relative;
   overflow: hidden;
   padding: 24px;
-  border-radius: 28px;
 }
 </style>
 

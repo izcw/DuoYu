@@ -72,6 +72,7 @@
 /* Each surface samples the already-composited pixels directly beneath it.
    Do not repaint the original wallpaper here: that bypasses focus overlays. */
 .desktop-card-glass {
+  border-radius: var(--desktop-card-radius, 20px);
   isolation: isolate;
   clip-path: inset(0 round var(--desktop-card-radius, 20px));
   background: var(--glass-control-fill);
@@ -177,7 +178,7 @@
   position: relative;
   isolation: isolate;
 }
-:is(.cell-icon, .cell-panel.widget-card)::after {
+:is(.cell-icon, .desktop-card-glass)::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -197,14 +198,14 @@
   position: relative;
   z-index: 1;
 }
-:is(.cell-icon, .cell-panel.widget-card)::after {
+:is(.cell-icon, .desktop-card-glass)::after {
   mix-blend-mode: normal;
 }
-:is(.cell-icon, .cell-panel.widget-card)[data-highlight='true']::after {
+:is(.cell-icon, .desktop-card-glass)[data-highlight='true']::after {
   opacity: 0.95;
 }
 @media (prefers-reduced-motion: reduce) {
-  :is(.cell-icon, .cell-panel.widget-card)::after {
+  :is(.cell-icon, .desktop-card-glass)::after {
     transition: none;
   }
 }
@@ -252,6 +253,7 @@
 }
 
 /* Folder lighting belongs above its background but beneath its icon contents. */
+.folder-dialog-content.desktop-card-glass::after,
 .grid-stack-item[data-kind='folder'] > .cell-panel.widget-card::after {
   z-index: 0;
 }

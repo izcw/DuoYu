@@ -6,6 +6,7 @@ import type { GridStack, GridItemHTMLElement } from 'gridstack';
 import type { LibraryItem } from '../../shared/storage/database';
 import { database } from '../../shared/storage/database';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
+import FolderPreviewIcons from './FolderPreviewIcons.vue';
 import FolderIconGrid from './FolderIconGrid.vue';
 import GridItemMenu from './GridItemMenu.vue';
 import WorkspaceFavicon from '../workspace/WorkspaceFavicon.vue';
@@ -51,7 +52,7 @@ const dragging = ref('');
 const target = ref('');
 const intent = ref<'sort' | 'merge'>('sort');
 const folder = computed(() => props.all.find((i) => i.id === expanded.value));
-const children = (id: string) => props.all.filter((i) => i.parent === id);
+const children = (id: string) => props.all.filter((i) => i.parent === id).sort((a,b)=>a.order-b.order || a.id.localeCompare(b.id));
 const expandedLinks = computed(() => children(expanded.value));
 const pageCount = computed(() =>
   Math.max(
@@ -678,7 +679,7 @@ async function note(event: Event, id: string) {
                 gridTemplateRows: '1fr',
               }"
             >
-              <FolderIconGrid
+              <FolderPreviewIcons
                 :items="children(item.id)"
                 :columns="displaySize(item).width"
                 :rows="displaySize(item).height"

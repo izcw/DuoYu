@@ -23,7 +23,7 @@ export function useIconHighlight() {
     }
     const icon =
       event.target instanceof Element
-        ? event.target.closest<HTMLElement>('.cell-panel.widget-card') ||
+        ? event.target.closest<HTMLElement>('.desktop-card-glass') ||
           event.target.closest<HTMLElement>('.cell-icon')
         : null;
     if (

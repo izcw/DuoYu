@@ -74,6 +74,22 @@ export function createDragLanding() {
       zIndex: '2147483647',
       opacity: '1',
     });
+    // The folder grid may be scaled. Its rendered border box and the children's
+    // computed CSS pixels are different coordinate spaces. Keep the original
+    // layout dimensions and apply the grid scale to the entire preview.
+    if (source.matches('.folder-icon') && source.offsetWidth && source.offsetHeight) {
+      Object.assign(clone.style, {
+        boxSizing: 'border-box',
+        width: source.offsetWidth + 'px',
+        height: source.offsetHeight + 'px',
+        scale: (bounds.width / source.offsetWidth) + ' ' + (bounds.height / source.offsetHeight),
+        transformOrigin: 'top left',
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1fr)',
+        gridTemplateRows: 'minmax(0, 1fr)',
+        placeItems: 'center',
+      });
+    }
     if (options.transparentSurface) {
       Object.assign(clone.style, {
         background: 'transparent',

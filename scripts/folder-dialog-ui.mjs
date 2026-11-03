@@ -17,6 +17,26 @@ c.setDefaultTimeout(12000);
 try {
   const p = await c.newPage();
   await p.goto('chrome://newtab');
+  const icon = p.locator('.preview-icons button:has(img)').first();
+  await icon.waitFor();
+  await icon.scrollIntoViewIfNeeded();
+  const geometry = el => {
+    const box = el.getBoundingClientRect(), img = el.querySelector('img').getBoundingClientRect();
+    return [box.width, box.height, img.width, img.height, img.x-box.x, img.y-box.y];
+  };
+  const before = await icon.evaluate(geometry);
+  const rect = await icon.boundingBox();
+  const x = rect.x + rect.width/2, y = rect.y + rect.height/2;
+  await p.mouse.move(x,y);
+  await p.mouse.down();
+  await p.mouse.move(x+8,y+2,{steps:3});
+  const ghost = p.locator('.drag-landing-preview');
+  await ghost.waitFor();
+  const after = await ghost.evaluate(geometry);
+  for(let i=0;i<before.length;i++) expect(Math.abs(after[i]-before[i])).toBeLessThan(1);
+  await p.mouse.up();
+  await expect(ghost).toHaveCount(0);
+  console.log('PASS folder drag preserves image dimensions and offset');
   await p.getByRole('button', { name: '展开 常用工具', exact: true }).click();
   const folder = p.getByRole('dialog', { name: '常用工具', exact: true });
   await folder.waitFor();

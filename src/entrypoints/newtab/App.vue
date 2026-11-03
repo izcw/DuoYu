@@ -217,6 +217,7 @@ function stepPage(direction: number) {
 .desktop-pages {
   width: 100%;
   min-width: 0;
+  container-type: size;
   height: 100svh;
   min-height: 0;
   overflow: clip;
@@ -227,7 +228,9 @@ function stepPage(direction: number) {
   grid-template-columns: minmax(0, 1fr);
   justify-items: center;
   min-width: 0;
-  grid-template-rows: auto clamp(24px, 4vh, 48px) minmax(0, 1fr);
+  /* Both pages give GridStack the same available height per logical row. */
+  --desktop-row-room: max(1px, min(calc((100cqh - 154px) / 8), calc((100cqh - 248px) / 5)));
+  grid-template-rows: auto minmax(0, 1fr) calc(5 * var(--desktop-row-room));
   align-items: stretch;
   width: 100%;
   height: 100%;
@@ -245,6 +248,10 @@ function stepPage(direction: number) {
     transform 550ms ease;
   z-index: 5;
 }
+.is-apps-page .start-panel {
+  grid-template-rows: auto minmax(0, 1fr) calc(8 * var(--desktop-row-room));
+}
+.is-apps-page .desktop-header :deep(.search-form) { margin-top: 18px; }
 .is-apps-page .desktop-header {
   padding-top: 0;
 }
