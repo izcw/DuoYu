@@ -429,19 +429,31 @@ async function quarantine(op: CapturedOperation, reason: string) {
   });
 }
 export async function refreshConflictPreview() {
-  await navigator.locks.request('duoyu:sync:' + activeAccountKey(), async () => {
-    if (!account || switched()) throw Error('请先登录当前同步账号');
-    if (!(await database.syncMeta.get('initialized'))?.value) await refreshSnapshot();
-    else await pull();
-    await fetchRemoteConflicts(rpc);
-    // Old clients could leave a resolving flag after its queued operation disappeared.
-    await remoteTransaction(async () => {
-      const pending = new Set((await database.syncOutbox.toArray()).map(op => op.resolutionOf));
-      for (const record of await database.syncConflicts.toArray())
-        if (!record.resolvedAt && record.state === 'resolving' && !pending.has(record.id))
-          await database.syncConflicts.update(record.id, { state: 'conflict' });
-    });
-  });
+  await navigator.locks.request(
+    'duoyu:sync:' + activeAccountKey(),
+    async () => {
+      if (!account || switched()) throw Error('请先登录当前同步账号');
+      if (!(await database.syncMeta.get('initialized'))?.value)
+        await refreshSnapshot();
+      else await pull();
+      await fetchRemoteConflicts(rpc);
+      // Old clients could leave a resolving flag after its queued operation disappeared.
+      await remoteTransaction(async () => {
+        const pending = new Set(
+          (await database.syncOutbox.toArray()).map((op) => op.resolutionOf),
+        );
+        for (const record of await database.syncConflicts.toArray())
+          if (
+            !record.resolvedAt &&
+            record.state === 'resolving' &&
+            !pending.has(record.id)
+          )
+            await database.syncConflicts.update(record.id, {
+              state: 'conflict',
+            });
+      });
+    },
+  );
 }
 export async function syncNow() {
   if (!account || switched()) return;
@@ -459,6 +471,7 @@ export async function syncNow() {
           await refreshSnapshot();
         // Check the dataset generation before replaying any offline operations.
         await pull();
+        await fetchRemoteConflicts(rpc);
         for (const original of await database.syncOutbox
           .orderBy('createdAt')
           .toArray()) {

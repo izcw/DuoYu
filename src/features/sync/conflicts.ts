@@ -1,3 +1,4 @@
+import { discardWallpaperChoice } from '../wallpaper/wallpaper-intent';
 import { database } from '../../shared/storage/database';
 import { activeAccountKey } from '../../shared/storage/account';
 import type { SyncConflict, CapturedOperation } from './capture';
@@ -8,7 +9,22 @@ import {
   type Change,
   type Row,
 } from './model';
-import { rpc, syncNow, remoteTransaction } from './client';
+import {
+  rpc,
+  syncNow,
+  remoteTransaction,
+  refreshConflictPreview,
+  applyRemote,
+} from './client';
+function assertConflictAccount(expected = activeAccountKey()) {
+  if (
+    !expected ||
+    activeAccountKey() !== expected ||
+    database.name !== 'duoyu-account-' + expected
+  )
+    throw Error('登录账号已变化，请刷新后在当前账号下处理冲突');
+  return expected;
+}
 export const conflictReasons: Record<string, string> = {
   field_conflict: '同一内容在其他设备上也被修改了',
   layout_conflict: '位置或大小与其他设备的修改冲突',
@@ -37,12 +53,23 @@ export function conflictChanges(record: SyncConflict): Change[] {
   );
 }
 export async function fetchRemoteConflicts(request: typeof rpc = rpc) {
+  const owner = assertConflictAccount();
   const response = await request('/api/v1/sync/conflicts');
+  assertConflictAccount(owner);
   const epoch = (await database.syncMeta.get('epoch'))?.value;
   const changed =
     (await database.syncMeta.get('conflictEpoch'))?.value !== epoch;
+  let resolvedChanged = false;
   for (const entry of response.conflicts ?? []) {
     const existing = await database.syncConflicts.get(entry.operation_id);
+    if (entry.resolved_at && existing && !existing.resolvedAt) {
+      resolvedChanged = true;
+      discardWallpaperChoice(conflictChanges(existing));
+      // A cloud choice also cancels a previously staged local resolution.
+      for (const op of await database.syncOutbox.toArray())
+        if (op.resolutionOf === existing.id)
+          await database.syncOutbox.delete(op.id);
+    }
     await database.syncConflicts.put({
       id: entry.operation_id,
       createdAt: existing?.createdAt ?? Date.parse(entry.created_at),
@@ -55,30 +82,62 @@ export async function fetchRemoteConflicts(request: typeof rpc = rpc) {
       server: true,
       ...(entry.resolved_at
         ? { resolvedAt: Date.parse(entry.resolved_at) }
-        : !changed && existing?.resolvedAt
+        : existing?.resolvedAt
           ? { resolvedAt: existing.resolvedAt }
           : {}),
     });
   }
   if (epoch) await database.syncMeta.put({ id: 'conflictEpoch', value: epoch });
+  if (resolvedChanged)
+    await applyRemote(
+      [],
+      String((await database.syncMeta.get('cursor'))?.value ?? '0'),
+    );
 }
 export async function discardConflict(
   id: string,
   expected: Record<string, string> = {},
 ) {
-  await syncNow();
-  const latest = new Map(
-    (await database.syncShadow.toArray()).map((e) => [e.id, e.revision]),
+  return discardConflicts([id], expected);
+}
+export async function discardConflicts(
+  ids: string[],
+  expected: Record<string, string> = {},
+) {
+  const owner = assertConflictAccount();
+  // Fetch only: choosing cloud must not first upload a queued local resolution.
+  await refreshConflictPreview();
+  await navigator.locks.request(
+    'duoyu:sync:' + activeAccountKey(),
+    async () => {
+      assertConflictAccount(owner);
+      const latest = new Map(
+        (await database.syncShadow.toArray()).map((e) => [e.id, e.revision]),
+      );
+      for (const [key, revision] of Object.entries(expected))
+        if ((latest.get(key) ?? '0') !== revision)
+          throw Error('云端又有新修改，已刷新预览，请确认后重新应用');
+      for (const id of ids) {
+        assertConflictAccount(owner);
+        const record = await database.syncConflicts.get(id);
+        if (!record || record.resolvedAt) continue;
+        if (record.server)
+          await rpc('/api/v1/sync/conflicts/' + id + '/resolve', 'POST', {});
+        assertConflictAccount(owner);
+        discardWallpaperChoice(conflictChanges(record));
+        await remoteTransaction(async () => {
+          for (const op of await database.syncOutbox.toArray())
+            if (op.id === id || op.resolutionOf === id)
+              await database.syncOutbox.delete(op.id);
+          await database.syncConflicts.update(id, { resolvedAt: Date.now() });
+        });
+      }
+      await applyRemote(
+        [],
+        String((await database.syncMeta.get('cursor'))?.value ?? '0'),
+      );
+    },
   );
-  for (const [key, revision] of Object.entries(expected))
-    if ((latest.get(key) ?? '0') !== revision)
-      throw Error('云端又有新修改，已刷新预览，请确认后重新应用');
-  const record = await database.syncConflicts.get(id);
-  if (!record) return;
-  if (record.server)
-    await rpc('/api/v1/sync/conflicts/' + id + '/resolve', 'POST', {});
-  await database.syncConflicts.update(id, { resolvedAt: Date.now() });
-  await syncNow();
 }
 export async function retryConflict(
   id: string,
@@ -278,9 +337,9 @@ export async function retryConflict(
           planned.set('shortcuts:' + group, value);
         }
       if (!changes.length) {
-        await database.syncConflicts.update(id, { resolvedAt: Date.now() });
         if (record.server)
           await rpc('/api/v1/sync/conflicts/' + id + '/resolve', 'POST', {});
+        await database.syncConflicts.update(id, { resolvedAt: Date.now() });
         return;
       }
       // A resolution is a fresh commit based on current cloud state, never a replay

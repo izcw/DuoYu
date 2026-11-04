@@ -11,6 +11,7 @@ import {
 } from '../features/auth/config';
 import {
   AuthError,
+  AccessTokenRejected,
   discovery,
   random,
   challenge,
@@ -125,7 +126,8 @@ export default defineBackground(() => {
     return true;
   });
 
-  // Persist only renewal credentials; access tokens remain session-only.
+  // Persist the complete checkpoint in trusted extension storage so a restart
+  // cannot discard a successfully rotated credential or its identity token.
   const renewalKey = AUTH_SESSION_KEY + 'Renewal';
   const ready = Promise.all([
     browser.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }),
@@ -135,17 +137,20 @@ export default defineBackground(() => {
   let loggingIn = false;
   async function read(): Promise<Session | undefined> {
     await ready;
-    let session = (await browser.storage.session.get(AUTH_SESSION_KEY))[
-      AUTH_SESSION_KEY
+    // Local storage is the durable, authoritative checkpoint. A worker may
+    // stop between the local write and the session cache write.
+    const durable = (await browser.storage.local.get(renewalKey))[
+      renewalKey
     ] as Session | undefined;
-    if (!session) {
-      const renewal = (await browser.storage.local.get(renewalKey))[
-        renewalKey
-      ] as
-        | Pick<Session, 'account' | 'refresh' | 'refreshPending' | 'clientId'>
-        | undefined;
-      if (renewal) session = { ...renewal, access: '', expires: 0 };
-    }
+    let session = durable
+      ? {
+          ...durable,
+          access: durable.access ?? '',
+          expires: durable.expires ?? 0,
+        }
+      : ((await browser.storage.session.get(AUTH_SESSION_KEY))[
+          AUTH_SESSION_KEY
+        ] as Session | undefined);
     if (
       session &&
       (session.account.issuer !== authConfig.issuer ||
@@ -158,16 +163,9 @@ export default defineBackground(() => {
   }
   async function save(session: Session) {
     await ready;
-    if (session.refresh) {
-      await browser.storage.local.set({
-        [renewalKey]: {
-          account: session.account,
-          refresh: session.refresh,
-          refreshPending: session.refreshPending ?? false,
-          clientId: authConfig.clientId,
-        },
-      });
-    } else await browser.storage.local.remove(renewalKey);
+    await browser.storage.local.set({
+      [renewalKey]: { ...session, clientId: authConfig.clientId },
+    });
     await browser.storage.session.set({
       [AUTH_SESSION_KEY]: { ...session, clientId: authConfig.clientId },
     });
@@ -176,7 +174,7 @@ export default defineBackground(() => {
     await browser.storage.local.remove(renewalKey);
     await browser.storage.session.remove(AUTH_SESSION_KEY);
   }
-  async function status(): Promise<AuthView> {
+  async function status(retried = false): Promise<AuthView> {
     let s = await read();
     if (!s) return { account: null };
     if (navigator.onLine === false) {
@@ -186,8 +184,15 @@ export default defineBackground(() => {
       };
     }
     if (s.refreshPending) {
-      await clear();
-      return { account: null, warning: '上次登录续期结果不确定，请重新登录' };
+      try {
+        return await login(undefined, true, s.account.sub);
+      } catch {
+        /* Keep the checkpoint if silent authorization is unavailable. */
+      }
+      return {
+        account: s.account,
+        warning: '登录续期响应未确认，凭证已保留；请重新授权恢复云同步',
+      };
     }
     try {
       if (s.expires <= Date.now() + 30000) {
@@ -195,6 +200,7 @@ export default defineBackground(() => {
           await clear();
           return { account: null, warning: '登录已过期，请重新登录' };
         }
+        await discovery();
         // Never retry a refresh whose response was lost: the server may already
         // have consumed it, and replay would revoke the entire token family.
         let t;
@@ -205,9 +211,12 @@ export default defineBackground(() => {
             grant_type: 'refresh_token',
             refresh_token: s.refresh,
           });
-          if (t.id_token) await verifyID(t.id_token, undefined, s.account.sub);
-        } catch {
-          throw new AuthError('登录续期未完成，请重新登录', true);
+        } catch (error) {
+          if (error instanceof AuthError && error.invalidSession) throw error;
+          return {
+            account: s.account,
+            warning: '登录续期响应未确认，凭证已保留；请重新授权恢复云同步',
+          };
         }
         if (!t.refresh_token)
           throw new AuthError('账号服务未返回轮换令牌', true);
@@ -221,17 +230,26 @@ export default defineBackground(() => {
         };
         // Persist rotated refresh token before any subsequent network call.
         await save(s);
+        if (t.id_token) await verifyID(t.id_token, undefined, s.account.sub);
       }
       s.account = await userInfo(s.access, s.account.sub);
       await save(s);
       return { account: s.account };
     } catch (e) {
+      if (e instanceof AccessTokenRejected && s.refresh) {
+        await save({ ...s, expires: 0 });
+        if (!retried) return status(true);
+        return {
+          account: s.account,
+          warning: '账号资料验证暂未恢复，将稍后重试',
+        };
+      }
       if (e instanceof AuthError && e.invalidSession) {
         await clear();
         return { account: null, warning: e.message };
       }
       return {
-        account: s.expires > Date.now() ? s.account : null,
+        account: s.account,
         warning:
           e instanceof AuthError
             ? e.message
@@ -239,7 +257,11 @@ export default defineBackground(() => {
       };
     }
   }
-  async function login(parentWindowId?: number): Promise<AuthView> {
+  async function login(
+    parentWindowId?: number,
+    silent = false,
+    expectedSubject?: string,
+  ): Promise<AuthView> {
     const d = await discovery(),
       state = random(),
       nonce = random(),
@@ -255,11 +277,16 @@ export default defineBackground(() => {
       nonce,
       code_challenge: await challenge(verifier),
       code_challenge_method: 'S256',
-      prompt: 'consent',
+      prompt: silent ? 'none' : 'consent',
     }).toString();
     let callback: string | undefined;
     try {
-      callback = await launchLoginWindow(url.href, parentWindowId);
+      callback = silent
+        ? await browser.identity.launchWebAuthFlow({
+            url: url.href,
+            interactive: false,
+          })
+        : await launchLoginWindow(url.href, parentWindowId);
     } catch {
       throw new AuthError('登录窗口已关闭或授权未完成，可重新登录');
     }
@@ -273,7 +300,7 @@ export default defineBackground(() => {
     });
     try {
       if (!t.id_token) throw new AuthError('账号服务未返回身份令牌');
-      const sub = await verifyID(t.id_token, nonce);
+      const sub = await verifyID(t.id_token, nonce, expectedSubject);
       const account = await userInfo(t.access_token, sub);
       await save({
         account,
@@ -330,10 +357,15 @@ export default defineBackground(() => {
           if (
             !view.account ||
             !session?.identity ||
+            session.refreshPending ||
+            session.expires <= Date.now() ||
             message.account?.issuer !== view.account.issuer ||
             message.account?.sub !== view.account.sub
           ) {
-            respond({ status: 401, error: '请重新登录后同步' });
+            respond({
+              status: view.account ? 503 : 401,
+              error: view.warning || '请重新登录后同步',
+            });
             return;
           }
           const path = String(message.path || '');

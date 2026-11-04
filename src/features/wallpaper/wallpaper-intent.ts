@@ -21,6 +21,28 @@ function readChoice(): Choice | undefined {
       return c;
   } catch {}
 }
+// A version decision supersedes the matching pending wallpaper choice only.
+// Never discard a newer, unrelated wallpaper selected while a request is running.
+export function discardWallpaperChoice(
+  changes: { table: string; id: string; value: any }[],
+) {
+  const choice = readChoice();
+  if (!choice) return;
+  const matches = changes.some(
+    (change) =>
+      (change.table === 'wallpapers' &&
+        change.id === 'daily' &&
+        change.value?.contentHash === choice.contentHash &&
+        choice.contentHash) ||
+      (change.table === 'preferences' &&
+        change.id === 'wallpaperSelection' &&
+        change.value?.value === choice.selection &&
+        choice.selection === 'daily'),
+  );
+  if (!matches) return;
+  accountStorage.removeItem(KEY);
+  accountStorage.setItem('duoyu-wallpaper-intent-migrated', '1');
+}
 export async function restoreWallpaperChoice() {
   let choice = readChoice();
   if (!choice && !accountStorage.getItem('duoyu-wallpaper-intent-migrated')) {
@@ -55,6 +77,29 @@ export async function restoreWallpaperChoice() {
     } catch {}
   }
   if (!choice) return;
+  // An unresolved version decision must not repeatedly generate a fresh upload
+  // from the same saved intent every time cloud data is materialized.
+  const waiting = (
+    await database.syncConflicts
+      .filter((record) => !record.resolvedAt)
+      .toArray()
+  ).some((record) => {
+    const op = record.operation as any;
+    const changes =
+      op?.prepared?.changes ?? op?.changes ?? Object.values(op?.rows ?? {});
+    return changes.some(
+      (change: any) =>
+        (change.table === 'wallpapers' &&
+          change.id === 'daily' &&
+          change.value?.contentHash === choice?.contentHash &&
+          choice?.contentHash) ||
+        (change.table === 'preferences' &&
+          change.id === 'wallpaperSelection' &&
+          change.value?.value === choice?.selection &&
+          choice?.selection === 'daily'),
+    );
+  });
+  if (waiting) return;
   const c = choice;
   const expected = accountStorage.getItem(KEY);
   if (c.selection === 'daily') {

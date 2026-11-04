@@ -9,6 +9,7 @@ export class AuthError extends Error {
     super(message);
   }
 }
+export class AccessTokenRejected extends AuthError {}
 type Discovery = {
   issuer: string;
   authorization_endpoint: string;
@@ -186,7 +187,7 @@ export async function userInfo(accessToken: string, sub: string) {
   if (!r.ok) {
     const body = await r.json().catch(() => ({}));
     if (r.status === 401 && body.error === 'invalid_token')
-      throw new AuthError('登录已失效，请重新登录', true);
+      throw new AccessTokenRejected('访问凭证需要续期', true);
     if (r.status === 403 && body.error === 'origin_not_allowed')
       throw new AuthError(
         '扩展请求来源未获允许，请在账号中心登记当前扩展的 allowed_origins',

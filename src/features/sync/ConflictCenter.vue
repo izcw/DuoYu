@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { liveQuery } from 'dexie';
 import PageIcon from '../../shared/components/base/PageIcon.vue';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
 import { database } from '../../shared/storage/database';
 import type { SyncConflict } from './capture';
 import type { Entity } from './model';
-import { conflictChanges, discardConflict, retryConflict } from './conflicts';
+import { conflictChanges, discardConflicts, retryConflict } from './conflicts';
 import { formatSyncTime, syncNow, refreshConflictPreview } from './client';
 import ConflictDesktopPreview from './ConflictDesktopPreview.vue';
 import {
@@ -72,8 +72,14 @@ const views = computed(() =>
   previewConflictViews(changes.value, [local.value, cloud.value]),
 );
 const chosenView = ref('');
-watch(selected, () => { chosenView.value = ''; });
-const view = computed(() => views.value.includes(chosenView.value) ? chosenView.value : (views.value[0] ?? ''));
+watch(selected, () => {
+  chosenView.value = '';
+});
+const view = computed(() =>
+  views.value.includes(chosenView.value)
+    ? chosenView.value
+    : (views.value[0] ?? ''),
+);
 const highlightedIds = computed(() =>
   changes.value.flatMap((c) => [
     c.id,
@@ -116,29 +122,42 @@ watch(
   },
   { immediate: true },
 );
-async function refreshLatest() {
-  latestReady.value = false;
-  await run(async () => {
+async function readLatest(remote = true) {
+  if (remote) {
+    latestReady.value = false;
     await refreshConflictPreview();
-    shadow.value = (await database.syncShadow.toArray()).map((e) => ({
-      table: e.table,
-      id: e.entityId,
-      payload: e.payload as Record<string, any>,
-      revision: e.revision,
-      deleted: e.deleted,
-    }));
-    latestReady.value = true;
-  });
-  message.value = '';
+  }
+  // Read both together: liveQuery notifications can arrive after the refresh promise.
+  const [entries, conflicts] = await Promise.all([
+    database.syncShadow.toArray(),
+    database.syncConflicts.orderBy('createdAt').reverse().toArray(),
+  ]);
+  shadow.value = entries.map((e) => ({
+    table: e.table,
+    id: e.entityId,
+    payload: e.payload as Record<string, any>,
+    revision: e.revision,
+    deleted: e.deleted,
+  }));
+  records.value = conflicts.filter((record) => !record.resolvedAt);
+  await nextTick();
+  latestReady.value = true;
 }
-async function run(action: () => Promise<unknown>) {
+async function refreshLatest() {
+  if (busy.value) return;
+  await run(() => readLatest(), '预览已更新，请选择要应用的版本。');
+}
+async function run(
+  action: () => Promise<unknown>,
+  success = '所选版本已应用。',
+) {
   if (busy.value) return;
   busy.value = true;
   error.value = '';
   message.value = '';
   try {
     await action();
-    message.value = '处理结果已保存，将继续自动同步。';
+    message.value = success;
   } catch (e) {
     error.value = e instanceof Error ? e.message : '处理失败';
   } finally {
@@ -149,46 +168,77 @@ async function apply(side: 'local' | 'cloud') {
   if (side === 'local' && localLayout.value.overflow) return;
   const group = current.value;
   if (!group || busy.value) return;
-  if (!latestReady.value) {
-    await refreshLatest();
-    if (!latestReady.value || current.value?.id !== group.id) return;
-  }
-  if (resolving.value) {
-    await run(async () => {
+  const chosenIds = new Set(group.records.map((record) => record.id));
+  await run(async () => {
+    if (!latestReady.value) await readLatest();
+    const remaining = records.value.filter((record) =>
+      chosenIds.has(record.id),
+    );
+    if (!remaining.length) {
+      // Already resolved by another device or an administrator during refresh.
+      return;
+    }
+    const refreshed = groups.value.find((candidate) =>
+      candidate.records.some((record) => chosenIds.has(record.id)),
+    );
+    if (
+      !refreshed ||
+      refreshed.id !== group.id ||
+      refreshed.records.some((record) => !chosenIds.has(record.id))
+    )
+      throw Error('刷新后冲突分组已变化，请查看更新后的预览并重新选择');
+    if (resolving.value && side === 'local') {
       await syncNow();
       await refreshConflictPreview();
       const pending = await database.syncOutbox.toArray();
-      if (pending.some(op => group.records.some(record => record.id === op.resolutionOf)))
+      if (
+        pending.some((op) =>
+          group.records.some((record) => record.id === op.resolutionOf),
+        )
+      )
         throw Error('上次选择仍在待上传队列，请检查云同步状态后重试');
-    });
-    return;
-  }
-  const members = [...group.records].reverse();
-  const map = new Map(
-    shadow.value.map((e) => [e.table + ':' + e.id, e.revision]),
-  );
-  const resolved =
-    side === 'local'
-      ? previewResolutionChanges(shadow.value, changes.value, local.value)
-      : changes.value;
-  const expected = Object.fromEntries(
-    resolved.map((c) => [
-      c.table + ':' + c.id,
-      map.get(c.table + ':' + c.id) ?? '0',
-    ]),
-  );
-  await run(async () => {
+      return;
+    }
+    const members = [...remaining].reverse();
+    const map = new Map(
+      shadow.value.map((e) => [e.table + ':' + e.id, e.revision]),
+    );
+    const resolved =
+      side === 'local'
+        ? previewResolutionChanges(shadow.value, changes.value, local.value)
+        : changes.value;
+    const expected = Object.fromEntries(
+      resolved.map((c) => [
+        c.table + ':' + c.id,
+        map.get(c.table + ':' + c.id) ?? '0',
+      ]),
+    );
     if (side === 'local') {
       // Stage the complete menu version durably before acknowledging redundant records.
       // A failed upload remains in the outbox (or a new conflict), never only in this UI.
       await retryConflict(members[0]!.id, {}, expected, true, resolved);
-      if ((await database.syncOutbox.toArray()).some(op => op.resolutionOf === members[0]!.id)) throw Error('本机版本已保存，仍在等待上传。可重试上次处理。');
-      const failure = (await database.syncConflicts.toArray()).find(record => !record.resolvedAt && (record.operation as {resolutionOf?: string})?.resolutionOf === members[0]!.id);
+      if (
+        (await database.syncOutbox.toArray()).some(
+          (op) => op.resolutionOf === members[0]!.id,
+        )
+      )
+        throw Error('本机版本已保存，仍在等待上传。可重试上次处理。');
+      const failure = (await database.syncConflicts.toArray()).find(
+        (record) =>
+          !record.resolvedAt &&
+          (record.operation as { resolutionOf?: string })?.resolutionOf ===
+            members[0]!.id,
+      );
       if (failure) throw Error('云端未接受这次处理：' + failure.reason);
-      for (const record of members.slice(1)) await discardConflict(record.id);
+      if (members.length > 1)
+        await discardConflicts(members.slice(1).map((record) => record.id));
     } else {
-      for (const record of members) await discardConflict(record.id, expected);
+      await discardConflicts(
+        members.map((record) => record.id),
+        expected,
+      );
     }
+    await readLatest(false);
   });
 }
 </script>
@@ -207,8 +257,12 @@ async function apply(side: 'local' | 'cloud') {
           刷新预览
         </button>
       </div>
-      <p v-if="error" class="error" role="alert">{{ error }}。请点击「刷新预览」重试。</p>
-      <p v-else-if="!latestReady" role="status">正在读取最新云端版本，完成后即可选择。</p>
+      <p v-if="error" class="error" role="alert">
+        {{ error }}。请点击「刷新预览」重试。
+      </p>
+      <p v-else-if="busy && !latestReady" role="status">
+        正在读取最新云端版本，完成后即可选择。
+      </p>
       <div v-if="records.length" class="conflict-layout">
         <aside class="conflict-list" aria-label="冲突菜单">
           <button
@@ -238,8 +292,22 @@ async function apply(side: 'local' | 'cloud') {
             <strong>{{ current.name }}</strong>
             <span class="frame-legend"><i />{{ changes.length }} 个冲突项</span>
           </div>
-          <nav v-if="views.length > 1" class="preview-views" aria-label="预览区域">
-            <button v-for="region in views" :key="region" :aria-pressed="region === view" @click="chosenView = region">{{ previewPages([local,cloud]).find(page => page.id === region)?.name || region }}</button>
+          <nav
+            v-if="views.length > 1"
+            class="preview-views"
+            aria-label="预览区域"
+          >
+            <button
+              v-for="region in views"
+              :key="region"
+              :aria-pressed="region === view"
+              @click="chosenView = region"
+            >
+              {{
+                previewPages([local, cloud]).find((page) => page.id === region)
+                  ?.name || region
+              }}
+            </button>
           </nav>
           <div class="version-panels">
             <article
@@ -248,9 +316,7 @@ async function apply(side: 'local' | 'cloud') {
               class="version-panel"
               :data-version="side"
             >
-
               <template v-if="view">
-
                 <ConflictDesktopPreview
                   :entities="side === 'local' ? local : cloud"
                   :view="view"
@@ -266,19 +332,40 @@ async function apply(side: 'local' | 'cloud') {
                 />
               </template>
               <footer>
-                <span class="version-dot" :class="{ 'cloud-dot': side === 'cloud' }" aria-hidden="true" />
+                <span
+                  class="version-dot"
+                  :class="{ 'cloud-dot': side === 'cloud' }"
+                  aria-hidden="true"
+                />
                 <h3>{{ side === 'local' ? '本机版本' : '云端版本' }}</h3>
-                <span class="version-location" :title="versionLabel(side === 'local' ? local : cloud, view)">{{ versionLabel(side === 'local' ? local : cloud, view) }}</span>
-                <small>{{ resolving ? '正在同步处理结果' : side === 'local' ? changes.length + ' 项更改' : '当前已同步数据' }}</small>
+                <span
+                  class="version-location"
+                  :title="versionLabel(side === 'local' ? local : cloud, view)"
+                  >{{
+                    versionLabel(side === 'local' ? local : cloud, view)
+                  }}</span
+                >
+                <small>{{
+                  resolving
+                    ? '正在同步处理结果'
+                    : side === 'local'
+                      ? changes.length + ' 项更改'
+                      : '当前已同步数据'
+                }}</small>
                 <button
                   class="apply-version"
                   :disabled="
-                    busy ||
-                    (side === 'local' && localLayout.overflow > 0)
+                    busy || (side === 'local' && localLayout.overflow > 0)
                   "
                   @click="apply(side)"
                 >
-                  {{ resolving ? '重试上次处理' : side === 'local' ? '应用本机版本' : '应用云端版本' }}
+                  {{
+                    resolving && side === 'local'
+                      ? '重试上次处理'
+                      : side === 'local'
+                        ? '应用本机版本'
+                        : '应用云端版本'
+                  }}
                 </button>
               </footer>
             </article>
@@ -405,9 +492,23 @@ async function apply(side: 'local' | 'cloud') {
   margin-bottom: 16px;
   font-size: 14px;
 }
-.preview-views { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 12px; }
-.preview-views button { padding:5px 10px; border:0; border-radius:6px; background:#f5f5f7; cursor:pointer; }
-.preview-views button[aria-pressed=true] { background:#222; color:white; }
+.preview-views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+.preview-views button {
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: #f5f5f7;
+  cursor: pointer;
+}
+.preview-views button[aria-pressed='true'] {
+  background: #222;
+  color: white;
+}
 .version-panels {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -423,14 +524,42 @@ async function apply(side: 'local' | 'cloud') {
   background: #fff;
 }
 .version-panel > footer {
-  display:flex; align-items:center; gap:8px; padding:12px 14px;
-  margin-top:auto; border-top:1px solid #eeeef1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  margin-top: auto;
+  border-top: 1px solid #eeeef1;
 }
-.version-panel h3 { margin:0; flex:none; font-size:14px; font-weight:600; }
-.version-dot { flex:0 0 7px; height:7px; border-radius:50%; background:#222; }
-.cloud-dot { background:#939aa5; }
-.version-location { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#747782; font-size:12px; }
-.version-panel footer small { flex:none; font-size:11px; color:#747782; }
+.version-panel h3 {
+  margin: 0;
+  flex: none;
+  font-size: 14px;
+  font-weight: 600;
+}
+.version-dot {
+  flex: 0 0 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #222;
+}
+.cloud-dot {
+  background: #939aa5;
+}
+.version-location {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #747782;
+  font-size: 12px;
+}
+.version-panel footer small {
+  flex: none;
+  font-size: 11px;
+  color: #747782;
+}
 .apply-version,
 .secondary {
   white-space: nowrap;

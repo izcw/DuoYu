@@ -273,6 +273,24 @@ try {
   assert(conflict);
   await resolution.retryConflict(conflict.id);
   assert((await database.syncConflicts.get(conflict.id)).resolvedAt);
+  const blocked = (await database.syncConflicts.toArray()).find(c => c.state === 'blocked' && !c.resolvedAt);
+  assert(blocked);
+  await resolution.discardConflict(blocked.id);
+  assert((await database.syncConflicts.get(blocked.id)).resolvedAt);
+  assert.equal(await database.libraryItems.get(rejectedId), undefined, 'cloud choice must immediately remove a local-only rejected item without new cloud revisions');
+  assert.equal(await database.syncOutbox.count(), 0, 'applying cloud must not generate an upload');
+  console.log('PASS cloud choice immediately rematerializes local data without uploading rejected changes');
+  const resolvedRecord = await database.syncConflicts.get(blocked.id);
+  await database.syncMeta.put({id:'conflictEpoch',value:'old-generation'});
+  await resolution.fetchRemoteConflicts(async()=>({conflicts:[{operation_id:blocked.id,created_at:new Date().toISOString(),resolved_at:null,detail:{code:'field_conflict',changes:[]}}]}));
+  assert.equal((await database.syncConflicts.get(blocked.id)).resolvedAt,resolvedRecord.resolvedAt,'stale server list must not resurrect an acknowledged conflict after epoch metadata changes');
+  const accountStorageKey = data.get('duoyu-sync-account');
+  data.set('duoyu-sync-account','different-account');
+  let calledWrongAccount = false;
+  await assert.rejects(resolution.fetchRemoteConflicts(async()=>{calledWrongAccount=true;return {conflicts:[]};}),/账号/);
+  assert.equal(calledWrongAccount,false);
+  data.set('duoyu-sync-account',accountStorageKey);
+  console.log('PASS resolved conflict persistence and switched-account isolation');
   const pngSha = (await database.syncAssets.toArray())[0].id;
   await database.syncAssets.delete(pngSha);
   await applyOperation(pool, backend, {
@@ -319,6 +337,19 @@ try {
   await client.refreshSnapshot();
   assert.equal((await database.wallpapers.get('daily')).selection,'cloud:chosen');
   console.log('PASS explicit wallpaper survives stale startup snapshot, uploads and remains selected after the next refresh');
+  const wallpaperConflictId = randomUUID();
+  wallpaperIntent.rememberWallpaperChoice({selection:'cloud:rejected',contentHash:pngSha,asset:'duoyu-asset:'+pngSha});
+  await database.syncConflicts.put({id:wallpaperConflictId,createdAt:Date.now(),reason:'field_conflict',state:'conflict',operation:{changes:[{table:'wallpapers',id:'daily',value:{selection:'cloud:rejected',contentHash:pngSha}}]}});
+  await wallpaperIntent.restoreWallpaperChoice();
+  assert.equal((await database.wallpapers.get('daily')).selection,'cloud:chosen','unresolved wallpaper intent must not regenerate an upload');
+  await resolution.discardConflict(wallpaperConflictId);
+  await wallpaperIntent.restoreWallpaperChoice();
+  await client.refreshSnapshot();
+  await wallpaperIntent.restoreWallpaperChoice();
+  assert.equal((await database.wallpapers.get('daily')).selection,'cloud:chosen');
+  assert.equal(await database.syncOutbox.count(),0,'cloud choice must survive reload restoration without creating another operation');
+  console.log('PASS wallpaper conflict cloud choice survives repeated startup restoration without reupload');
+
 
   console.log(
     'PASS bad-operation quarantine, continuing uploads/downloads, timestamp, in-app conflict resolution, nonblocking image failure and retry',
