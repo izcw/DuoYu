@@ -11,7 +11,7 @@ import MenuSetting from '@icon-park/vue-next/es/icons/Setting';
 import { accountStorage } from '../../shared/storage/account';
 import { truncateLinkTitle } from './link-title';
 import LinkIconEditor from './LinkIconEditor.vue';
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { defineAsyncComponent, computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { liveQuery } from 'dexie';
 import { browser } from 'wxt/browser';
 import { database, type LibraryItem } from '../../shared/storage/database';
@@ -27,7 +27,7 @@ import { isWallpaperBlank } from '../wallpaper/blank-area';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
 import { backupCloudNow } from '../sync/client';
 import { openSettings } from '../desktop/settings-state';
-import DesktopTools from '../desktop/DesktopTools.vue';
+const DesktopTools = defineAsyncComponent(() => import('../desktop/DesktopTools.vue'));
 import LibraryGrid from './LibraryGrid.vue';
 import { LIBRARY_GRID_ROWS } from './grid-config';
 import { mergeLibraryLinks } from './library';
@@ -676,6 +676,7 @@ onUnmounted(() => subscription?.unsubscribe());
       />
     </div>
     <DesktopTools
+      v-if="tool"
       :error="error"
       :tool="tool"
       :automatic="automatic"

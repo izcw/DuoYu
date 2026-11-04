@@ -9,11 +9,16 @@ import {
 } from '../../features/desktop/glass/preferences';
 
 async function bootstrap() {
-  if (!(await initializeCloud())) return;
   const mode = await loadGlassMode();
   document.documentElement.dataset.glassMode = mode;
   createApp(App).provide(initialGlassModeKey, mode).mount('#app');
   printConsoleBanner();
+  // Rendering the account-scoped local database must never wait for network
+  // authentication, queued uploads, or remote wallpaper downloads. Account
+  // changes still go through initializeCloud's checked reload boundary.
+  requestAnimationFrame(() => {
+    setTimeout(() => void initializeCloud().catch(() => {}), 0);
+  });
 }
 
 void bootstrap();

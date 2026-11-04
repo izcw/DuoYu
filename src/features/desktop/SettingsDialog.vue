@@ -31,7 +31,7 @@ watch(settingsOpen, async (open) => {
   } catch {
     error.value = '读取设置失败，请重新打开设置';
   }
-});
+}, { immediate: true });
 async function run(task: () => Promise<unknown>, success = '') {
   if (busy.value) return;
   busy.value = true;

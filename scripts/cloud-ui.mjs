@@ -27,7 +27,7 @@ try {
   await page.locator('.account-entry').waitFor({ timeout: 30000 });
   await page.locator('.library-cell-grid').first().waitFor({ timeout: 30000 });
   await page.locator('.account-entry').click();
-  await page.getByText('使用多鱼账号登录', { exact: true }).waitFor();
+  await page.getByText('登录后，在不同设备间同步你的桌面', { exact: true }).waitFor();
   assert.equal(errors.length, 0, errors.join('\n'));
   await page.screenshot({ path: 'work/cloud-ui-guest.png' });
   console.log(

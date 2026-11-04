@@ -2,7 +2,7 @@
 import { useIconHighlight } from '../../features/desktop/useIconHighlight';
 useIconHighlight();
 import { accountStorage } from '../../shared/storage/account';
-import { nextTick, ref, watch } from 'vue';
+import { defineAsyncComponent, nextTick, ref, watch } from 'vue';
 import { useDesktopPages } from '../../features/desktop/useDesktopPages';
 import WorkspaceOverlay from '../../features/workspace/WorkspaceOverlay.vue';
 import DesktopSwitcher from '../../features/wallpaper/DesktopSwitcher.vue';
@@ -10,8 +10,8 @@ import ClockWidget from '../../features/clock/ClockWidget.vue';
 import SearchBox from '../../features/search/SearchBox.vue';
 import GlassModeSwitch from '../../features/desktop/GlassModeSwitch.vue';
 import DesktopDock from '../../features/desktop/DesktopDock.vue';
-import SettingsDialog from '../../features/desktop/SettingsDialog.vue';
-import { settingsPage } from '../../features/desktop/settings-state';
+const SettingsDialog = defineAsyncComponent(() => import('../../features/desktop/SettingsDialog.vue'));
+import { settingsPage, settingsOpen } from '../../features/desktop/settings-state';
 import AccountButton from '../../features/auth/AccountButton.vue';
 import BottomWidgets from '../../features/desktop/BottomWidgets.vue';
 import WallpaperWheel from '../../features/shortcuts/WallpaperWheel.vue';
@@ -111,7 +111,7 @@ function stepPage(direction: number) {
       go(0);
     "
   />
-  <SettingsDialog />
+  <SettingsDialog v-if="settingsOpen" />
   <Teleport to="body">
     <div
       class="desktop-library-backdrop glass-focus-layer"
