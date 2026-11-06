@@ -1,7 +1,7 @@
 import { nextTick, onUnmounted, type Ref } from 'vue';
 
-// The glass surfaces always use the destination layout. Only their contents
-// travel, so the border, shadow and hit area keep their actual dimensions.
+// Anchor each move on its icon. The whole card takes the destination shape
+// before it travels, keeping its border and contents together at native size.
 export function useWorkspaceLayoutMotion(
   container: Ref<HTMLElement | undefined>,
 ) {
@@ -24,13 +24,14 @@ export function useWorkspaceLayoutMotion(
     const top = Math.max(0, bounds.top);
     const bottom = Math.min(innerHeight, bounds.bottom);
     const positions = new Map<Element, { rect: DOMRect; visible: boolean }>();
-    for (const part of root.querySelectorAll(
-      '[data-saved-id] .workspace-icon-slot, [data-saved-id] .workspace-link > span',
-    )) {
-      const rect = part.getBoundingClientRect();
-      positions.set(part, {
+    for (const card of root.querySelectorAll('[data-saved-id]')) {
+      const icon = card.querySelector('.workspace-icon-slot');
+      if (!icon) continue;
+      const rect = icon.getBoundingClientRect();
+      const surface = card.getBoundingClientRect();
+      positions.set(card, {
         rect,
-        visible: rect.bottom > top && rect.top < bottom,
+        visible: surface.bottom > top && surface.top < bottom,
       });
     }
     return positions;
@@ -46,13 +47,13 @@ export function useWorkspaceLayoutMotion(
     if (!before?.size || !root) return;
     await nextTick();
     if (generation !== current || !root.isConnected) return;
-    for (const [part, end] of measure(root)) {
-      const start = before.get(part);
+    for (const [card, end] of measure(root)) {
+      const start = before.get(card);
       if (!start || (!start.visible && !end.visible)) continue;
       const dx = start.rect.x - end.rect.x;
       const dy = start.rect.y - end.rect.y;
       if (!dx && !dy) continue;
-      const animation = part.animate(
+      const animation = card.animate(
         [
           { transform: 'translate(' + dx + 'px, ' + dy + 'px)' },
           { transform: 'none' },

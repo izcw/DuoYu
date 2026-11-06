@@ -111,7 +111,7 @@ try {
           animation.effect.getKeyframes().some((frame) => frame.transform),
         );
       const samples = [];
-      for (const offset of [0.2, 0.5, 0.8, 1]) {
+      for (const offset of [0, 0.2, 0.5, 0.8, 1]) {
         for (const animation of animations) {
           animation.pause();
           animation.currentTime =
@@ -123,16 +123,17 @@ try {
             const icon = el
               .querySelector('.workspace-icon-slot')
               .getBoundingClientRect();
+            const title = el.querySelector('strong').getBoundingClientRect();
             return {
-              surface: {
-                x,
-                y,
-                width,
-                height,
-                radius: getComputedStyle(el).borderRadius,
-              },
-              iconX: icon.x,
-              iconY: icon.y,
+              x,
+              y,
+              width,
+              height,
+              radius: getComputedStyle(el).borderRadius,
+              iconOffsetX: icon.x - x,
+              iconOffsetY: icon.y - y,
+              titleOffsetX: title.x - x,
+              titleOffsetY: title.y - y,
             };
           }),
         );
@@ -141,23 +142,33 @@ try {
       return samples;
     });
     for (const sample of samples.slice(0, -1)) {
-      sample.forEach(({ surface }, i) => {
-        assert.deepEqual(
-          surface,
-          samples.at(-1)[i].surface,
-          'Background and border must keep the destination geometry throughout the switch',
-        );
+      sample.forEach((card, i) => {
+        const end = samples.at(-1)[i];
+        assert.equal(card.radius, end.radius);
+        for (const key of [
+          'width',
+          'height',
+          'iconOffsetX',
+          'iconOffsetY',
+          'titleOffsetX',
+          'titleOffsetY',
+        ]) {
+          assert.ok(
+            Math.abs(card[key] - end[key]) < 0.1,
+            key + ' must stay fixed as the whole surface travels',
+          );
+        }
       });
     }
     assert.ok(
-      samples[0].some(
+      samples[2].some(
         (card, i) =>
           Math.hypot(
-            card.iconX - samples.at(-1)[i].iconX,
-            card.iconY - samples.at(-1)[i].iconY,
+            card.x - samples.at(-1)[i].x,
+            card.y - samples.at(-1)[i].y,
           ) > 1,
       ),
-      'Foreground should travel independently of the surface',
+      'The surface must still be travelling at the midpoint',
     );
   }
   for (const width of [1200, 390]) {
@@ -182,10 +193,12 @@ try {
     assert.equal((await first.boundingBox()).x, (await second.boundingBox()).x);
     assert.ok((await second.boundingBox()).y > (await first.boundingBox()).y);
     assert.ok((await title.boundingBox()).x > (await icon.boundingBox()).x);
-    await search.fill('Charlie');
-    await expect(cards).toHaveCount(1);
     await grid.click();
     await checkSurfaceDuringMotion();
+    await search.fill('Charlie');
+    await expect(cards).toHaveCount(1);
+    await list.click();
+    await grid.click();
     await expect(cards.first()).toContainText('Charlie');
     await search.fill('');
     await expect(cards).toHaveCount(6);
