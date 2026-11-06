@@ -423,6 +423,10 @@ try {
     timeout: 30000,
   });
   await page.keyboard.press('Escape');
+  if (process.argv.includes('--page-icons')) {
+    const { verifyPageIcons } = await import('./fixtures/folded-page-icons.mjs');
+    await verifyPageIcons(page);
+  }
   console.log('Creating a collection item through the UI');
   await openGridMenu(page, page.locator('.library-cell-grid').first(), {
     waitForItem: false,
