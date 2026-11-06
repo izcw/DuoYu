@@ -437,6 +437,34 @@ try {
   );
   await expect(saved).toBeVisible();
   const account = accountId(origin, userId);
+  // A clean second profile has neither the selected desktop nor its image cache.
+  const wallpaperBytes = await readFile('public/icons/128.png');
+  await context.route('https://api.bimg.cc/all?**', (route) => route.fulfill({
+    json: { code: 200, total: 1, data: [{ id: 871, title: '重装验收', datetime: '2026-11-01', url: 'https://bing.com/th?id=fixture_1920x1080.jpg', copyright: 'fixture' }] },
+  }));
+  await context.route('https://bing.com/**', (route) => route.fulfill({ contentType: 'image/png', body: wallpaperBytes }));
+  await page.getByRole('button', { name: '切换桌面', exact: true }).click();
+  await page.getByRole('button', { name: '添加桌面', exact: true }).click();
+  await openGridMenu(page, page.locator('.library-cell-grid').first(), { waitForItem: false });
+  await page.getByRole('menuitem', { name: '换壁纸', exact: true }).click();
+  await page.getByRole('button', { name: '必应', exact: true }).click();
+  const bingCard = page.getByRole('button', { name: '应用壁纸 重装验收', exact: true });
+  await bingCard.click();
+  await expect(bingCard).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  const expectedAsset = 'duoyu-asset:' + createHash('sha256').update(wallpaperBytes).digest('hex');
+  const cloudDesktop = async () => (await syncPool.query(
+    "SELECT payload->'value' AS profile FROM sync_entities WHERE account_id=$1 AND entity_type='preferences' AND entity_id LIKE 'wallpaperDesktop:%' AND payload->'value'->>'asset'=$2 AND NOT deleted",
+    [account, expectedAsset],
+  )).rows[0]?.profile;
+  await expect.poll(async () => (await cloudDesktop())?.selection, { timeout: 30000 }).toBe('bing:871');
+  const chosenDesktop = (await cloudDesktop()).id;
+  const resumeDesktop = async () => (await syncPool.query(
+    "SELECT payload->>'value' AS desktop FROM sync_entities WHERE account_id=$1 AND entity_type='preferences' AND entity_id='wallpaperResumeDesktop' AND NOT deleted",
+    [account],
+  )).rows[0]?.desktop;
+  await expect.poll(resumeDesktop, { timeout: 30000 }).toBe(chosenDesktop);
+
   await expect
     .poll(
       async () =>
@@ -593,6 +621,14 @@ try {
   );
   await context.close();
   context = undefined;
+  if (process.argv.includes('--legacy-wallpaper')) {
+    // Older clients uploaded the desktop and image, but no resume preference.
+    const legacy = await syncPool.query(
+      "DELETE FROM sync_entities WHERE account_id=$1 AND entity_type='preferences' AND entity_id='wallpaperResumeDesktop'",
+      [account],
+    );
+    assert.equal(legacy.rowCount, 1);
+  }
   context = await chromium.launchPersistentContext(
     path.join(evidence, 'fresh-profile'),
     {
@@ -622,6 +658,33 @@ try {
   console.log(
     'PASS fresh browser profile pulls actual cloud data after real login',
   );
+  await page.getByRole('button', { name: '切换桌面', exact: true }).click();
+  await expect(page.locator('[data-desktop="' + chosenDesktop + '"]')).toHaveAttribute('aria-pressed', 'true');
+  const displayedWallpaper = page.locator('.wallpaper:not(.wallpaper-contained) img.loaded').first();
+  await expect.poll(async () => displayedWallpaper.evaluate(async img => {
+    const bytes = await (await fetch(img.src)).arrayBuffer();
+    return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), n => n.toString(16).padStart(2, '0')).join('');
+  }), { timeout: 15000 }).toBe(expectedAsset.slice('duoyu-asset:'.length));
+  await page.keyboard.press('Escape');
+  console.log('PASS fresh installation restores the selected desktop and byte-identical Bing wallpaper');
+  // Another device can set its own default without switching this open device.
+  await page.getByRole('button', { name: '切换桌面', exact: true }).click();
+  await page.locator('[data-desktop="default"]').click();
+  await expect.poll(resumeDesktop, { timeout: 30000 }).toBe('default');
+  await context.close();
+  context = await chromium.launchPersistentContext(path.join(evidence, 'profile'), {
+    channel: process.env.TEST_BROWSER_CHANNEL || 'msedge', headless: true,
+    ignoreDefaultArgs: ['--disable-extensions'],
+    args: [`--ignore-certificate-errors-spki-list=${pin}`, `--load-extension=${extension}`, `--disable-extensions-except=${extension}`],
+  });
+  await context.clearCookies();
+  page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/newtab.html`);
+  await signIn(context, page, origin);
+  await page.getByRole('button', { name: '切换桌面', exact: true }).click();
+  await expect(page.locator('[data-desktop="' + chosenDesktop + '"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  console.log('PASS existing device retains its own desktop after a different device selects default');
   // Project suspension is enforced at the Go entry, before the Node engine.
   await syncPool.query(
     'UPDATE backend_users SET disabled=true WHERE account_id=$1',

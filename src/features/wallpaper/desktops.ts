@@ -11,6 +11,44 @@ export interface Desktop {
   selection: string;
   asset?: string;
 }
+const resumeKey = 'wallpaperResumeDesktop';
+
+export async function chooseDesktop(id: string) {
+  await database.preferences.put({ id: resumeKey, value: id });
+  switchDesktop(id);
+}
+
+// Only a fresh device follows the account's choice. An existing device keeps
+// its own current desktop when another device switches.
+export function restoreDesktop(preferences: { id: string; value: unknown }[]) {
+  if (accountStorage.getItem(key) !== null) return;
+  const saved = preferences.find((p) => p.id === resumeKey);
+  const desktops = preferences.filter((p) => p.id.startsWith(prefix));
+  if (saved) {
+    const exists =
+      typeof saved.value === 'string' &&
+      desktops.some((p) => p.id === prefix + saved.value);
+    switchDesktop(exists ? String(saved.value) : 'default');
+    return;
+  }
+  // Older accounts synced the selected image and desktop, but no resume ID.
+  // Recover a unique match without guessing between desktops sharing an image.
+  const store = preferences.find((p) => p.id === 'savedWallpaper:store')
+    ?.value as { selection?: string; blob?: string } | undefined;
+  const matches = desktops.filter((p) => {
+    if (!store?.blob || !store.selection?.startsWith('bing:')) return false;
+    const desktop = p.value as Desktop | null;
+    return (
+      desktop &&
+      desktop.selection === store.selection &&
+      desktop.asset === store.blob
+    );
+  });
+  switchDesktop(
+    matches.length === 1 ? matches[0]!.id.slice(prefix.length) : 'default',
+  );
+}
+
 export function switchDesktop(id: string) {
   accountStorage.setItem(key, id);
   activeDesktop.value = id;
@@ -38,6 +76,11 @@ export async function saveDesktopChoice(
   const previous = (await database.preferences.get(prefix + id))?.value as
     Desktop | undefined;
   if (!previous && id !== 'default') throw Error('桌面已不存在');
+  if (
+    activeDesktop.value === id &&
+    (await database.preferences.get(resumeKey))?.value !== id
+  )
+    await database.preferences.put({ id: resumeKey, value: id });
   await database.preferences.put({
     id: prefix + id,
     value: {
@@ -65,6 +108,10 @@ export async function renameDesktop(id: string, raw: string) {
 }
 export async function deleteDesktop(id: string) {
   if (id === 'default') throw Error('默认桌面需要保留');
-  await database.preferences.delete(prefix + id);
+  await database.transaction('rw', database.preferences, async () => {
+    await database.preferences.delete(prefix + id);
+    if ((await database.preferences.get(resumeKey))?.value === id)
+      await database.preferences.put({ id: resumeKey, value: 'default' });
+  });
   if (activeDesktop.value === id) switchDesktop('default');
 }

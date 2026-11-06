@@ -2,6 +2,7 @@ import {
   restoreWallpaperChoice,
   settleWallpaperChoice,
 } from '../wallpaper/wallpaper-intent';
+import { restoreDesktop } from '../wallpaper/desktops';
 import { ref } from 'vue';
 import Dexie from 'dexie';
 import { browser } from 'wxt/browser';
@@ -271,7 +272,7 @@ export async function applyRemote(
   });
   await settleWallpaperChoice();
   await restoreWallpaperChoice();
-  await projectPreferences();
+  await projectPreferences(true);
   void hydrateWallpaper();
   window.dispatchEvent(new Event('duoyu-assets-retry'));
 }
@@ -673,12 +674,13 @@ export async function getSyncPreference(id: string) {
   assertCurrentPageAccount();
   return value;
 }
-async function projectPreferences() {
+async function projectPreferences(receivedCloudState = false) {
   if (!pageAccountKey || switched()) return;
   const modeKey = scopedKey('duoyu-wallpaper-mode');
   const oldWallpaperMode = localStorage.getItem(modeKey);
   const preferences = await database.preferences.toArray();
   if (switched()) return;
+  if (receivedCloudState) restoreDesktop(preferences);
   for (const p of preferences) {
     const key =
       p.id === 'dockOrder'

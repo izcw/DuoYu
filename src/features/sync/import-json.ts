@@ -303,6 +303,7 @@ export async function planJsonImport(
           'glassMode',
           'searchEngine',
           'dockOrder',
+          'wallpaperResumeDesktop',
           'wallpaperMode',
           'wallpaperSelection',
           'savedWallpaper:store',

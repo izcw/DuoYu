@@ -9,6 +9,7 @@ import { assetObjectUrl } from '../sync/assets';
 import {
   activeDesktop,
   addDesktop,
+  chooseDesktop,
   renameDesktop,
   deleteDesktop,
   prefix,
@@ -231,7 +232,7 @@ async function add() {
   adding.value = true;
   try {
     const id = await addDesktop();
-    select(id);
+    await select(id);
   } catch {
     error.value = '桌面创建失败，请重试';
   } finally {
@@ -244,11 +245,15 @@ async function open() {
   await nextTick();
   dialog.value?.showModal();
 }
-function select(id: string) {
-  if(suppressClick || landing.committing)return;
-  switchDesktop(id);
-  dialog.value?.close();
-  emit('selected');
+async function select(id: string) {
+  if (suppressClick || landing.committing) return;
+  try {
+    await chooseDesktop(id);
+    dialog.value?.close();
+    emit('selected');
+  } catch {
+    error.value = '桌面选择保存失败，请重试';
+  }
 }
 onUnmounted(() => {
   cancelGesture?.();
