@@ -97,10 +97,69 @@ try {
   const moving = () =>
     cards.evaluateAll((nodes) =>
       nodes.some((el) =>
-        el.getAnimations().some((a) => a.playState === 'running'),
+        el
+          .getAnimations({ subtree: true })
+          .some((a) => a.playState === 'running'),
       ),
     );
   await expect(cards).toHaveCount(6);
+  async function checkSurfaceDuringMotion() {
+    const samples = await cards.evaluateAll((nodes) => {
+      const animations = nodes
+        .flatMap((el) => el.getAnimations({ subtree: true }))
+        .filter((animation) =>
+          animation.effect.getKeyframes().some((frame) => frame.transform),
+        );
+      const samples = [];
+      for (const offset of [0.2, 0.5, 0.8, 1]) {
+        for (const animation of animations) {
+          animation.pause();
+          animation.currentTime =
+            animation.effect.getTiming().duration * offset;
+        }
+        samples.push(
+          nodes.map((el) => {
+            const { x, y, width, height } = el.getBoundingClientRect();
+            const icon = el
+              .querySelector('.workspace-icon-slot')
+              .getBoundingClientRect();
+            return {
+              surface: {
+                x,
+                y,
+                width,
+                height,
+                radius: getComputedStyle(el).borderRadius,
+              },
+              iconX: icon.x,
+              iconY: icon.y,
+            };
+          }),
+        );
+      }
+      for (const animation of animations) animation.finish();
+      return samples;
+    });
+    for (const sample of samples.slice(0, -1)) {
+      sample.forEach(({ surface }, i) => {
+        assert.deepEqual(
+          surface,
+          samples.at(-1)[i].surface,
+          'Background and border must keep the destination geometry throughout the switch',
+        );
+      });
+    }
+    assert.ok(
+      samples[0].some(
+        (card, i) =>
+          Math.hypot(
+            card.iconX - samples.at(-1)[i].iconX,
+            card.iconY - samples.at(-1)[i].iconY,
+          ) > 1,
+      ),
+      'Foreground should travel independently of the surface',
+    );
+  }
   for (const width of [1200, 390]) {
     await page.setViewportSize({ width, height: 840 });
     await expect(grid).toHaveAttribute('aria-pressed', 'true');
@@ -118,6 +177,7 @@ try {
     await grid.press('Enter');
     await expect.poll(moving).toBe(false);
     await list.click();
+    await checkSurfaceDuringMotion();
     await expect.poll(moving).toBe(false);
     assert.equal((await first.boundingBox()).x, (await second.boundingBox()).x);
     assert.ok((await second.boundingBox()).y > (await first.boundingBox()).y);
@@ -125,6 +185,7 @@ try {
     await search.fill('Charlie');
     await expect(cards).toHaveCount(1);
     await grid.click();
+    await checkSurfaceDuringMotion();
     await expect(cards.first()).toContainText('Charlie');
     await search.fill('');
     await expect(cards).toHaveCount(6);
