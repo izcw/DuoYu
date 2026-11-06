@@ -13,6 +13,13 @@ export async function verifyPageIcons(page) {
   const picker = dialog.getByRole('group', { name: '选择页面图标' });
   const name = dialog.getByLabel('收藏页名称');
   const checkGroups = async (picker) => {
+    await expect(picker).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+    const selected = picker.locator('button[aria-pressed="true"]');
+    await expect(selected).toHaveCSS('color', 'rgb(0, 0, 0)');
+    assert.ok(
+      await selected.evaluate((el) => el.offsetWidth > 0 && el.offsetWidth === el.offsetHeight),
+      'The selected icon should have a square hit area',
+    );
     await expect(picker.getByRole('searchbox')).toHaveCount(0);
     await expect(picker.getByRole('combobox')).toHaveCount(0);
     const groups = picker.getByRole('region');

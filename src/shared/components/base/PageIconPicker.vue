@@ -115,8 +115,8 @@ function navigate(event: KeyboardEvent) {
 </template>
 <style scoped>
 .page-icon-picker {
-  color: #f2f2f2;
-  background: #222;
+  color: #000;
+  background: #fff;
   border-radius: 14px;
   overflow: hidden;
   min-width: 0;
@@ -140,13 +140,15 @@ h3 {
 .choices {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
+  place-items: center;
   gap: 4px;
 }
 button {
   display: grid;
   place-items: center;
   padding: 0;
-  height: 38px;
+  width: min(38px, 100%);
+  aspect-ratio: 1;
   min-width: 0;
   background: none;
   border: 0;
@@ -155,11 +157,11 @@ button {
   border-radius: 9px;
 }
 button:hover {
-  background: rgb(255 255 255 / 12%);
+  background: #f4f4f4;
 }
 button[aria-pressed='true'] {
-  background: rgb(80 158 255 / 30%);
-  box-shadow: inset 0 0 0 1px rgb(164 206 255 / 66%);
+  background: #fff;
+  box-shadow: inset 0 0 0 1.5px #595959;
 }
 button:focus-visible {
   outline: 2px solid currentColor;
