@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { guestMode } from '../../shared/storage/account';
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import {
   SEARCH_ENGINES,
@@ -175,7 +176,7 @@ onUnmounted(() => {
         @close="close"
     /></Teleport>
     <button
-      ref="trigger"
+      ref="trigger" :disabled="guestMode"
       class="engine-trigger glass-control glass-interactive"
       type="button"
       :aria-label="`切换搜索引擎，当前 ${current.name}`"

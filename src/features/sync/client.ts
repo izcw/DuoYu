@@ -1,7 +1,3 @@
-import {
-  restoreWallpaperChoice,
-  settleWallpaperChoice,
-} from '../wallpaper/wallpaper-intent';
 import { restoreDesktop } from '../wallpaper/desktops';
 import { ref } from 'vue';
 import Dexie from 'dexie';
@@ -270,14 +266,14 @@ export async function applyRemote(
     await database.syncMeta.put({ id: 'initialized', value: true });
     if (epoch) await database.syncMeta.put({ id: 'epoch', value: epoch });
   });
-  await settleWallpaperChoice();
-  await restoreWallpaperChoice();
   await projectPreferences(true);
   void hydrateWallpaper();
   window.dispatchEvent(new Event('duoyu-assets-retry'));
 }
 async function hydrateWallpaper() {
   try {
+    const profile = (await database.preferences.get('wallpaperDesktop:default'))?.value as {selection?: string} | undefined;
+    if (profile && profile.selection !== 'legacy') return;
     const shadow = await database.syncShadow.get('wallpapers:daily');
     const ref = (shadow?.payload as Row)?.asset;
     if (
@@ -628,8 +624,6 @@ export async function initializeCloud() {
     const id =
       key === 'duoyu-dock-order'
         ? 'dockOrder'
-        : key === 'duoyu-wallpaper-mode'
-          ? 'wallpaperMode'
           : key.startsWith('duoyu-layout-')
             ? 'layout:' + key.slice(13)
             : undefined;
@@ -650,7 +644,6 @@ export async function initializeCloud() {
     const selected =
       sessionChange ?? (response?.view && chooseAccount(response.view.account));
     if (selected && !(await selected)) return false;
-    await restoreWallpaperChoice();
     if (account && generation === initialGeneration) {
       await syncNow();
       await projectPreferences();
@@ -664,13 +657,11 @@ export async function setSyncPreference(id: string, value: unknown) {
   assertCurrentPageAccount();
   if (pageAccountKey) {
     await database.preferences.put({ id, value });
-  } else await browser.storage.local.set({ [id]: value });
+  } else throw Error('请先登录，再修改设置');
 }
 export async function getSyncPreference(id: string) {
   assertCurrentPageAccount();
-  const value = pageAccountKey
-    ? (await database.preferences.get(id))?.value
-    : (await browser.storage.local.get(id))[id];
+  const value = (await database.preferences.get(id))?.value;
   assertCurrentPageAccount();
   return value;
 }

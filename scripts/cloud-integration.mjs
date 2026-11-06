@@ -68,7 +68,7 @@ if (!navigator.locks)
 await mkdir('work/sync-integration', { recursive: true });
 const replacements = {
   "'../library/grid-config'": "'./grid-config.mjs'",
-  "'../wallpaper/wallpaper-intent'": "'./wallpaper-intent.mjs'",
+  "'../wallpaper/desktops'": "'./desktops.mjs'",
   "'../../shared/collection-colors'": "'./collection-colors.mjs'",
   "'./pending-wallpaper'": "'./pending-wallpaper.mjs'",
   "'../../shared/storage/database'": "'./database.mjs'",
@@ -87,7 +87,7 @@ const replacements = {
 for (const [name, path] of Object.entries({
   'pending-wallpaper': 'src/features/sync/pending-wallpaper.ts',
   'collection-colors': 'src/shared/collection-colors.ts',
-  'wallpaper-intent': 'src/features/wallpaper/wallpaper-intent.ts',
+  desktops: 'src/features/wallpaper/desktops.ts',
   client: 'src/features/sync/client.ts',
   capture: 'src/features/sync/capture.ts',
   model: 'src/features/sync/model.ts',
@@ -329,30 +329,15 @@ try {
   )
     await new Promise((r) => setTimeout(r, 20));
   assert((await database.wallpapers.get('daily')).blob instanceof Blob);
-  const wallpaperIntent = await import('../work/sync-integration/wallpaper-intent.mjs');
-  wallpaperIntent.rememberWallpaperChoice({selection:'cloud:chosen',contentHash:pngSha,asset:'duoyu-asset:'+pngSha,sourceUrl:'local:'+pngSha});
+  // A pre-upgrade local intent or thumbnail must never originate a cloud edit.
+  const owner = localStorage.getItem('duoyu-sync-account');
+  localStorage.setItem('account:'+owner+':duoyu-wallpaper-intent',JSON.stringify({selection:'daily'}));
   await client.refreshSnapshot();
-  assert.equal((await database.wallpapers.get('daily')).selection,'cloud:chosen');
-  assert.equal((await database.preferences.get('wallpaperSelection')).value,'cloud:chosen');
-  assert(await database.syncOutbox.count(), 'old startup snapshot must queue the explicit choice for upload');
   await client.syncNow();
-  assert.equal((await database.syncShadow.get('wallpapers:daily')).payload.selection,'cloud:chosen');
-  await client.refreshSnapshot();
-  assert.equal((await database.wallpapers.get('daily')).selection,'cloud:chosen');
-  console.log('PASS explicit wallpaper survives stale startup snapshot, uploads and remains selected after the next refresh');
-  const wallpaperConflictId = randomUUID();
-  wallpaperIntent.rememberWallpaperChoice({selection:'cloud:rejected',contentHash:pngSha,asset:'duoyu-asset:'+pngSha});
-  await database.syncConflicts.put({id:wallpaperConflictId,createdAt:Date.now(),reason:'field_conflict',state:'conflict',operation:{changes:[{table:'wallpapers',id:'daily',value:{selection:'cloud:rejected',contentHash:pngSha}}]}});
-  await wallpaperIntent.restoreWallpaperChoice();
-  assert.equal((await database.wallpapers.get('daily')).selection,'cloud:chosen','unresolved wallpaper intent must not regenerate an upload');
-  await resolution.discardConflict(wallpaperConflictId);
-  await wallpaperIntent.restoreWallpaperChoice();
-  await client.refreshSnapshot();
-  await wallpaperIntent.restoreWallpaperChoice();
-  assert.equal((await database.wallpapers.get('daily')).selection,'cloud:chosen');
-  assert.equal(await database.syncOutbox.count(),0,'cloud choice must survive reload restoration without creating another operation');
-  console.log('PASS wallpaper conflict cloud choice survives repeated startup restoration without reupload');
-
+  assert.equal(await database.syncOutbox.count(),0);
+  assert.equal((await database.syncShadow.get('wallpapers:daily')).payload.asset,'duoyu-asset:'+pngSha);
+  assert.notEqual((await database.preferences.get('wallpaperSelection'))?.value,'daily');
+  console.log('PASS stale local wallpaper intent cannot rewrite the cloud snapshot');
 
   console.log(
     'PASS bad-operation quarantine, continuing uploads/downloads, timestamp, in-app conflict resolution, nonblocking image failure and retry',

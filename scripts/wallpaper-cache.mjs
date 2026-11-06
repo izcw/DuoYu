@@ -22,6 +22,7 @@ async function launch() {
       `--load-extension=${extension}`,
     ],
   });
+  await context.route('**/api/v1/guest-template',r=>r.fulfill({json:{configured:false,revision:'',entities:[]}}));
   await context.route('https://api.bimg.cc/**', async (r) => {
     requests++;
     if (mode === 'offline') return r.abort();
@@ -38,24 +39,24 @@ async function record(page, action = 'read') {
   return page.evaluate(
     (action) =>
       new Promise((resolve, reject) => {
-        const request = indexedDB.open('duoyu');
+        const request = indexedDB.open('duoyu-guest-template-v1');
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const db = request.result;
-          const tx = db.transaction('wallpapers', 'readwrite');
-          const table = tx.objectStore('wallpapers');
+          const tx = db.transaction('syncMeta', 'readwrite');
+          const table = tx.objectStore('syncMeta');
           let value;
-          const get = table.get('daily');
+          const get = table.get('dailyImageCache');
           get.onsuccess = () => {
-            value = get.result;
+            value = get.result?.value;
             if (action === 'stale' && value) {
               value.sourceUrl = 'yesterday';
-              table.put(value);
+              table.put({id:'dailyImageCache',value});
             }
-            if (action === 'clear') table.clear();
+            if (action === 'clear') table.delete('dailyImageCache');
             if (action === 'corrupt' && value) {
               value.blob = new Blob(['bad'], { type: 'image/png' });
-              table.put(value);
+              table.put({id:'dailyImageCache',value});
             }
           };
           tx.oncomplete = () => {
@@ -96,7 +97,7 @@ try {
   assert.equal(requests, 1);
   await expect
     .poll(() =>
-      page.evaluate(() => localStorage.getItem('duoyu:wallpaper-preview')),
+      page.evaluate(() => localStorage.getItem('guest-template:duoyu:wallpaper-preview')),
     )
     .toBeTruthy();
   await page.addInitScript(() => {
@@ -124,7 +125,7 @@ try {
     'PASS startup preview exists before app mount; cached image has no fade through fallback',
   );
   await page.evaluate(() =>
-    localStorage.setItem('duoyu:wallpaper-preview', '{broken'),
+    localStorage.setItem('guest-template:duoyu:wallpaper-preview', '{broken'),
   );
   await page.reload();
   await loaded(page);
@@ -132,7 +133,7 @@ try {
     .poll(() =>
       page.evaluate(() =>
         localStorage
-          .getItem('duoyu:wallpaper-preview')
+          .getItem('guest-template:duoyu:wallpaper-preview')
           ?.startsWith('{"version":'),
       ),
     )
@@ -171,7 +172,7 @@ try {
   console.log('PASS reconnect updates cache');
   await record(page, 'clear');
   mode = 'offline';
-  await page.evaluate(() => localStorage.removeItem('duoyu:wallpaper-preview'));
+  await page.evaluate(() => localStorage.removeItem('guest-template:duoyu:wallpaper-preview'));
   await page.emulateMedia({ colorScheme: 'light' });
   await page.reload();
   await expect(page.locator('.wallpaper-status')).toBeVisible();
@@ -249,7 +250,7 @@ try {
   console.log('PASS corrupt stored image recovers');
   await record(page, 'stale');
   await page.evaluate(() => {
-    const key = 'duoyu:wallpaper-preview';
+    const key = 'guest-template:duoyu:wallpaper-preview';
     const preview = JSON.parse(localStorage.getItem(key));
     preview.sourceUrl =
       'https://api.bimg.cc/today?uhd=true&mkt=zh-CN&date=2000-1-1';
@@ -278,7 +279,7 @@ try {
     .poll(() =>
       page.evaluate(
         () =>
-          JSON.parse(localStorage.getItem('duoyu:wallpaper-preview')).sourceUrl,
+          JSON.parse(localStorage.getItem('guest-template:duoyu:wallpaper-preview')).sourceUrl,
       ),
     )
     .not.toContain('2000-1-1');

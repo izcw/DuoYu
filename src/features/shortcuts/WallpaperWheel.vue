@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { guestMode } from '../../shared/storage/account';
 import { openWebTab } from '../../shared/open-web-tab';
 import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 import AddShortcutDialog from './components/AddShortcutDialog.vue';
@@ -45,6 +46,7 @@ let closeTimer: ReturnType<typeof setTimeout> | undefined;
 let gesture: { id: number; x: number; y: number; holding: boolean } | undefined;
 let ignoreContext = false;
 let ready = false;
+let guestCleanup: (() => void) | undefined;
 let writeQueue = Promise.resolve();
 function reorder(ids: string[]) {
   items.value = ids.map((id) => items.value.find((item) => item.id === id)!);
@@ -215,7 +217,15 @@ async function add(item: ShortcutItem) {
 }
 onMounted(async () => {
   try {
-    await database.transaction('rw', database.shortcuts, async () => {
+    if (guestMode) {
+      const read = async () => {
+        const row = await database.shortcuts.get('wallpaper');
+        items.value = (row?.items ?? actions).filter((item) => item.id !== 'add');
+      };
+      await read();
+      window.addEventListener('duoyu-sync-preferences', read);
+      guestCleanup = () => window.removeEventListener('duoyu-sync-preferences', read);
+    } else await database.transaction('rw', database.shortcuts, async () => {
       const stored = await database.shortcuts.get('wallpaper');
       if (
         stored?.items.length &&
@@ -268,6 +278,7 @@ onMounted(async () => {
   window.addEventListener('resize', cancel);
 });
 onUnmounted(() => {
+  guestCleanup?.();
   clearTimeout(holdTimer);
   clearTimeout(closeTimer);
   document.removeEventListener('contextmenu', contextMenu);

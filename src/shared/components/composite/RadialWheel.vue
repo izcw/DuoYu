@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { guestMode } from '../../../shared/storage/account';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 export interface RadialItem {
   id: string;
@@ -125,7 +126,7 @@ function selectAt(x: number, y: number) {
   else emit('close');
 }
 function start(event: PointerEvent, item: RadialItem) {
-  if (event.button !== props.interaction.dragButton || !event.isPrimary) return;
+  if (guestMode || event.button !== props.interaction.dragButton || !event.isPrimary) return;
   event.preventDefault();
   suppressClick = false;
   drag = {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { guestMode } from '../../../shared/storage/account';
 import { useMouseSort } from '../../useMouseSort';
 const pressSort = useMouseSort();
 import { computed, ref, onUnmounted } from 'vue';
@@ -50,7 +51,7 @@ function blur(event: FocusEvent) {
 const dragPreview = createDragLanding();
 onUnmounted(dragPreview.dispose);
 function start(event: DragEvent, id: string) {
-  if (props.disabled) {
+  if (props.disabled || guestMode) {
     event.preventDefault();
     return;
   }
@@ -97,7 +98,7 @@ function drop(event: DragEvent) {
 <template>
   <div
     class="desktop-menu"
-    @mousedown.capture="pressSort"
+    @mousedown.capture="!guestMode && pressSort($event)"
     :class="{ 'is-hovered': shown }"
     :tabindex="shown ? -1 : 0"
     :aria-label="label"
@@ -149,9 +150,9 @@ function drop(event: DragEvent) {
           :class="{ 'is-dragging': dragged === item.id }"
           :data-menu-row="item.id"
           :data-library-page-id="library ? item.id : undefined"
-          :draggable="!disabled"
+          :draggable="!disabled && !guestMode"
           @dragstart.stop="start($event, item.id)"
-          @contextmenu.prevent.stop="emit('context', $event, item.id)"
+          @contextmenu.prevent.stop="!guestMode && emit('context', $event, item.id)"
         >
           <button
             class="side-menu-choice"
@@ -173,7 +174,7 @@ function drop(event: DragEvent) {
         class="side-menu-add"
         :class="library ? 'library-page-add' : 'workspace-space-add'"
         :aria-label="addLabel"
-        :disabled="disabled"
+        v-if="!guestMode" :disabled="disabled"
         @mouseenter="hot = 'add'"
         @mouseleave="hot = ''"
         @click="emit('add')"

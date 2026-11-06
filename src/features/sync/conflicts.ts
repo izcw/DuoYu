@@ -1,4 +1,3 @@
-import { discardWallpaperChoice } from '../wallpaper/wallpaper-intent';
 import { database } from '../../shared/storage/database';
 import { activeAccountKey } from '../../shared/storage/account';
 import type { SyncConflict, CapturedOperation } from './capture';
@@ -64,7 +63,6 @@ export async function fetchRemoteConflicts(request: typeof rpc = rpc) {
     const existing = await database.syncConflicts.get(entry.operation_id);
     if (entry.resolved_at && existing && !existing.resolvedAt) {
       resolvedChanged = true;
-      discardWallpaperChoice(conflictChanges(existing));
       // A cloud choice also cancels a previously staged local resolution.
       for (const op of await database.syncOutbox.toArray())
         if (op.resolutionOf === existing.id)
@@ -124,7 +122,6 @@ export async function discardConflicts(
         if (record.server)
           await rpc('/api/v1/sync/conflicts/' + id + '/resolve', 'POST', {});
         assertConflictAccount(owner);
-        discardWallpaperChoice(conflictChanges(record));
         await remoteTransaction(async () => {
           for (const op of await database.syncOutbox.toArray())
             if (op.id === id || op.resolutionOf === id)

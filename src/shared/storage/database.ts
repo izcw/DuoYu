@@ -82,7 +82,7 @@ export interface LibraryItem {
 
 /** Shared IndexedDB entry point. Add future tables through versioned migrations. */
 export const database = new Dexie(
-  pageAccountKey ? 'duoyu-account-' + pageAccountKey : 'duoyu',
+  pageAccountKey ? 'duoyu-account-' + pageAccountKey : 'duoyu-guest-template-v1',
 ) as Dexie & {
   preferences: EntityTable<{ id: string; value: unknown }, 'id'>;
   syncOutbox: EntityTable<CapturedOperation, 'id'>;

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { guestMode } from '../../shared/storage/account';
 import { useMouseSort } from '../../shared/useMouseSort';
 const pressSort = useMouseSort();
 import PageIcon from '../../shared/components/base/PageIcon.vue';
@@ -238,6 +239,7 @@ async function reorderSpaces(ids: string[]) {
   }
 }
 function workspaceKey(event: KeyboardEvent) {
+  if (guestMode && (event.key === 'Delete' || event.key === 'Backspace')) return;
   if (event.key.toLowerCase() === 'f' && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();
     focusSearch();
@@ -569,6 +571,7 @@ function openTabGap(event: DragEvent, tabs: BrowserTab[], dropping = false) {
   }
 }
 function startDrag(event: DragEvent, value: Drag) {
+  if (guestMode) {event.preventDefault();return;}
   if (
     landing.committing ||
     isMarkedSpace.value ||
@@ -805,7 +808,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
 <template>
   <section
     class="workspace-board"
-    @mousedown="pressSort"
+    @mousedown="!guestMode && pressSort($event)"
     :class="{ 'is-list-view': viewMode === 'list' }"
     aria-label="标签页管理"
     @click.stop="menu = ''"
@@ -998,7 +1001,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
             </button>
           </div>
           <div
-            v-if="selectedEntries.length"
+            v-if="!guestMode && selectedEntries.length"
             class="workspace-selection glass-surface"
           >
             <span>选择 {{ selectedEntries.length }} 项</span>
@@ -1036,7 +1039,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
           <button
             class="workspace-button glass-control glass-interactive"
             :disabled="busy || loading"
-            v-if="!isMarkedSpace"
+            v-if="!guestMode && !isMarkedSpace"
             @click="showCreate"
           >
             <PageIcon name="Add" :size="16" /> 新建集合
@@ -1081,9 +1084,9 @@ function moveWithSelect(event: Event, group: string, id: string) {
             >
               <header class="workspace-collection-heading">
                 <button
-                  v-if="!isMarkedSpace"
+                  v-if="!guestMode && !isMarkedSpace"
                   class="workspace-icon collection-handle glass-control glass-interactive"
-                  :draggable="!isMarkedSpace"
+                  :draggable="!guestMode && !isMarkedSpace"
                   :aria-label="`拖动集合 ${group.name}`"
                   title="拖动集合排序"
                   @dragstart.stop="
@@ -1146,7 +1149,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                   </button>
                   <button
                     class="workspace-icon glass-control glass-interactive"
-                    aria-label="更多集合操作"
+                    v-if="!guestMode" aria-label="更多集合操作"
                     title="更多集合操作"
                     :aria-expanded="menu === 'collection:' + group.id"
                     @click.stop="
@@ -1253,7 +1256,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                       'is-selected': selected.has(tab.id),
                     }"
                     :data-saved-id="tab.id"
-                    :draggable="!isMarkedSpace"
+                    :draggable="!guestMode && !isMarkedSpace"
                     @dragstart.stop="
                       startDrag($event, {
                         kind: 'saved',
@@ -1271,7 +1274,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                       @open="run(() => openSaved([tab]))"
                       ><template #checkbox>
                         <input
-                          class="workspace-card-checkbox"
+                          v-if="!guestMode" class="workspace-card-checkbox"
                           type="checkbox"
                           :checked="selected.has(tab.id)"
                           :aria-label="`选择标签页 ${tab.title}`"
@@ -1281,7 +1284,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                         />
                       </template>
                       <button
-                        class="workspace-bookmark"
+                        v-if="!guestMode" class="workspace-bookmark"
                         :aria-label="`标记收藏 ${tab.title}`"
                         :aria-pressed="!!tab.starred"
                         :disabled="busy"
@@ -1325,7 +1328,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                         :aria-label="`更多 ${tab.title}`"
                         :aria-expanded="menu === tab.id"
                         title="更多"
-                        @click="menu = menu === tab.id ? '' : tab.id"
+                        v-if="!guestMode" @click="menu = menu === tab.id ? '' : tab.id"
                       >
                         <img
                           class="workspace-action-icon"
@@ -1464,7 +1467,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                   class="workspace-group-toggle"
                   :aria-label="`折叠群组 ${group.label}`"
                   :aria-expanded="!group.collapsed"
-                  :disabled="busy"
+                  :disabled="guestMode || busy"
                   @click="run(() => toggleBrowserGroup(group.id))"
                 >
                   {{ group.label }}
@@ -1479,7 +1482,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                 <template v-else>{{ group.label }}</template>
                 <span>{{ group.tabs.length }}</span>
                 <button
-                  v-if="group.id !== -1"
+                  v-if="!guestMode && group.id !== -1"
                   class="workspace-group-save glass-control glass-interactive"
                   :aria-label="`保存群组 ${group.label} 为集合`"
                   title="以群组名称保存为集合"
@@ -1514,7 +1517,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                     tab.id !== undefined && selectedBrowserTabs.has(tab.id),
                 }"
                 :data-browser-tab-id="tab.id"
-                :draggable="!isMarkedSpace"
+                :draggable="!guestMode && !isMarkedSpace"
                 @dragstart.stop="
                   tab.id !== undefined &&
                   startDrag($event, { kind: 'tab', id: tab.id })
@@ -1529,7 +1532,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                     :title="tabTitle(tab)"
                   />
                   <input
-                    class="workspace-card-checkbox"
+                    v-if="!guestMode" class="workspace-card-checkbox"
                     type="checkbox"
                     :aria-label="`选择打开的标签页 ${tabTitle(tab)}`"
                     :checked="
@@ -1560,7 +1563,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
           </ReorderTransition>
         </div>
         <div
-          v-if="selectedOpenTabs.length"
+          v-if="!guestMode && selectedOpenTabs.length"
           class="workspace-browser-selection glass-surface"
           aria-label="所选浏览器标签页操作"
         >

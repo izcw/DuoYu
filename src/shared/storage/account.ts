@@ -7,6 +7,7 @@ export function activeAccountKey() {
 // The database and preference namespace belong to one page lifetime.
 // A different tab may update the shared marker before this page reloads.
 export const pageAccountKey = activeAccountKey();
+export const guestMode = !pageAccountKey;
 export function assertCurrentPageAccount() {
   if (activeAccountKey() !== pageAccountKey)
     throw Error('账号已切换，请在当前账号重新操作');
@@ -29,6 +30,11 @@ export function guardAccountWrites(db: Dexie) {
               req.trans.abort();
               throw Error('账号已切换，请在当前账号重新操作');
             }
+            if (guestMode && !['syncMeta','syncAssets'].includes(name) &&
+                !(req.trans as IDBTransaction & {guestTemplate?: boolean}).guestTemplate) {
+              req.trans.abort();
+              throw Error('请先登录，再编辑桌面');
+            }
             return table.mutate(req);
           },
         };
@@ -37,7 +43,7 @@ export function guardAccountWrites(db: Dexie) {
   });
 }
 export function scopedKey(key: string) {
-  return pageAccountKey ? `account:${pageAccountKey}:${key}` : key;
+  return pageAccountKey ? `account:${pageAccountKey}:${key}` : 'guest-template:' + key;
 }
 export const accountStorage = {
   getItem(key: string) {

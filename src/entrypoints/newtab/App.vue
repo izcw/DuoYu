@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { useIconHighlight } from '../../features/desktop/useIconHighlight';
 useIconHighlight();
-import { accountStorage } from '../../shared/storage/account';
+import { guestTemplateStatus } from '../../features/sync/guest-template';
+import { accountStorage, guestMode } from '../../shared/storage/account';
 import { defineAsyncComponent, nextTick, ref, watch } from 'vue';
 import { useDesktopPages } from '../../features/desktop/useDesktopPages';
 import WorkspaceOverlay from '../../features/workspace/WorkspaceOverlay.vue';
@@ -109,7 +110,8 @@ function stepPage(direction: number) {
 <template>
   <Teleport to="body">
     <div class="desktop-top-actions">
-      <GlassModeSwitch />
+      <span v-if="guestMode" class="guest-notice">{{ guestTemplateStatus || '官方模板 · 登录后可编辑' }}</span>
+      <GlassModeSwitch v-else />
       <span id="desktop-switch-slot"></span>
       <AccountButton />
     </div>
@@ -209,6 +211,7 @@ function stepPage(direction: number) {
 </template>
 
 <style scoped>
+.guest-notice {color:white;text-shadow:0 1px 4px #222;font-size:13px;}
 .desktop-top-actions {
   position: fixed;
   top: 16px;

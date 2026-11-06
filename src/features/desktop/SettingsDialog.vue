@@ -6,7 +6,7 @@ import DialogLayout from '../../shared/components/base/DialogLayout.vue';
 import AccountPanel from '../auth/AccountPanel.vue';
 import JsonImportDialog from '../sync/JsonImportDialog.vue';
 import { getSyncPreference, setSyncPreference } from '../sync/client';
-import { accountStorage } from '../../shared/storage/account';
+import { accountStorage, guestMode } from '../../shared/storage/account';
 import { backupDesktop } from './desktop-backup';
 import { settingsOpen, settingsSection, settingsPage } from './settings-state';
 const menus = [
@@ -69,7 +69,7 @@ function saveLayout(layout: string) {
   >
     <DialogLayout
       v-model="settingsSection"
-      :menus="menus"
+      :menus="guestMode ? [menus[0]] : menus"
       label="设置分类"
       @update:model-value="
         message = '';

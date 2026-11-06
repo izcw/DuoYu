@@ -58,9 +58,9 @@ const todayFailed = ref(false);
 const uploadInput = ref<HTMLInputElement>();
 const hasUploadedWallpaper = ref(false);
 const wallpaperSubscription = liveQuery(() =>
-  database.wallpapers.get('daily'),
+  database.preferences.get('savedWallpaper:upload'),
 ).subscribe((row) => {
-  hasUploadedWallpaper.value = !!row?.sourceUrl.startsWith('local:');
+  hasUploadedWallpaper.value = !!row?.value;
 });
 onUnmounted(() => wallpaperSubscription.unsubscribe());
 const store = computed(

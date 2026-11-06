@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { guestMode } from '../../shared/storage/account';
 import { computed, onUnmounted, ref, watch, nextTick } from 'vue';
 import { createDragLanding } from '../../shared/drag-landing';
 import { accountStorage } from '../../shared/storage/account';
@@ -16,6 +17,7 @@ import {
   switchDesktop,
   type Desktop,
 } from './desktops';
+import { readDesktop } from './desktop-profile';
 import WallpaperBackground from './WallpaperBackground.vue';
 import WallpaperSurface from './WallpaperSurface.vue';
 import { getDailyWallpaperUrl } from './wallpaper';
@@ -68,13 +70,13 @@ const subscription = liveQuery(async () => ({
   desktops: (
     await database.preferences.where('id').startsWith(prefix).toArray()
   ).map((p) => p.value as Desktop),
-  legacy: await database.wallpapers.get('daily'),
+  first: await readDesktop('default'),
   deleted: await database.syncShadow.get(
     'preferences:' + prefix + activeDesktop.value,
   ),
   mode: (await database.preferences.get('wallpaperMode'))?.value,
 })).subscribe({
-  next: ({ desktops, legacy, mode, deleted }) => {
+  next: ({ desktops, first, deleted }) => {
     if (
       activeDesktop.value !== 'default' &&
       !desktops.some((d) => d.id === activeDesktop.value) &&
@@ -84,14 +86,10 @@ const subscription = liveQuery(async () => ({
       switchDesktop('default');
       emit('selected');
     }
-    profiles.value = desktops.sort(
+    profiles.value = [first, ...desktops.filter((d) => d.id !== 'default')].sort(
       (a, b) => a.created - b.created || a.id.localeCompare(b.id),
     );
-    legacyBlob.value =
-      mode === 'custom' ||
-      (mode === undefined && legacy?.sourceUrl.startsWith('local:'))
-        ? legacy?.blob
-        : undefined;
+    legacyBlob.value = first.legacyBlob;
   },
   error: () => {
     error.value = '无法读取桌面壁纸';
@@ -121,7 +119,7 @@ const landing = createDragLanding();
 let cancelGesture: (() => void) | undefined;
 let suppressClick = false;
 function press(event:MouseEvent,id:string) {
-  if(event.button !== 0 || landing.committing) return;
+  if(guestMode || event.button !== 0 || landing.committing) return;
   cancelGesture?.();
   const button = event.currentTarget as HTMLElement, strip = button.parentElement!;
   function inside(e:MouseEvent){ return strip.contains(document.elementFromPoint(e.clientX,e.clientY)); }
@@ -177,24 +175,30 @@ watch(legacyBlob, (blob, _, cleanup) => {
   const url = legacyUrl.value;
   if (url) cleanup(() => URL.revokeObjectURL(url));
 });
-const images = ref<Record<string, string>>({});
+const retryImages = ref(0);
+const retryAssets = () => { retryImages.value++; };
+window.addEventListener('duoyu-assets-retry', retryAssets);
+window.addEventListener('online', retryAssets);
+const imageCache = ref<Record<string, string>>({});
+const imageKey = (card: Desktop) => card.asset || (card.selection === 'daily' ? daily.value : legacyUrl.value);
+const images = computed(() => Object.fromEntries(cards.value.map(card => [card.id, imageCache.value[imageKey(card)] || ''])));
 const opened = ref(false);
 watch(
-  [cards, activeDesktop, opened, daily, legacyUrl],
+  [cards, activeDesktop, opened, daily, legacyUrl, retryImages],
   async (_, __, cleanup) => {
     let valid = true;
     cleanup(() => {
       valid = false;
     });
     for (const card of cards.value) {
-      if (!opened.value && (card.id !== activeDesktop.value || card.selection === 'legacy')) continue;
+      if (!opened.value && (card.id !== activeDesktop.value || card.selection === 'legacy' || card.selection === 'daily')) continue;
       try {
         const image = card.asset
           ? await assetObjectUrl(card.asset)
-          : card.selection === 'legacy' && legacyUrl.value
+          : card.id === 'default' && legacyUrl.value
             ? legacyUrl.value
-            : daily.value;
-        if (valid) images.value = { ...images.value, [card.id]: image };
+            : card.selection === 'daily' ? daily.value : '';
+        if (valid && image) imageCache.value = { ...imageCache.value, [imageKey(card)]: image };
       } catch {
         if (valid)
           error.value = '壁纸暂时无法加载，请检查网络后重新打开切换面板';
@@ -207,7 +211,7 @@ const source = computed(() => images.value[activeDesktop.value] || '');
 watch(
   [source, active],
   ([url, profile], _, cleanup) => {
-    if (!profile || profile.selection === 'legacy' || !url) return;
+    if (!profile || profile.selection === 'daily' || !url) return;
     const preview = new Image();
     preview.onload = () => saveWallpaperPreview(preview,profile.asset || url,profile.asset ? 'local:'+profile.asset : url, profile.id === 'default' ? 'duoyu:wallpaper-preview' : 'duoyu:desktop-preview:'+profile.id);
     preview.src=url;
@@ -248,7 +252,8 @@ async function open() {
 async function select(id: string) {
   if (suppressClick || landing.committing) return;
   try {
-    await chooseDesktop(id);
+    if (guestMode) switchDesktop(id);
+    else await chooseDesktop(id);
     dialog.value?.close();
     emit('selected');
   } catch {
@@ -259,13 +264,15 @@ onUnmounted(() => {
   cancelGesture?.();
   landing.dispose();
   subscription.unsubscribe();
+  window.removeEventListener('duoyu-assets-retry', retryAssets);
+  window.removeEventListener('online', retryAssets);
   clearInterval(timer);
 });
 </script>
 <template>
-  <WallpaperBackground
+  <WallpaperBackground :key="activeDesktop" :desktop="activeDesktop"
     v-if="
-      activeDesktop === 'default' && (!active || active.selection === 'legacy')
+      active?.selection === 'daily'
     "
   />
   <WallpaperSurface v-else :source="source" :loaded="!!source" />
@@ -303,20 +310,20 @@ onUnmounted(() => {
             :aria-pressed="activeDesktop === card.id"
             @click="select(card.id)"
             @contextmenu.prevent="
-              editing = {
+              !guestMode && (editing = {
                 id: card.id,
                 name: cardName(card.id),
                 action: 'menu',
-              }
+              })
             "
           >
             <span class="desktop-thumb"
               ><img
-                draggable="false" v-if="images[card.id]"
+                draggable="false" v-if="opened && images[card.id]"
                 :src="images[card.id]"
                 alt="" /></span
             ><strong>{{ cardName(card.id) }}</strong></button
-          ><button key="add" aria-label="添加桌面" :disabled="adding" @click="add">
+          ><button v-if="!guestMode" key="add" aria-label="添加桌面" :disabled="adding" @click="add">
             <span class="desktop-thumb desktop-plus">＋</span
             ><strong>添加桌面</strong>
           </button>

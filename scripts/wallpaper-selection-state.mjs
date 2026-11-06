@@ -18,9 +18,13 @@ const code = ts
   .outputText.replace(/^import[\s\S]*?;\r?\n/gm, '')
   .replace(/\bexport /g, '');
 const database = new Dexie('wallpaper-selection-test-' + Date.now());
-database.version(1).stores({ wallpapers: 'id', preferences: 'id' });
+database.version(1).stores({ wallpapers: 'id', preferences: 'id', syncShadow: 'id' });
 const events = new EventTarget();
 const activeDesktop = ref('default');
+const profileCode = ts.transpileModule(await readFile('src/features/wallpaper/desktop-profile.ts','utf8'),{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}
+}).outputText.replace(/^import[^;]+;\s*/gm,'').replace(/\bexport /g,'');
+const readDesktop = new Function('database','prefix','accountStorage','pageAccountKey',profileCode+'; return readDesktop;')(database,'wallpaperDesktop:',{getItem:()=>null},'test-account');
 const useSelection = new Function(
   'ref',
   'onUnmounted',
@@ -31,6 +35,7 @@ const useSelection = new Function(
   'window',
   'prefix',
   'activeDesktop',
+  'readDesktop',
   code + '; return useWallpaperSelection;',
 )(
   ref,
@@ -42,6 +47,7 @@ const useSelection = new Function(
   events,
   'wallpaperDesktop:',
   activeDesktop,
+  readDesktop,
 );
 // Real Vue mount/unmount lifecycle and real Dexie transactions/notifications.
 const renderer = createRenderer({

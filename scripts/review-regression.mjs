@@ -26,7 +26,6 @@ const scripts =
         'dock-reorder',
         'dock-transfer',
         'pending-wallpaper',
-        'wallpaper-intent',
         'wallpaper-selection-race',
         'wallpaper-selection-state',
         'wallpaper-download',

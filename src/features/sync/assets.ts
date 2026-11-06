@@ -1,3 +1,4 @@
+import { guestMode } from '../../shared/storage/account';
 import { database } from '../../shared/storage/database';
 export const ASSET_PREFIX = 'duoyu-asset:';
 const active = new Map<string, Promise<Blob>>();
@@ -67,6 +68,14 @@ export async function getAsset(reference: string): Promise<Blob> {
   if (saved) return saved.blob;
   if (active.has(sha)) return active.get(sha)!;
   const job = (async () => {
+    if (guestMode) {
+      const response = await fetch(new URL('/api/v1/guest-template/assets/' + sha, import.meta.env.VITE_SYNC_URL), {credentials:'omit',signal:AbortSignal.timeout(15000)});
+      if (!response.ok) throw Error('模板图片不可用');
+      const asset = await prepareAsset(await response.blob());
+      if (asset.id !== sha) throw Error('模板图片校验失败');
+      await storePreparedAsset(asset);
+      return asset.blob;
+    }
     if (!transport) throw Error('图片下载服务未就绪');
     const r = await transport('/api/v1/assets/' + sha, 'GET', undefined, true);
     const blob = new Blob(

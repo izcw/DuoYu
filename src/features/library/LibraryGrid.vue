@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { guestMode } from '../../shared/storage/account';
 import { computed, onUnmounted, ref, watch, nextTick } from 'vue';
 import { useGridSelection } from '../../shared/useGridSelection';
 import { useWidgetGrid } from '../../shared/useWidgetGrid';
@@ -725,7 +726,7 @@ async function note(event: Event, id: string) {
               <textarea
                 :value="item.text"
                 :aria-label="item.name"
-                placeholder="记下一点灵感…"
+                placeholder="记下一点灵感…" :readonly="guestMode"
                 @pointerdown.stop
                 @dragstart.prevent.stop
                 @input="note($event, item.id)"
@@ -749,7 +750,7 @@ async function note(event: Event, id: string) {
             </button>
           </div>
           <button
-            v-if="!preview"
+            v-if="!preview && !guestMode"
             class="cell-resize"
             :aria-label="'调整大小 ' + item.name"
             title="拖动调整大小，也可用方向键"

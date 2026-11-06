@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { guestMode } from '../../shared/storage/account';
 import type { WidgetSize } from '../../shared/storage/database';
 import MenuAdd from '@icon-park/vue-next/es/icons/Add';
 import MenuFolder from '@icon-park/vue-next/es/icons/Folder';
@@ -80,6 +81,7 @@ function containInteraction(event: MouseEvent) {
   if (!isWallpaperBlank(event.target, event)) event.stopPropagation();
 }
 async function showContext(event: MouseEvent) {
+  if (guestMode) {event.preventDefault();return;}
   if (isWallpaperBlank(event.target, event)) return;
   event.stopPropagation();
   if ((event.target as Element).closest('input, textarea, select')) return;
@@ -447,6 +449,7 @@ function drop(item?: LibraryItem, intent: 'sort' | 'merge' = 'merge') {
   );
 }
 function key(event: KeyboardEvent) {
+  if (guestMode) return;
   if (event.key !== 'Escape') return;
   if (
     editing.value ||
@@ -669,7 +672,7 @@ onUnmounted(() => subscription?.unsubscribe());
         :items="visible"
         :all="items"
         :managing="managing"
-        :disabled="!!query || editing || busy"
+        :disabled="guestMode || !!query || editing || busy"
         @open="open"
         @edit="edit($event)"
         @remove="

@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { accountStorage } from '../../shared/storage/account';
+import { saveWallpaperPreview } from './wallpaper-preview';
+const props = defineProps<{desktop: string}>();
 import WallpaperSurface from './WallpaperSurface.vue';
 import { onMounted, onUnmounted, ref } from 'vue';
 import { getDailyWallpaperUrl } from './wallpaper';
 import {
   decodeWallpaper,
-  readWallpaperForDisplay,
+  readDailyCache,
   refreshWallpaper,
 } from './wallpaper-cache';
 import type { WallpaperRecord } from '../../shared/storage/database';
@@ -16,7 +17,7 @@ const failed = ref(false);
 let timer: ReturnType<typeof setInterval> | undefined;
 const controller = new AbortController();
 let displayedSource = '';
-const cachedWallpaper = readWallpaperForDisplay();
+const cachedWallpaper = readDailyCache();
 let pending = false;
 let retryAfter = 0;
 let revision = 0;
@@ -27,6 +28,12 @@ async function display(record: WallpaperRecord, request: number) {
     URL.revokeObjectURL(next);
     return;
   }
+  const preview = new Image();
+  preview.onload = () => {
+    if (!controller.signal.aborted && source.value === next)
+      saveWallpaperPreview(preview, record.contentHash || record.sourceUrl, record.sourceUrl, props.desktop === 'default' ? 'duoyu:wallpaper-preview' : 'duoyu:desktop-preview:' + props.desktop);
+  };
+  preview.src = next;
   const previous = source.value;
   source.value = next;
   // Keep the original image available for wallpaper-store previews only.
@@ -41,7 +48,7 @@ async function display(record: WallpaperRecord, request: number) {
   if (previous) URL.revokeObjectURL(previous);
 }
 async function update() {
-  if (accountStorage.getItem('duoyu-wallpaper-mode') === 'custom') return;
+
   const next = getDailyWallpaperUrl();
   if (
     pending ||
@@ -54,10 +61,7 @@ async function update() {
   const request = revision;
   try {
     const record = await refreshWallpaper(next, controller.signal);
-    if (
-      request !== revision ||
-      accountStorage.getItem('duoyu-wallpaper-mode') === 'custom'
-    )
+    if (request !== revision)
       return;
     await display(record, request);
     retryAfter = 0;
@@ -71,25 +75,13 @@ async function update() {
     if (request !== revision && !controller.signal.aborted) void update();
   }
 }
-async function wallpaperChanged() {
-  const request = ++revision;
-  if (accountStorage.getItem('duoyu-wallpaper-mode') === 'custom') {
-    const cached = await readWallpaperForDisplay();
-    // Missing cloud assets are temporary; never reset the user's chosen mode.
-    if (cached && request === revision) await display(cached, request);
-  } else {
-    displayedSource = '';
-    retryAfter = 0;
-    await update();
-  }
-}
 function online() {
   retryAfter = 0;
   void update();
 }
 onMounted(async () => {
   window.addEventListener('online', online);
-  window.addEventListener('duoyu-wallpaper-change', wallpaperChanged);
+
   const request = revision;
   const cached = await cachedWallpaper;
   if (controller.signal.aborted) return;
@@ -105,10 +97,11 @@ onMounted(async () => {
   timer = setInterval(() => void update(), 60_000);
 });
 onUnmounted(() => {
+  revision++;
   controller.abort();
   clearInterval(timer);
   window.removeEventListener('online', online);
-  window.removeEventListener('duoyu-wallpaper-change', wallpaperChanged);
+
   document.documentElement.style.removeProperty('--desktop-wallpaper-image');
   delete document.documentElement.dataset.desktopWallpaper;
   if (source.value) URL.revokeObjectURL(source.value);

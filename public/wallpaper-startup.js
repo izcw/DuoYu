@@ -44,11 +44,17 @@
 
 // Runs before the app bundle. Only a small preview is stored synchronously;
 // Dexie remains the source of truth for the full-resolution wallpaper.
-(() => {
+(async () => {
   try {
     // Match accountStorage before the app and database have initialized.
     const account = localStorage.getItem('duoyu-sync-account');
-    const prefix = account ? `account:${account}:` : '';
+    if (account) {
+      const owner = (await chrome.storage.session.get('duoyuAuthSession')).duoyuAuthSession?.account;
+      if (!owner) return;
+      const digest = await crypto.subtle.digest('SHA-256',new TextEncoder().encode(owner.issuer+'\0'+owner.sub));
+      if (Array.from(new Uint8Array(digest), n=>n.toString(16).padStart(2,'0')).join('') !== account) return;
+    }
+    const prefix = account ? `account:${account}:` : 'guest-template:';
     const desktop = localStorage.getItem(`${prefix}duoyu-device-desktop`) || 'default';
     const key = desktop === 'default' ? 'duoyu:wallpaper-preview' : 'duoyu:desktop-preview:' + desktop;
     const raw = localStorage.getItem(prefix + key);

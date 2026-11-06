@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { guestMode } from '../../shared/storage/account';
 import { accountStorage, scopedKey } from '../../shared/storage/account';
 import { computed, ref, onUnmounted, watch } from 'vue';
 import { liveQuery } from 'dexie';
@@ -186,7 +187,7 @@ function activate(item: (typeof items.value)[number]) {
 }
 let stopGesture: (() => void) | undefined;
 function press(event: MouseEvent, id: string) {
-  if (event.button !== 0 || savingOrder.value || pinned.includes(id)) return;
+  if (guestMode || event.button !== 0 || savingOrder.value || pinned.includes(id)) return;
   const source = event.currentTarget as HTMLElement;
   const dock = source.closest('.desktop-dock')!;
   stopGesture?.();

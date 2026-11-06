@@ -443,8 +443,11 @@ try {
     json: { code: 200, total: 1, data: [{ id: 871, title: '重装验收', datetime: '2026-11-01', url: 'https://bing.com/th?id=fixture_1920x1080.jpg', copyright: 'fixture' }] },
   }));
   await context.route('https://bing.com/**', (route) => route.fulfill({ contentType: 'image/png', body: wallpaperBytes }));
-  await page.getByRole('button', { name: '切换桌面', exact: true }).click();
-  await page.getByRole('button', { name: '添加桌面', exact: true }).click();
+  const firstDesktop = process.argv.includes('--default-wallpaper');
+  if (!firstDesktop) {
+    await page.getByRole('button', { name: '切换桌面', exact: true }).click();
+    await page.getByRole('button', { name: '添加桌面', exact: true }).click();
+  }
   await openGridMenu(page, page.locator('.library-cell-grid').first(), { waitForItem: false });
   await page.getByRole('menuitem', { name: '换壁纸', exact: true }).click();
   await page.getByRole('button', { name: '必应', exact: true }).click();
@@ -459,6 +462,15 @@ try {
   )).rows[0]?.profile;
   await expect.poll(async () => (await cloudDesktop())?.selection, { timeout: 30000 }).toBe('bing:871');
   const chosenDesktop = (await cloudDesktop()).id;
+  if (firstDesktop) assert.equal(chosenDesktop, 'default');
+  // New selections must sync through the same desktop preference on every desktop.
+  if (firstDesktop) {
+    const legacyWrites = await syncPool.query(
+      "SELECT entity_id FROM sync_entities WHERE account_id=$1 AND (entity_type='wallpapers' OR (entity_type='preferences' AND entity_id IN ('wallpaperSelection','wallpaperMode')))",
+      [account],
+    );
+    assert.deepEqual(legacyWrites.rows, [], 'desktop 1 also wrote the legacy wallpaper selection');
+  }
   const resumeDesktop = async () => (await syncPool.query(
     "SELECT payload->>'value' AS desktop FROM sync_entities WHERE account_id=$1 AND entity_type='preferences' AND entity_id='wallpaperResumeDesktop' AND NOT deleted",
     [account],
@@ -646,15 +658,61 @@ try {
   await context.route('**/api/auth/code', (r) => r.abort());
   await context.route('**/api/service/mail', (r) => r.abort());
   await context.route('https://api.bimg.cc/**', (r) => r.abort());
+  const guestLink = { id: 'guest-template-link', pageId: 'home', parent: '', kind: 'link', name: '官方模板入口', url: 'https://example.invalid/guest-only', order: 0, width: 1, height: 1 };
+  const guestImage = await readFile('public/images/google.png');
+  const guestHash = createHash('sha256').update(guestImage).digest('hex');
+  assert.notEqual('duoyu-asset:'+guestHash,expectedAsset);
+  const catalogDir = path.join(evidence,'business-assets','catalog');
+  await mkdir(catalogDir,{recursive:true});
+  await writeFile(path.join(catalogDir,guestHash),guestImage);
+  const guestDesktop = {table:'preferences',id:'wallpaperDesktop:default',payload:{id:'wallpaperDesktop:default',value:{id:'default',created:0,selection:'bing:771',asset:'duoyu-asset:'+guestHash}}};
+  const template = await syncPool.query("INSERT INTO backend_catalog(kind,name,status,payload) VALUES('templates','访客验收','published',$1) RETURNING id",
+    [{format:'duoyu-template',version:1,source_account_id:'private-source',assets:[{sha256:guestHash,media_type:'image/png',bytes:guestImage.length}],entities:[guestDesktop,{table:'libraryItems',id:guestLink.id,payload:guestLink}]}]);
+  await syncPool.query("INSERT INTO backend_settings(id,value) VALUES('default_template_id',to_jsonb($1::text)) ON CONFLICT(id) DO UPDATE SET value=excluded.value",[template.rows[0].id]);
+  const guestResponse = await fetch(backendOrigin+'/api/v1/guest-template');
+  assert.equal(guestResponse.status,200);
+  assert.ok(!(await guestResponse.text()).includes('private-source'));
+  assert.equal((await fetch(backendOrigin+'/api/v1/guest-template',{method:'POST'})).status,405);
+  assert.equal((await fetch(backendOrigin+'/api/v1/guest-template/assets/'+'a'.repeat(64))).status,404);
   page = await context.newPage();
   await page.goto(`chrome-extension://${extensionId}/newtab.html`);
+  const official = page.locator('.cell-link[aria-label="打开收藏 官方模板入口"]');
+  await expect(official).toBeVisible();
+  await expect.poll(async()=>page.locator('.wallpaper img.loaded').first().evaluate(async img => {
+    const bytes = await (await fetch(img.src)).arrayBuffer();
+    return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),n=>n.toString(16).padStart(2,'0')).join('');
+  })).toBe(guestHash);
+  await context.route('**/api/v1/guest-template',r=>r.abort());
+  await page.reload();
+  await expect(official).toBeVisible();
+  await expect(page.getByText('离线显示上次下载的官方模板')).toBeVisible();
+  await context.unroute('**/api/v1/guest-template');
+  await official.click({button:'right'});
+  await expect(page.getByRole('menuitem',{name:'添加网址'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'调整大小 官方模板入口'})).toHaveCount(0);
+  await page.getByRole('button',{name:'切换桌面',exact:true}).click();
+  await expect(page.getByRole('button',{name:'添加桌面',exact:true})).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await context.route(guestLink.url, route => route.fulfill({contentType:'text/plain',body:'guest link opened'}));
+  const linkOpened = context.waitForEvent('page');
+  await official.click();
+  const opened = await linkOpened;
+  await opened.waitForURL(guestLink.url,{waitUntil:'commit'}).catch(async()=>assert.equal((await page.evaluate(()=>chrome.tabs.query({}))).some(t=>(t.url || t.pendingUrl)==='https://example.invalid/guest-only'),true));
+  await opened.close();
+  console.log('PASS official guest template, open link, absent edit/add/resize actions and restricted template endpoint');
   await expect(
     page.locator('.cell-link[aria-label="打开收藏 真实认证同步收藏"]'),
   ).toHaveCount(0);
+  // Exercise a stale local default intent left by a previous build on startup.
+  await page.addInitScript(() => {
+    const owner = localStorage.getItem('duoyu-sync-account');
+    if (owner) localStorage.setItem('account:'+owner+':duoyu-wallpaper-intent', JSON.stringify({selection:'daily'}));
+  });
   await signIn(context, page, origin);
   await expect(
     page.locator('.cell-link[aria-label="打开收藏 真实认证同步收藏"]'),
   ).toBeVisible({ timeout: 30000 });
+  await expect(official).toHaveCount(0);
   console.log(
     'PASS fresh browser profile pulls actual cloud data after real login',
   );
@@ -665,6 +723,15 @@ try {
     const bytes = await (await fetch(img.src)).arrayBuffer();
     return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), n => n.toString(16).padStart(2, '0')).join('');
   }), { timeout: 15000 }).toBe(expectedAsset.slice('duoyu-asset:'.length));
+  if (firstDesktop) {
+    await page.keyboard.press('Escape');
+    await page.getByRole('button',{name:'我的账号',exact:true}).click();
+    await page.getByRole('button',{name:'立即同步',exact:true}).click();
+    await expect(page.locator('.sync-time')).toContainText('最近同步');
+    assert.equal((await cloudDesktop()).selection,'bing:871');
+    const localOverwrite = await syncPool.query("SELECT entity_id FROM sync_entities WHERE account_id=$1 AND entity_id IN ('wallpaperSelection','wallpaperMode')",[account]);
+    assert.equal(localOverwrite.rowCount,0);
+  }
   await page.keyboard.press('Escape');
   console.log('PASS fresh installation restores the selected desktop and byte-identical Bing wallpaper');
   // Another device can set its own default without switching this open device.

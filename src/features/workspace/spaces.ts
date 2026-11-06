@@ -11,7 +11,7 @@ export async function ensureDefaultDestination() {
   });
 }
 export async function ensureDefaultSpace() {
-  if (database.name === 'duoyu') return ensureDefaultDestination();
+  if (database.name === 'duoyu-guest-template-v1') return;
   await database.transaction(
     'rw',
     database.workspaceSpaces,
