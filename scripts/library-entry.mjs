@@ -46,14 +46,19 @@ try {
   ).toBeVisible();
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
-  await page.mouse.click(1850, 500);
+  await page
+    .getByRole('navigation', { name: '快捷 Dock', exact: true })
+    .getByRole('button', { name: '标签工作区', exact: true })
+    .click();
   await expect(
     page.getByRole('dialog', { name: '工作区', exact: true }),
   ).toBeVisible();
   await page
-    .locator('.workspace-dock')
-    .getByRole('button', { name: '收藏库', exact: true })
+    .getByRole('navigation', { name: '快捷 Dock', exact: true })
+    .getByRole('button', { name: '首页', exact: true })
     .click();
+  await page.mouse.move(2, 500);
+  await page.getByRole('button', { name: '常用收藏', exact: true }).click();
   await expect(page.locator('.desktop-pages')).toHaveAttribute(
     'data-desktop-page',
     '1',
@@ -64,7 +69,7 @@ try {
   await expect(page.locator('.desktop-library .library-board')).toBeVisible();
   assert.deepEqual(errors, []);
   console.log(
-    'PASS removed wheel library, workspace shortcut navigates to desktop library',
+    'PASS current wheel entries, explicit Dock workspace/home navigation and collection sidebar entry',
   );
 } finally {
   await context.close();

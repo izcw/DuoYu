@@ -89,8 +89,22 @@ try {
     );
   }
   await page.bringToFront();
-  await page.mouse.click(1000, 450);
+  await page
+    .getByRole('navigation', { name: '快捷 Dock', exact: true })
+    .getByRole('button', { name: '标签工作区', exact: true })
+    .click();
   const board = page.locator('.workspace-board');
+  const namedGroup = (name) =>
+    board.locator('.workspace-collection').filter({
+      has: page.locator('.workspace-collection-name').filter({ hasText: name }),
+    });
+  async function groupAction(name, action) {
+    const group = namedGroup(name);
+    await group
+      .getByRole('button', { name: '更多集合操作', exact: true })
+      .click();
+    await group.getByRole('button', { name: action, exact: true }).click();
+  }
   await expect(board).toBeVisible();
   await expect(board.locator('.workspace-tabs .workspace-icon')).toHaveCount(0);
   await expect(board.locator('.workspace-save-controls')).toHaveCount(0);
@@ -118,47 +132,43 @@ try {
   });
   await expect(alphaTab.locator('strong')).toHaveText('Alpha');
   for (const name of ['集合01', '集合02']) {
-    await board
-      .getByRole('button', { name: '＋ 新建集合', exact: true })
-      .click();
+    await board.getByRole('button', { name: '新建集合', exact: true }).click();
     await expect(
-      board.getByRole('button', { name: `重命名 ${name}`, exact: true }),
+      board.getByRole('button', { name: `${name}`, exact: true }),
     ).toBeVisible();
   }
   await expect(
     board.getByRole('textbox', { name: '集合名称', exact: true }),
   ).toHaveCount(0);
   for (const name of ['集合01', '集合02']) {
-    await board
-      .getByRole('button', { name: `删除集合 ${name}`, exact: true })
-      .click();
+    await groupAction(name, '删除集合');
     await board.getByRole('button', { name: '确认删除', exact: true }).click();
     await expect(
-      board.getByRole('button', { name: `重命名 ${name}`, exact: true }),
+      board.getByRole('button', { name: `${name}`, exact: true }),
     ).toHaveCount(0);
   }
   const create = async (name) => {
-    await board
-      .getByRole('button', { name: '＋ 新建集合', exact: true })
-      .click();
-    const group = board.locator('.workspace-collection').last();
+    await board.getByRole('button', { name: '新建集合', exact: true }).click();
+    const fresh = namedGroup('集合01');
+    await expect(fresh).toBeVisible();
+    const group = board.locator(
+      `[data-collection-id="${await fresh.getAttribute('data-collection-id')}"]`,
+    );
     await expect(group.locator('.workspace-collection-name')).toContainText(
       '集合01',
     );
-    await group
-      .getByRole('button', { name: '重命名 集合01', exact: true })
-      .click();
+    await groupAction('集合01', '重命名');
     await group
       .getByRole('textbox', { name: '重命名集合', exact: true })
       .fill(name);
-    await group.getByRole('button', { name: '保存集合名称' }).click();
+    await group.getByRole('textbox', { name: '重命名集合' }).press('Enter');
     await expect(group.locator('.workspace-collection-name')).toContainText(
       name,
     );
   };
   await create('项目资料');
   const first = page.locator('.workspace-collection').filter({
-    has: page.getByRole('button', { name: '重命名 项目资料', exact: true }),
+    has: page.getByRole('button', { name: '项目资料', exact: true }),
   });
   await expect(first).toBeVisible();
   const firstId = await first.getAttribute('data-collection-id');
@@ -189,9 +199,13 @@ try {
   );
   await create('稍后阅读');
   const second = page.locator('.workspace-collection').filter({
-    has: page.getByRole('button', { name: '重命名 稍后阅读', exact: true }),
+    has: page.getByRole('button', { name: '稍后阅读', exact: true }),
   });
   const secondId = await second.getAttribute('data-collection-id');
+  await first
+    .locator('.workspace-saved-tab')
+    .filter({ hasText: 'Alpha' })
+    .hover();
   await first.getByRole('button', { name: '更多 Alpha', exact: true }).click();
   await first.getByLabel('移动收藏 Alpha').selectOption(secondId);
   await expect(second.locator('.workspace-saved-tab')).toHaveCount(1);
@@ -203,6 +217,18 @@ try {
     'Alpha',
     'Beta',
   ]);
+  // The emptied source collection changes the destination's vertical position.
+  // Wait for FLIP layout transitions before computing the next drag endpoints.
+  await expect
+    .poll(() =>
+      board.evaluate(
+        (el) =>
+          el
+            .getAnimations({ subtree: true })
+            .filter((a) => a.playState === 'running').length,
+      ),
+    )
+    .toBe(0);
   await first
     .locator('.workspace-saved-tab')
     .nth(1)
@@ -220,22 +246,24 @@ try {
     'data-collection-id',
     secondId,
   );
-  await second
-    .getByRole('button', { name: '重命名 稍后阅读', exact: true })
-    .click();
+  await groupAction('稍后阅读', '重命名');
   await board
     .getByRole('textbox', { name: '重命名集合', exact: true })
     .fill('灵感收藏');
   await board
-    .getByRole('button', { name: '保存集合名称', exact: true })
-    .click();
+    .getByRole('textbox', { name: '重命名集合', exact: true })
+    .press('Enter');
   await expect(
-    board.getByRole('button', { name: '重命名 灵感收藏', exact: true }),
+    board.getByRole('button', { name: '灵感收藏', exact: true }),
   ).toBeVisible();
   await board.getByRole('searchbox', { name: '搜索工作区' }).fill('Alpha');
   await expect(board.locator('.workspace-saved-tab')).toHaveCount(1);
   await expect(board.locator('.workspace-open-tab')).toHaveCount(1);
   await board.getByRole('button', { name: '清空工作区搜索' }).click();
+  await first
+    .locator('.workspace-saved-tab')
+    .filter({ hasText: 'Alpha' })
+    .hover();
   await first.getByRole('button', { name: '更多 Alpha', exact: true }).click();
   await first
     .getByRole('button', { name: '移除收藏 Alpha', exact: true })
@@ -246,9 +274,7 @@ try {
     'Beta',
     'Alpha',
   ]);
-  await board
-    .getByRole('button', { name: '删除集合 灵感收藏', exact: true })
-    .click();
+  await groupAction('灵感收藏', '删除集合');
   await board.getByRole('button', { name: '确认删除', exact: true }).click();
   await expect(board.locator('.workspace-collection')).toHaveCount(1);
   await board.getByRole('button', { name: '撤销删除', exact: true }).click();
@@ -265,10 +291,18 @@ try {
       },
     });
   });
+  await first
+    .locator('.workspace-saved-tab')
+    .filter({ hasText: 'Alpha' })
+    .hover();
   await first.getByRole('checkbox', { name: '选择标签页 Alpha' }).check();
+  await first
+    .locator('.workspace-saved-tab')
+    .filter({ hasText: 'Beta' })
+    .hover();
   await first.getByRole('checkbox', { name: '选择标签页 Beta' }).check();
   await expect(board.locator('.workspace-selection')).toContainText(
-    '已选择 2 项',
+    '选择 2 项',
   );
   await board
     .getByRole('button', { name: '复制所选链接', exact: true })
@@ -287,12 +321,20 @@ try {
   await board.getByRole('button', { name: '取消选择', exact: true }).click();
   await expect(board.locator('.workspace-selection')).toHaveCount(0);
   await first
+    .locator('.workspace-saved-tab')
+    .filter({ hasText: 'Alpha' })
+    .hover();
+  await first
     .getByRole('button', { name: '复制链接 Alpha', exact: true })
     .click();
   assert.equal(
     await page.evaluate(() => window.copiedLinks),
     'https://example.com/workspace-fixture/Alpha',
   );
+  await first
+    .locator('.workspace-saved-tab')
+    .filter({ hasText: 'Alpha' })
+    .hover();
   await first.getByRole('button', { name: '更多 Alpha', exact: true }).click();
   await first.getByRole('button', { name: '修改', exact: true }).click();
   const editor = page.getByRole('dialog', { name: '修改标签页' });
@@ -307,6 +349,10 @@ try {
   await expect(
     first.getByRole('button', { name: '更多 Alpha edited', exact: true }),
   ).toBeVisible();
+  await first
+    .locator('.workspace-saved-tab')
+    .filter({ hasText: 'Alpha edited' })
+    .hover();
   await first
     .getByRole('button', { name: '更多 Alpha edited', exact: true })
     .click();
@@ -348,7 +394,10 @@ try {
     .toBe(before + 3);
   await page.reload();
   await page.locator('.clock-time').waitFor();
-  await page.mouse.click(1000, 450);
+  await page
+    .getByRole('navigation', { name: '快捷 Dock', exact: true })
+    .getByRole('button', { name: '标签工作区', exact: true })
+    .click();
   await expect(first.locator('.workspace-saved-tab strong')).toHaveText([
     'Beta',
     'Alpha',
@@ -365,11 +414,14 @@ try {
   const peer = await context.newPage();
   await peer.goto(page.url());
   await peer.locator('.clock-time').waitFor();
-  await peer.mouse.click(1000, 450);
+  await peer
+    .getByRole('navigation', { name: '快捷 Dock', exact: true })
+    .getByRole('button', { name: '标签工作区', exact: true })
+    .click();
   await expect(peer.locator('.workspace-saved-tab')).toHaveCount(3);
   await create('跨页同步');
   await expect(
-    peer.getByRole('button', { name: '重命名 跨页同步', exact: true }),
+    peer.getByRole('button', { name: '跨页同步', exact: true }),
   ).toBeVisible();
   await peer.close();
   // External browser events update the visible list without reopening the workspace.
@@ -605,14 +657,12 @@ try {
     .getByRole('button', { name: '保存群组 项目调研 为集合', exact: true })
     .click();
   const savedNativeGroup = board.locator('.workspace-collection').filter({
-    has: page.getByRole('button', { name: '重命名 项目调研', exact: true }),
+    has: page.getByRole('button', { name: '项目调研', exact: true }),
   });
   await expect(
     savedNativeGroup.locator('.workspace-saved-tab strong'),
   ).toHaveText(['Gamma', 'Alpha']);
-  await savedNativeGroup
-    .getByRole('button', { name: '删除集合 项目调研', exact: true })
-    .click();
+  await groupAction('项目调研', '删除集合');
   await board.getByRole('button', { name: '确认删除', exact: true }).click();
   await expect(savedNativeGroup).toHaveCount(0);
   await grouped
@@ -641,7 +691,9 @@ try {
     name: '选择打开的标签页 Gamma',
     exact: true,
   });
+  await board.locator(`[data-browser-tab-id="${tabs[0].id}"]`).hover();
   await checkAlpha.check();
+  await board.locator(`[data-browser-tab-id="${tabs[2].id}"]`).hover();
   await checkGamma.check();
   const batch = board.getByLabel('所选浏览器标签页操作');
   await expect(batch).toContainText('已选择 2 项');
@@ -656,7 +708,17 @@ try {
   );
   assert.equal(actualGrouped[0].groupId, actualGrouped[1].groupId);
   assert.notEqual(actualGrouped[0].groupId, -1);
+  // Native grouping has completed before Vue's leave animation necessarily does.
+  // Wait for the old ungrouped cards to leave before addressing each unique tab.
+  await expect(
+    board.locator(`[data-browser-tab-id="${tabs[0].id}"]`),
+  ).toHaveCount(1);
+  await expect(
+    board.locator(`[data-browser-tab-id="${tabs[2].id}"]`),
+  ).toHaveCount(1);
+  await board.locator(`[data-browser-tab-id="${tabs[0].id}"]`).hover();
   await checkAlpha.check();
+  await board.locator(`[data-browser-tab-id="${tabs[2].id}"]`).hover();
   await checkGamma.check();
   await batch.getByRole('button', { name: '取消群组', exact: true }).click();
   await expect(
@@ -670,8 +732,16 @@ try {
   }
   await page.bringToFront();
   await board
+    .locator('.workspace-open-tab')
+    .filter({ hasText: 'CloseOne' })
+    .hover();
+  await board
     .getByRole('checkbox', { name: '选择打开的标签页 CloseOne', exact: true })
     .check();
+  await board
+    .locator('.workspace-open-tab')
+    .filter({ hasText: 'CloseTwo' })
+    .hover();
   await board
     .getByRole('checkbox', { name: '选择打开的标签页 CloseTwo', exact: true })
     .check();
@@ -690,42 +760,57 @@ try {
     (id) => chrome.tabs.update(id, { active: true }),
     owner.id,
   );
-  await board.getByRole('button', { name: '＋ 新建空间', exact: true }).click();
-  await board
+  await board.getByRole('button', { name: '新建空间', exact: true }).click();
+  const spaceEditor = page.getByRole('dialog');
+  await spaceEditor
     .getByRole('textbox', { name: '空间名称', exact: true })
     .fill('工作项目');
-  await board.getByRole('button', { name: '保存空间', exact: true }).click();
+  await spaceEditor.getByRole('button', { name: '添加', exact: true }).click();
   await expect(board.locator('h1')).toHaveText('工作项目');
   await expect(board.locator('.workspace-collection')).toHaveCount(0);
   await create('项目会话');
   await alphaTab.dragTo(board.locator('.workspace-collection').first());
   await expect(page.locator('.drag-landing-preview')).toHaveCount(0);
   await expect(board.locator('.workspace-saved-tab')).toHaveCount(1);
-  await board.getByRole('button', { name: '重命名空间', exact: true }).click();
   await board
+    .locator('.workspace-space')
+    .filter({ hasText: '工作项目' })
+    .click({ button: 'right' });
+  await board
+    .getByRole('menuitem', { name: '重命名空间', exact: true })
+    .click();
+  await spaceEditor
     .getByRole('textbox', { name: '空间名称', exact: true })
     .fill('开发空间');
-  await board.getByRole('button', { name: '保存空间', exact: true }).click();
+  await spaceEditor.getByRole('button', { name: '保存', exact: true }).click();
   await expect(board.locator('h1')).toHaveText('开发空间');
   await page.reload();
   await page.locator('.clock-time').waitFor();
-  await page.mouse.click(1000, 450);
-  await expect(board.locator('h1')).toHaveText('开发空间');
+  await page
+    .getByRole('navigation', { name: '快捷 Dock', exact: true })
+    .getByRole('button', { name: '标签工作区', exact: true })
+    .click();
+  await expect(board.locator('h1')).toHaveText('个人空间');
+  await board.getByRole('button', { name: '开发空间', exact: true }).click();
   await expect(board.locator('.workspace-saved-tab')).toHaveCount(1);
   await board
     .locator('.workspace-space')
     .filter({ hasText: '个人空间' })
     .click();
   await expect(
-    board.getByRole('button', { name: '重命名 项目资料', exact: true }),
+    board.getByRole('button', { name: '项目资料', exact: true }),
   ).toBeVisible();
   await expect(
-    board.getByRole('button', { name: '重命名 项目会话', exact: true }),
+    board.getByRole('button', { name: '项目会话', exact: true }),
   ).toHaveCount(0);
   await board
     .locator('.workspace-space')
     .filter({ hasText: '开发空间' })
     .click();
+  await board
+    .locator('.workspace-saved-tab')
+    .filter({ hasText: 'Alpha' })
+    .hover();
   await board
     .getByRole('button', { name: '标记收藏 Alpha', exact: true })
     .click();
@@ -736,23 +821,29 @@ try {
   await expect(board.locator('h1')).toHaveText('标记');
   await expect(board.locator('.workspace-saved-tab')).toHaveCount(3);
   await expect(board.locator('.workspace-collection-name')).toContainText([
-    '个人空间 / 项目资料',
     '开发空间 / 项目会话',
+    '个人空间 / 项目资料',
   ]);
   await expect(
     board.getByRole('button', { name: '删除空间', exact: true }),
   ).toHaveCount(0);
   await expect(
-    board.getByRole('button', { name: '＋ 新建集合', exact: true }),
+    board.getByRole('button', { name: '新建集合', exact: true }),
   ).toHaveCount(0);
   await page.reload();
   await page.locator('.clock-time').waitFor();
-  await page.mouse.click(1000, 450);
+  await page
+    .getByRole('navigation', { name: '快捷 Dock', exact: true })
+    .getByRole('button', { name: '标签工作区', exact: true })
+    .click();
+  await expect(board.locator('h1')).toHaveText('个人空间');
+  await board.getByRole('button', { name: '标记', exact: true }).click();
   await expect(board.locator('h1')).toHaveText('标记');
   await expect(board.locator('.workspace-saved-tab')).toHaveCount(3);
   const markedProject = board
     .locator('.workspace-collection')
     .filter({ hasText: '开发空间 / 项目会话' });
+  await markedProject.locator('.workspace-saved-tab').hover();
   await markedProject
     .getByRole('button', { name: '标记收藏 Alpha', exact: true })
     .click();
@@ -765,26 +856,45 @@ try {
   await expect(
     board.getByRole('button', { name: '标记收藏 Alpha', exact: true }),
   ).toHaveAttribute('aria-pressed', 'false');
-  await board.getByRole('button', { name: '删除空间', exact: true }).click();
   await board
+    .locator('.workspace-space')
+    .filter({ hasText: '开发空间' })
+    .click({ button: 'right' });
+  await board.getByRole('menuitem', { name: '删除空间', exact: true }).click();
+  await page
+    .getByRole('dialog', { name: '删除空间', exact: true })
     .getByRole('button', { name: '确认删除空间', exact: true })
     .click();
   await expect(board.locator('h1')).toHaveText('个人空间');
   await expect(
-    board.getByRole('button', { name: '重命名 项目会话', exact: true }),
+    board.getByRole('button', { name: '项目会话', exact: true }),
   ).toBeVisible();
+  await board
+    .locator('.workspace-space')
+    .filter({ hasText: '个人空间' })
+    .click({ button: 'right' });
   await expect(
-    board.getByRole('button', { name: '删除空间', exact: true }),
+    board.getByRole('menuitem', { name: '删除空间', exact: true }),
   ).toBeDisabled();
-  const dockGrid = board.locator('.dock-icon-grid');
-  await expect(dockGrid.locator('[data-link-id]')).toHaveCount(5);
-  const homeBox = await dockGrid.locator('[data-link-id="home"]').boundingBox();
+  await page.keyboard.press('Escape');
+  // The shared Dock now pins Home and Workspace; reorder the movable memo entry.
+  const dockGrid = page.getByRole('navigation', {
+    name: '快捷 Dock',
+    exact: true,
+  });
+  await expect(dockGrid.locator('[data-dock-id]')).toHaveCount(5);
+  await expect(
+    dockGrid.locator('[data-dock-id="duoyu-home"]'),
+  ).not.toHaveAttribute('data-drag-handle');
+  const homeBox = await dockGrid
+    .locator('[data-dock-id="duoyu-memo"]')
+    .boundingBox();
   const canvasBox = await dockGrid
-    .locator('[data-link-id="canvas"]')
+    .locator('[data-dock-id="duoyu-canvas"]')
     .boundingBox();
   await page.mouse.move(homeBox.x + homeBox.width / 2, homeBox.y + 18);
   await page.mouse.down();
-  await page.mouse.move(canvasBox.x + canvasBox.width / 2, canvasBox.y + 18, {
+  await page.mouse.move(canvasBox.x + canvasBox.width - 3, canvasBox.y + 18, {
     steps: 12,
   });
   await expect(board).toBeVisible();
@@ -792,20 +902,35 @@ try {
   await expect
     .poll(() =>
       dockGrid
-        .locator('[data-link-id]')
-        .evaluateAll((items) => items.map((item) => item.dataset.linkId)),
+        .locator('[data-dock-id]')
+        .evaluateAll((items) => items.map((item) => item.dataset.dockId)),
     )
-    .toEqual(['library', 'memo', 'translate', 'canvas', 'home']);
+    .toEqual([
+      'duoyu-home',
+      'duoyu-workspace',
+      'duoyu-translate',
+      'duoyu-canvas',
+      'duoyu-memo',
+    ]);
   await page.reload();
   await page.locator('.clock-time').waitFor();
-  await page.mouse.click(1000, 450);
+  await page
+    .getByRole('navigation', { name: '快捷 Dock', exact: true })
+    .getByRole('button', { name: '标签工作区', exact: true })
+    .click();
   await expect
     .poll(() =>
       dockGrid
-        .locator('[data-link-id]')
-        .evaluateAll((items) => items.map((item) => item.dataset.linkId)),
+        .locator('[data-dock-id]')
+        .evaluateAll((items) => items.map((item) => item.dataset.dockId)),
     )
-    .toEqual(['library', 'memo', 'translate', 'canvas', 'home']);
+    .toEqual([
+      'duoyu-home',
+      'duoyu-workspace',
+      'duoyu-translate',
+      'duoyu-canvas',
+      'duoyu-memo',
+    ]);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(
     await page.evaluate(
@@ -813,23 +938,47 @@ try {
     ),
     true,
   );
+  await expect(page.locator('.newtab')).toHaveCSS('visibility', 'hidden');
+  await expect(page.locator('.workspace-overlay')).toHaveCSS('opacity', '1');
   await page.screenshot({ path: 'work/workspace-collections-mobile.png' });
-  const dock = board.getByRole('navigation', { name: '工作区快捷入口' });
+  const dock = dockGrid;
+  await context.route('https://fanyi.baidu.com/**', (r) =>
+    r.fulfill({
+      contentType: 'text/html',
+      body: '<title>Translation fixture</title>',
+    }),
+  );
+  await page.evaluate(() => {
+    window.createdDestinations = [];
+    chrome.tabs.onCreated.addListener((tab) =>
+      window.createdDestinations.push(tab.pendingUrl || tab.url),
+    );
+  });
+  const translationPage = context.waitForEvent('page');
+  await dock.getByRole('button', { name: '翻译', exact: true }).click();
+  const translated = await translationPage;
+  await expect
+    .poll(() => page.evaluate(() => window.createdDestinations))
+    .toContain('https://fanyi.baidu.com/');
+  await translated.close();
+  await page.bringToFront();
+  // Memo/canvas are existing inactive entries, not implemented workflows.
   await expect(
-    dock.getByRole('link', { name: '翻译', exact: true }),
-  ).toHaveAttribute('href', 'https://fanyi.baidu.com/');
-  await dock.getByRole('button', { name: '笔记', exact: true }).click();
-  await expect(board.getByRole('status')).toContainText('笔记功能即将上线');
+    dock.getByRole('button', { name: '便签', exact: true }),
+  ).toBeVisible();
+  await expect(
+    dock.getByRole('button', { name: '画布', exact: true }),
+  ).toBeVisible();
   await dock.getByRole('button', { name: '首页', exact: true }).click();
   await expect(page.locator('.workspace-overlay')).toHaveCount(0);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.mouse.click(1000, 450);
-  await dock.getByRole('button', { name: '收藏库', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '快捷 Dock', exact: true })
+    .getByRole('button', { name: '标签工作区', exact: true })
+    .click();
+  await dock.getByRole('button', { name: '首页', exact: true }).click();
   await expect(page.locator('.library-board')).toBeVisible();
   await expect(board).toHaveCount(0);
-  await expect(page.locator('html')).toHaveClass(/workspace-active/);
-  await page.keyboard.press('Escape');
-
   await expect(page.locator('.workspace-overlay')).toHaveCount(0);
   assert.deepEqual(errors, []);
   console.log(

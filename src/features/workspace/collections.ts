@@ -1,4 +1,5 @@
 import type { CollectionColor } from '../../shared/collection-colors';
+import { ensureDefaultDestination } from './spaces';
 import {
   database,
   type SavedTab,
@@ -23,22 +24,17 @@ export function hostname(value: string) {
 export async function createCollection(
   name: string,
   tabs: SavedTab[] = [],
-  spaceId = 'default',
+  selectedSpace = 'default',
 ) {
+  const spaceId = selectedSpace || 'default';
   return database.transaction(
     'rw',
     database.tabCollections,
     database.workspaceSpaces,
     async () => {
-      if (!(await database.workspaceSpaces.get(spaceId))) {
-        if (spaceId !== 'default') throw new Error('空间已不存在，请重新选择');
-        // A signed-in workspace can be empty after its first cloud snapshot.
-        await database.workspaceSpaces.add({
-          id: 'default',
-          name: '个人空间',
-          order: 0,
-        });
-      }
+      if (spaceId === 'default') await ensureDefaultDestination();
+      else if (!(await database.workspaceSpaces.get(spaceId)))
+        throw new Error('空间已不存在，请重新选择');
       const first = await database.tabCollections.orderBy('order').first();
       const existing = await database.tabCollections.toArray();
       const nextNumber =
@@ -67,10 +63,36 @@ export async function createCollection(
 export async function renameCollection(id: string, name: string) {
   const trimmed = name.trim().slice(0, 80);
   if (!trimmed) return;
-  await database.tabCollections.update(id, {
-    name: trimmed,
-    updatedAt: Date.now(),
+  if (
+    !(await database.tabCollections.update(id, {
+      name: trimmed,
+      updatedAt: Date.now(),
+    }))
+  )
+    throw new Error('集合已不存在');
+}
+export function removeCollection(id: string) {
+  return database.transaction('rw', database.tabCollections, async () => {
+    const group = await database.tabCollections.get(id);
+    if (!group) throw new Error('集合已不存在');
+    await database.tabCollections.delete(id);
+    return group;
   });
+}
+export function restoreCollection(group: TabCollection) {
+  return database.transaction(
+    'rw',
+    database.tabCollections,
+    database.workspaceSpaces,
+    async () => {
+      let spaceId = group.spaceId || 'default';
+      if (!(await database.workspaceSpaces.get(spaceId))) {
+        await ensureDefaultDestination();
+        spaceId = 'default';
+      }
+      await database.tabCollections.add({ ...group, spaceId });
+    },
+  );
 }
 export async function addTabs(id: string, tabs: SavedTab[], before?: string) {
   return database.transaction('rw', database.tabCollections, async () => {
@@ -102,32 +124,43 @@ export async function moveSavedTab(
       source === target ? from : await database.tabCollections.get(target);
     if (!from || !to) throw new Error('集合已变更，请重试');
     const index = from.tabs.findIndex((t) => t.id === id);
-    if (index < 0) return;
+    if (index < 0) throw new Error('标签页已被移除，请重试');
     const [tab] = from.tabs.splice(index, 1);
     const at = before ? to.tabs.findIndex((t) => t.id === before) : -1;
+    if (before && at < 0) throw new Error('目标位置已变更，请重试');
     to.tabs.splice(at < 0 ? to.tabs.length : at, 0, tab!);
     from.updatedAt = to.updatedAt = Date.now();
     await database.tabCollections.put(from);
     if (source !== target) await database.tabCollections.put(to);
   });
 }
-export async function reorderCollection(id: string, before?: string) {
+export async function reorderCollection(
+  id: string,
+  before: string | undefined,
+  spaceId: string,
+) {
   if (id === before) return;
   await database.transaction('rw', database.tabCollections, async () => {
-    const all = await database.tabCollections.orderBy('order').toArray();
+    const all = await database.tabCollections
+      .orderBy('order')
+      .filter((c) => (c.spaceId || 'default') === spaceId)
+      .toArray();
     const item = all.find((c) => c.id === id);
-    if (!item || (before && !all.some((c) => c.id === before))) return;
+    if (!item || (before && !all.some((c) => c.id === before)))
+      throw new Error('集合位置已变更，请重试');
     const rest = all.filter((c) => c.id !== id);
     rest.splice(
-      before
-        ? rest.findIndex((c) => c.id === before)
-        : rest.findLastIndex((c) => c.spaceId === item.spaceId) + 1,
+      before ? rest.findIndex((c) => c.id === before) : rest.length,
       0,
       item,
     );
-    await database.tabCollections.bulkPut(
-      rest.map((c, order) => ({ ...c, order })),
-    );
+    let previousOrder = -Infinity;
+    for (const [index, group] of rest.entries()) {
+      const order = Math.max(all[index]!.order, previousOrder + 1);
+      previousOrder = order;
+      if (order !== group.order)
+        await database.tabCollections.update(group.id, { order });
+    }
   });
 }
 

@@ -11,6 +11,7 @@ const selectedWallpaper = useWallpaperSelection();
 const progress = ref<WallpaperProgress>();
 import { importWallpaper } from './wallpaper-cache';
 import { getBingOriginalUrl } from './wallpaper';
+import { readResponseBytes } from '../../shared/response-body';
 interface Wallpaper {
   id: number;
   title: string;
@@ -43,19 +44,25 @@ async function load() {
         ]),
       },
     );
-    if (!response.ok) throw new Error();
-    const data = await response.json();
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error();
+    }
+    const data = JSON.parse(new TextDecoder().decode(await readResponseBytes(response, 512 * 1024)));
     if (data.code !== 200 || !Array.isArray(data.data)) throw new Error();
     const known = new Set(entries.value.map((item) => item.id));
-    const incoming = (data.data as Wallpaper[]).filter(
-      (item) =>
-        !known.has(item.id) &&
-        /^https:\/\/(?:www\.)?bing\.com\//.test(item.url),
-    );
+    const incoming = (data.data as Wallpaper[]).filter(item => {
+      if (!item || !Number.isSafeInteger(item.id) || known.has(item.id) ||
+          typeof item.title !== 'string' || typeof item.datetime !== 'string' ||
+          typeof item.url !== 'string' || !/^https:\/\/(?:www\.)?bing\.com\//.test(item.url))
+        return false;
+      known.add(item.id);
+      return true;
+    });
     entries.value.push(...incoming);
     entries.value.sort((a, b) => b.datetime.localeCompare(a.datetime));
     more.value =
-      incoming.length > 0 && entries.value.length < Number(data.total);
+      data.data.length > 0 && page * 18 < Number(data.total);
     page++;
   } catch {
     if (!disposed) error.value = '壁纸加载失败，请重试';

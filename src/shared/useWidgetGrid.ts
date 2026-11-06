@@ -186,7 +186,10 @@ export function useWidgetGrid(
     clearHold();
   }
   function keyDown(event: KeyboardEvent) {
-    if (event.key === 'Escape') cancelDrag();
+    if (event.key === 'Escape' && (heldItem || dragging || resizeStart)) {
+      event.preventDefault();
+      cancelDrag();
+    }
   }
   onMounted(() => {
     if (!element.value || !container.value) return;

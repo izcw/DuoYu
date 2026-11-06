@@ -65,7 +65,7 @@ node scripts/auth-protocol.mjs
 node scripts/auth-integration.mjs
 ```
 
-`auth-integration.mjs` 仅用于本地开发：需要现有 `duoyu-postgres-dev` 容器及本地已登记项目，会更新 `duoyu_extensions_local` 的回调为被测试构建的实际地址。不要将此测试指向生产数据库。截图在忽略目录 `work/auth-entry.png`、`work/auth-account.png`。
+`auth-integration.mjs` 仅用于本地开发：需要现有 `duoyu-postgres-dev` 容器及本地已登记项目，仅检查 `duoyu_extensions_local` 已登记本构建的回调和来源，缺少任一登记时停止。不要将此测试指向生产数据库。截图在忽略目录 `work/auth-entry.png`、`work/auth-account.png`。
 
 ## DuoYu-ID 建议：按优先级处理
 

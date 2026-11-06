@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import type {WidgetSize} from "../../shared/storage/database";
+import type { WidgetSize } from '../../shared/storage/database';
 import WallpaperDownloadProgress from '../wallpaper/WallpaperDownloadProgress.vue';
 import {
   downloadWallpaper,
   type WallpaperProgress,
 } from '../wallpaper/download-wallpaper';
 import WallpaperSelectionMark from '../wallpaper/WallpaperSelectionMark.vue';
-import { ref, watch } from 'vue';
+import { ref, watch, onUnmounted } from 'vue';
 import { rpc, syncNow } from '../sync/client';
 import { planJsonImport, commitJsonImport } from '../sync/import-json';
 import { useWallpaperSelection } from '../wallpaper/useWallpaperSelection';
@@ -14,7 +14,9 @@ const selectedWallpaper = useWallpaperSelection();
 const progress = ref<WallpaperProgress>();
 import { importWallpaper } from '../wallpaper/wallpaper-cache';
 const props = defineProps<{ kind: 'templates' | 'widgets' | 'wallpapers' }>();
-const emit = defineEmits<{ add: [kind: 'calendar' | 'weather' | 'note', size?: WidgetSize] }>();
+const emit = defineEmits<{
+  add: [kind: 'calendar' | 'weather' | 'note', size?: WidgetSize];
+}>();
 const rows = ref<any[]>([]),
   busy = ref(false),
   applying = ref<string>(),
@@ -40,14 +42,25 @@ function wallpaperURLs(payload: any) {
   preview.hash = '';
   return { original, preview };
 }
+let loadGeneration = 0;
+onUnmounted(() => {
+  loadGeneration++;
+});
 async function load() {
+  const request = ++loadGeneration;
+  const kind = props.kind;
   busy.value = true;
+  rows.value = [];
+  chosen.value = undefined;
+  applying.value = undefined;
+  progress.value = undefined;
   error.value = '';
   message.value = '';
   try {
-    const items = (await rpc('/api/v1/catalog/' + props.kind)).items;
+    const items = (await rpc('/api/v1/catalog/' + kind)).items;
+    if (request !== loadGeneration) return;
     rows.value =
-      props.kind === 'wallpapers'
+      kind === 'wallpapers'
         ? items.map((row: any) => {
             const { original, preview } = wallpaperURLs(row.payload);
             return {
@@ -61,9 +74,10 @@ async function load() {
           })
         : items;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载失败';
+    if (request === loadGeneration)
+      error.value = e instanceof Error ? e.message : '加载失败';
   } finally {
-    busy.value = false;
+    if (request === loadGeneration) busy.value = false;
   }
 }
 watch(
@@ -76,18 +90,34 @@ watch(
 );
 async function apply(row: any) {
   if (busy.value) return;
+  const request = loadGeneration;
+  const kind = props.kind;
   busy.value = true;
   applying.value = String(row.id);
   progress.value = undefined;
   error.value = '';
   try {
-    if (props.kind === 'widgets') {
+    if (kind === 'widgets') {
       const kind = row.payload?.type;
       if (!['calendar', 'weather', 'note'].includes(kind))
         throw Error('当前扩展暂不支持这个组件类型');
-      const {minWidth=1,minHeight=1,maxWidth=9,maxHeight=8,width=3,height=2}=row.payload;
-      emit('add', kind,{minWidth,minHeight,maxWidth,maxHeight,width,height});
-    } else if (props.kind === 'templates') {
+      const {
+        minWidth = 1,
+        minHeight = 1,
+        maxWidth = 9,
+        maxHeight = 8,
+        width = 3,
+        height = 2,
+      } = row.payload;
+      emit('add', kind, {
+        minWidth,
+        minHeight,
+        maxWidth,
+        maxHeight,
+        width,
+        height,
+      });
+    } else if (kind === 'templates') {
       if (row.payload?.format === 'duoyu-template') {
         row.requestId ??= crypto.randomUUID();
         await rpc('/api/v1/templates/' + row.id + '/apply', 'POST', {
@@ -98,24 +128,29 @@ async function apply(row: any) {
         const plan = await planJsonImport(JSON.stringify(row.payload));
         await commitJsonImport(plan);
       }
-      message.value = '模板已添加为新页面';
+      if (request === loadGeneration) message.value = '模板已添加为新页面';
     } else {
       const { original: url } = wallpaperURLs(row.payload);
       const blob = await downloadWallpaper(
         url,
-        (value) => (progress.value = value),
+        (value) => {
+          if (request === loadGeneration) progress.value = value;
+        },
         { credentials: 'omit', redirect: 'error' },
       );
       await importWallpaper(blob, 'cloud:' + row.id);
-      message.value = '';
+      if (request === loadGeneration) message.value = '';
     }
-    chosen.value = undefined;
+    if (request === loadGeneration) chosen.value = undefined;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '操作失败';
+    if (request === loadGeneration)
+      error.value = e instanceof Error ? e.message : '操作失败';
   } finally {
-    busy.value = false;
-    applying.value = undefined;
-    progress.value = undefined;
+    if (request === loadGeneration) {
+      busy.value = false;
+      applying.value = undefined;
+      progress.value = undefined;
+    }
   }
 }
 </script>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { itemMaxColumns, itemMaxRows } from './grid-config';
+import { sizeLimits } from './grid-layout';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import type { LibraryItem } from '../../shared/storage/database';
 const props = defineProps<{
@@ -22,10 +22,9 @@ const current = computed(() => ({
   height: props.item.height || 1,
 }));
 const displayed = computed(() => preview.value || current.value);
-const rows = computed(() =>
-  Math.min(props.maxRows || 9, props.item.widgetSize?.maxHeight ?? itemMaxRows(props.item.kind)),
-);
-const columns = computed(() => props.item.widgetSize?.maxWidth ?? itemMaxColumns(props.item.kind));
+const limits = computed(() => sizeLimits(props.item.kind, props.item.widgetSize));
+const rows = computed(() => Math.min(props.maxRows || 9, limits.value.maxHeight));
+const columns = computed(() => limits.value.maxWidth);
 const menuWidth = computed(() =>
   Math.max(244, columns.value * 24 + (columns.value - 1) * 4 + 30),
 );

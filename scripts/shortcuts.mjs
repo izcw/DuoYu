@@ -8,7 +8,7 @@ const context = await chromium.launchPersistentContext(
   {
     channel: 'msedge',
     headless: true,
-    viewport: { width: 1440, height: 900 },
+    viewport: { width: 1440, height: 1800 },
     ignoreDefaultArgs: ['--disable-extensions'],
     args: [`--load-extension=${ext}`, `--disable-extensions-except=${ext}`],
   },
@@ -35,7 +35,7 @@ try {
   await expect(wheel).toHaveCount(0);
   console.log('PASS controls and cards excluded');
   await open();
-  await expect(page.locator('.wallpaper-wheel .radial-choice')).toHaveCount(9);
+  await expect(page.locator('.wallpaper-wheel .radial-choice')).toHaveCount(8);
   const angles = await page
     .locator('.wallpaper-wheel .radial-orbit')
     .evaluateAll((es) =>
@@ -87,7 +87,7 @@ try {
   await page.locator('.shortcut-dialog button[type=submit]').click();
   await expect(page.locator('.shortcut-dialog')).toHaveCount(0);
   await open();
-  await expect(page.locator('.wallpaper-wheel .radial-choice')).toHaveCount(10);
+  await expect(page.locator('.wallpaper-wheel .radial-choice')).toHaveCount(9);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(250);
   await page.mouse.move(700, 520);
@@ -152,7 +152,7 @@ try {
   console.log('PASS long hold release opens selected URL in new tab');
   await page.bringToFront();
   await page.waitForTimeout(250);
-  await open(8, 8);
+  await open(1432, 8);
   const boxes = await page
     .locator('.wallpaper-wheel .radial-choice')
     .evaluateAll((es) =>
@@ -163,7 +163,7 @@ try {
     );
   assert(
     boxes.every(
-      (b) => b.x >= 0 && b.y >= 0 && b.right <= 1440 && b.bottom <= 900,
+      (b) => b.x >= 0 && b.y >= 0 && b.right <= 1440 && b.bottom <= 1800,
     ),
   );
   await page.screenshot({ path: 'work/wallpaper-wheel.png' });

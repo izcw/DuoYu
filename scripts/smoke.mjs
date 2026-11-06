@@ -10,7 +10,11 @@ const manifest = JSON.parse(
 );
 assert.equal(manifest.manifest_version, 3);
 assert.equal(manifest.chrome_url_overrides.newtab, 'newtab.html');
-assert.deepEqual(manifest.host_permissions, ['https://api.bing.com/*']);
+assert.deepEqual(manifest.host_permissions, ['http://*/*', 'https://*/*']);
+assert.deepEqual(
+  [...manifest.permissions].sort(),
+  ['storage', 'tabs', 'tabGroups', 'favicon', 'identity'].sort(),
+);
 await mkdir('work', { recursive: true });
 const profile = await mkdtemp(path.join(root, 'work/smoke-profile-'));
 const context = await chromium.launchPersistentContext(profile, {
@@ -59,14 +63,15 @@ try {
       height: box.height,
       clock: getComputedStyle(document.querySelector('.clock-time')).fontSize,
       date: getComputedStyle(document.querySelector('.clock-date')).fontSize,
-      search: getComputedStyle(document.querySelector('input')).fontSize,
+      search: getComputedStyle(document.querySelector('#search-input'))
+        .fontSize,
       wallpaper: [image.naturalWidth, image.naturalHeight],
     };
   });
   assert.equal(metrics.width, 500);
   assert.equal(metrics.height, 52);
   assert.equal(metrics.clock, '70px');
-  assert.equal(metrics.date, '18px');
+  assert.equal(metrics.date, '16px');
   assert.equal(metrics.search, '16px');
   assert.equal(metrics.wallpaper[0], 3840);
   const time = await page.locator('.clock-time').innerText();
@@ -78,17 +83,17 @@ try {
   page.on('request', (request) => {
     if (request.url().startsWith('https://api.bing.com/')) suggestionRequests++;
   });
-  await page.locator('input').fill('vue');
+  await page.locator('#search-input').fill('vue');
   await page.waitForFunction(
     () => document.querySelectorAll('[role=option]').length === 10,
   );
   assert.equal(await page.locator('[role=option]').count(), 10);
   const requestsBeforeReplay = suggestionRequests;
-  await page.locator('input').fill('');
+  await page.locator('#search-input').fill('');
   assert.equal(await page.locator('[role=option]').count(), 0);
   // Cached input must render without a network round trip.
   const cacheStart = performance.now();
-  await page.locator('input').fill('vue');
+  await page.locator('#search-input').fill('vue');
   await page.locator('[role=option]').first().waitFor();
   const cacheLatencyMs = Math.round(performance.now() - cacheStart);
   assert.equal(suggestionRequests, requestsBeforeReplay);
@@ -99,12 +104,12 @@ try {
     .first()
     .locator('span')
     .innerText();
-  await page.locator('input').press('ArrowDown');
+  await page.locator('#search-input').press('ArrowDown');
   assert.equal(
     await page.locator('[role=option]').first().getAttribute('aria-selected'),
     'true',
   );
-  await page.locator('input').press('Enter');
+  await page.locator('#search-input').press('Enter');
   await waitForSearch();
   assert.match(new URL(searchResult.url()).hostname, /(^|\.)bing\.com$/);
   assert.equal(
@@ -123,7 +128,7 @@ try {
           json: [requested, ['vue 开发 chrome 插件', 'vue 新标签页开发']],
         });
   });
-  await page.locator('input').fill(longQuery);
+  await page.locator('#search-input').fill(longQuery);
   await page
     .locator('.suggestion-kind')
     .filter({ hasText: '相关' })
@@ -135,18 +140,18 @@ try {
   );
   assert.equal(await page.locator('[role=option]').count(), 3);
   await page.screenshot({ path: 'work/search-long-query.png' });
-  await page.locator('input').press('Enter');
+  await page.locator('#search-input').press('Enter');
   await waitForSearch();
   assert.equal(new URL(searchResult.url()).searchParams.get('q'), longQuery);
   await page.unroute('https://api.bing.com/**');
   await searchResult.close();
   searchResult = undefined;
   await page.goto(newtabUrl);
-  await page.locator('input').fill('vue');
+  await page.locator('#search-input').fill('vue');
   await page.locator('[role=option]').first().waitFor();
-  await page.locator('input').press('Escape');
+  await page.locator('#search-input').press('Escape');
   assert.equal(await page.locator('[role=option]').count(), 0);
-  await page.locator('input').fill('');
+  await page.locator('#search-input').fill('');
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(
     await page.evaluate(
@@ -161,7 +166,7 @@ try {
   assert.equal(await page.locator('.wallpaper-status').count(), 0);
   assert.equal(await page.locator('.clock-time').isVisible(), true);
   await page.route('https://api.bing.com/**', (route) => route.abort());
-  await page.locator('input').fill('多鱼 test');
+  await page.locator('#search-input').fill('多鱼 test');
   await page.locator('button[type=submit]').click();
   await waitForSearch();
   assert.match(new URL(searchResult.url()).hostname, /(^|\.)bing\.com$/);

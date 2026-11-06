@@ -3,6 +3,8 @@ import { normalizeSize } from './grid-layout';
 export { normalizeSize } from './grid-layout';
 import { database, type LibraryItem } from '../../shared/storage/database';
 import { webUrl } from '../workspace/collections';
+import { readMetadataHTML } from '../../shared/response-body';
+import { requireLibraryPage } from './pages';
 
 export type LibraryDraft = Pick<
   LibraryItem,
@@ -27,13 +29,13 @@ export async function saveLibraryItem(draft: LibraryDraft, id?: string) {
         signal: AbortSignal.timeout(4000),
       });
       if (response.ok) {
-        const html = (await response.text()).slice(0, 300000);
+        const html = (await readMetadataHTML(response)).slice(0, 300000);
         name =
           new DOMParser()
             .parseFromString(html, 'text/html')
             .title.trim()
             .slice(0, 80) || name;
-      }
+      } else await response.body?.cancel();
     } catch {
       /* Cross-origin pages may prohibit title lookup; keep the hostname. */
     }
@@ -45,15 +47,19 @@ export async function saveLibraryItem(draft: LibraryDraft, id?: string) {
   const icon = draft.icon.trim();
   if (icon && !webUrl(icon) && !icon.startsWith('duoyu-icon:'))
     throw new Error('图标地址须为 http:// 或 https:// 网址');
-  await database.transaction('rw', database.libraryItems, async () => {
+  await database.transaction('rw', database.libraryPages, database.libraryItems, async () => {
     const previous = id ? await database.libraryItems.get(id) : undefined;
     if (id && !previous) throw new Error('该收藏已被删除');
+    const pageId = draft.pageId || previous?.pageId || 'default';
+    if (previous && (previous.pageId || 'default') !== pageId)
+      throw new Error('该收藏已移至其他收藏页，请重新打开');
+    await requireLibraryPage(pageId);
     if (draft.parent) {
       const folder = await database.libraryItems.get(draft.parent);
       if (
         draft.kind === 'folder' ||
         folder?.kind !== 'folder' ||
-        (folder.pageId || 'default') !== (draft.pageId || 'default')
+        (folder.pageId || 'default') !== pageId
       )
         throw new Error('请选择有效的文件夹');
     }
@@ -68,7 +74,7 @@ export async function saveLibraryItem(draft: LibraryDraft, id?: string) {
     await database.libraryItems.put({
       ...previous,
       ...draft,
-      pageId: draft.pageId || previous?.pageId || 'default',
+      pageId,
       id: id || crypto.randomUUID(),
       name,
       url: url || '',

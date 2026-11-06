@@ -31,6 +31,8 @@ const DesktopTools = defineAsyncComponent(() => import('../desktop/DesktopTools.
 import LibraryGrid from './LibraryGrid.vue';
 import { LIBRARY_GRID_ROWS } from './grid-config';
 import { mergeLibraryLinks } from './library';
+import { requireLibraryPage } from './pages';
+import { normalizeSize } from './grid-layout';
 defineEmits<{ close: [] }>();
 const props = withDefaults(
   defineProps<{
@@ -165,14 +167,14 @@ async function addWidget(
   widget: 'calendar' | 'weather' | 'note',
   size?: WidgetSize,
 ) {
-  const width = size?.width ?? 3,
-    height = size?.height ?? (widget === 'weather' ? 1 : 2);
-  await database.libraryItems.add({
-    ...newPosition(width, height),
+  const {width,height} = normalizeSize(size?.width ?? 3, size?.height ?? (widget === 'weather' ? 1 : 2), 'widget', size);
+  const pageId = props.pageId;
+  const item = {
+    ...newPosition(width,height),
     id: crypto.randomUUID(),
-    kind: 'widget',
+    kind: 'widget' as const,
     widget,
-    pageId: props.pageId,
+    pageId,
     name:
       widget === 'calendar' ? '日历' : widget === 'weather' ? '天气' : '便签',
     parent: '',
@@ -183,6 +185,10 @@ async function addWidget(
     ...(size ? { widgetSize: size } : {}),
     order: Math.max(-1, ...items.value.map((i) => i.order)) + 1,
     updatedAt: Date.now(),
+  };
+  await database.transaction('rw', database.libraryPages, database.libraryItems, async () => {
+    await requireLibraryPage(pageId);
+    await database.libraryItems.add(item);
   });
 }
 const items = ref<LibraryItem[]>([]);

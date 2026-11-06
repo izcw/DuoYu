@@ -279,6 +279,7 @@ export function useGridSelection(
   }
   function key(event: KeyboardEvent) {
     if (event.key === 'Escape') {
+      if (gesture || selected.value.size) event.preventDefault();
       cancel();
       clear();
     } else if (

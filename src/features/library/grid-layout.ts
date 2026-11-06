@@ -4,6 +4,26 @@ import {
   itemMaxColumns,
   itemMaxRows,
 } from './grid-config';
+export function sizeLimits(
+  kind: LibraryItem['kind'],
+  bounds?: LibraryItem['widgetSize'],
+) {
+  function limit(value: number | undefined, fallback: number, max: number) {
+    return Number.isFinite(value)
+      ? Math.min(max, Math.max(1, Math.round(value!)))
+      : fallback;
+  }
+  const cols = itemMaxColumns(kind),
+    rows = itemMaxRows(kind);
+  const maxWidth = limit(bounds?.maxWidth, cols, cols);
+  const maxHeight = limit(bounds?.maxHeight, rows, rows);
+  return {
+    maxWidth,
+    maxHeight,
+    minWidth: limit(bounds?.minWidth, 1, maxWidth),
+    minHeight: limit(bounds?.minHeight, 1, maxHeight),
+  };
+}
 export function normalizeSize(
   width: number,
   height: number,
@@ -24,7 +44,13 @@ export function normalizeSize(
         Math.round(Number.isFinite(height) ? height : 1),
       ),
     );
-  if (bounds) return {width:Math.min(bounds.maxWidth, Math.max(bounds.minWidth,w)),height:Math.min(bounds.maxHeight,Math.max(bounds.minHeight,h))};
+  if (bounds) {
+    const limits = sizeLimits(kind, bounds);
+    return {
+      width: Math.min(limits.maxWidth, Math.max(limits.minWidth, w)),
+      height: Math.min(limits.maxHeight, Math.max(limits.minHeight, h)),
+    };
+  }
   if (kind !== 'link' && w * h < 3) {
     if (h > w) h = 3;
     else w = 3;
@@ -51,7 +77,8 @@ export function layoutLibraryItems(
     const { width: w, height: h } = normalizeSize(
       item.width || (item.kind === 'link' ? 1 : 3),
       Math.min(item.height || 1, rows),
-      item.kind,item.widgetSize,
+      item.kind,
+      item.widgetSize,
     );
     const fits = (x: number, y: number) =>
       x >= 0 &&

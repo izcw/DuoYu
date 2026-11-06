@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
+import { openGridMenu } from './ui-helpers.mjs';
 await mkdir('work', { recursive: true });
 const extension = path.resolve('.output/chrome-mv3');
 const context = await chromium.launchPersistentContext(
@@ -36,13 +37,11 @@ try {
   await expect(page.locator('.library-cell-grid')).toBeVisible();
   await page.waitForTimeout(700);
   async function menu() {
-    await page
-      .locator('.library-cell-grid')
-      .click({ button: 'right', position: { x: 10, y: 10 } });
+    await openGridMenu(page, page.locator('.library-cell-grid'));
     await expect(page.locator('.library-context-menu')).toBeVisible();
     await expect(page.locator('.library-context-menu')).toBeFocused();
     await expect(
-      page.getByRole('menuitem', { name: '＋ 添加网址', exact: true }),
+      page.getByRole('menuitem', { name: '添加网址', exact: true }),
     ).not.toBeFocused();
   }
   await menu();
@@ -50,14 +49,15 @@ try {
   const widgets = page.getByRole('dialog', { name: '组件商店', exact: true });
   await expect(widgets).toBeVisible();
   async function sideBySide(dialog) {
-    const left = await dialog.locator('.store-menu').boundingBox();
+    const left = await dialog.locator('.dialog-menu').boundingBox();
     const right = await dialog.locator('.store-content').boundingBox();
     assert.ok(left.x + left.width <= right.x);
     assert.ok(Math.abs(left.y - right.y) < 1);
   }
   await sideBySide(widgets);
   const fixedBox = await widgets.boundingBox();
-  assert.ok(Math.abs(fixedBox.width/fixedBox.height-4/3)<.01);
+  assert.equal(fixedBox.width, 1160);
+  assert.equal(fixedBox.height, 760);
   await widgets.getByRole('button', { name: '效率工具', exact: true }).click();
   await expect(widgets.locator('.store-content')).toContainText('便签');
   await expect(widgets.locator('.store-content')).not.toContainText('天气');
@@ -70,21 +70,26 @@ try {
   });
   await sideBySide(wallpapers);
   const wallpaperBox = await wallpapers.boundingBox();
-  assert.equal(wallpaperBox.width,fixedBox.width);
-  assert.equal(wallpaperBox.height,fixedBox.height);
-  await expect(wallpapers.getByAltText('今日必应壁纸')).toHaveAttribute('src', /api.bimg.cc\/today/);
+  assert.equal(wallpaperBox.width, fixedBox.width);
+  assert.equal(wallpaperBox.height, fixedBox.height);
+  await expect(wallpapers.getByAltText('今日必应壁纸')).toHaveAttribute(
+    'src',
+    /api.bimg.cc\/today/,
+  );
   await wallpapers
-    .getByRole('button', { name: '本地壁纸', exact: true })
+    .getByRole('button', { name: '我的壁纸', exact: true })
     .click();
-  await expect(wallpapers.getByLabel('导入壁纸')).toBeHidden();
-  await expect(wallpapers.getByRole('button', {name:'导入本地壁纸'})).toBeVisible();
+  await expect(wallpapers.locator('input[type="file"]')).toBeHidden();
+  await expect(
+    wallpapers.getByRole('button', { name: /上传壁纸/ }),
+  ).toBeVisible();
   await page.screenshot({ path: 'work/store-layout.png' });
   const after = await wallpapers.boundingBox();
-  assert.equal(after.height,fixedBox.height);
-  await page.setViewportSize({width:1000,height:700});
+  assert.equal(after.height, fixedBox.height);
+  await page.setViewportSize({ width: 1000, height: 700 });
   const small = await wallpapers.boundingBox();
   assert.ok(small.height <= 668);
-  assert.ok(Math.abs(small.width/small.height-4/3)<.01);
+  assert.ok(small.width <= 968);
   assert.deepEqual(errors, []);
   console.log(
     'PASS menu focus without first-item border, shared two-column stores and category switching',

@@ -58,7 +58,10 @@ try {
           JSON.stringify({ size, state, entry }),
         );
       if (state === 1) {
-        await page.getByRole('button', { name: '首页', exact: true }).click();
+        await page
+          .getByRole('navigation', { name: '快捷 Dock', exact: true })
+          .getByRole('button', { name: '首页', exact: true })
+          .click();
         await page.waitForTimeout(700);
       }
     }
@@ -66,6 +69,7 @@ try {
   console.log(
     'PASS browser-centered clock, search and grid on home/library at three viewport sizes',
   );
+  assert.deepEqual(errors, []);
 } finally {
   await context.close();
 }

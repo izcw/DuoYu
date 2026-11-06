@@ -234,7 +234,10 @@ watch(
   },
   { immediate: true },
 );
+let uploadRequest = 0;
+onUnmounted(() => { uploadRequest++; });
 function removeUpload() {
+  uploadRequest++;
   upload.value = '';
   error.value = '';
   if (fileInput.value) fileInput.value.value = '';
@@ -243,6 +246,7 @@ function removeUpload() {
 async function choose(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0];
   if (!file) return;
+  const request = ++uploadRequest;
   error.value = '';
   if (
     !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(
@@ -253,8 +257,10 @@ async function choose(event: Event) {
     error.value = '请选择 5MB 以内的 PNG、JPEG、WebP 或 GIF 图片';
     return;
   }
+  let bitmap: ImageBitmap | undefined;
   try {
-    const bitmap = await createImageBitmap(file);
+    bitmap = await createImageBitmap(file);
+    if (request !== uploadRequest) return;
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 128;
     const ctx = canvas.getContext('2d')!;
@@ -266,10 +272,11 @@ async function choose(event: Event) {
       bitmap.width * scale,
       bitmap.height * scale,
     );
-    bitmap.close();
     upload.value = canvas.toDataURL('image/png');
   } catch {
-    error.value = '图片无法读取，请重新选择';
+    if (request === uploadRequest) error.value = '图片无法读取，请重新选择';
+  } finally {
+    bitmap?.close();
   }
 }
 </script>

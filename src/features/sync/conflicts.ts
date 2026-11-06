@@ -146,10 +146,12 @@ export async function retryConflict(
   wholeVersion = false,
   replacementChanges?: Change[],
 ) {
+  const owner = assertConflictAccount();
   await syncNow();
   await navigator.locks.request(
-    'duoyu:sync:' + activeAccountKey(),
+    'duoyu:sync:' + owner,
     async () => {
+      assertConflictAccount(owner);
       const record = await database.syncConflicts.get(id);
       if (!record || record.resolvedAt)
         throw Error('这项更改已处理，请刷新列表');
@@ -339,6 +341,7 @@ export async function retryConflict(
       if (!changes.length) {
         if (record.server)
           await rpc('/api/v1/sync/conflicts/' + id + '/resolve', 'POST', {});
+        assertConflictAccount(owner);
         await database.syncConflicts.update(id, { resolvedAt: Date.now() });
         return;
       }
@@ -347,6 +350,7 @@ export async function retryConflict(
       const operationId = crypto.randomUUID();
       let device = String((await database.syncMeta.get('device'))?.value ?? '');
       if (!device) {
+        assertConflictAccount(owner);
         device = crypto.randomUUID();
         await database.syncMeta.put({ id: 'device', value: device });
       }
@@ -366,6 +370,7 @@ export async function retryConflict(
       // Let normal preparation handle binary assets. Saved tabs are already
       // normalized so a prepared changes list is supplied after asset encoding.
       const { encodeAssets } = await import('./assets');
+      assertConflictAccount(owner);
       const encoded = await encodeAssets(changes, epoch);
       operation.prepared = {
         id: operationId,
@@ -375,11 +380,13 @@ export async function retryConflict(
         resolutionOf: id,
       };
       await remoteTransaction(async () => {
+        assertConflictAccount(owner);
         await database.syncOutbox.put(operation);
         await database.syncConflicts.update(id, { state: 'resolving' });
       });
     },
   );
+  assertConflictAccount(owner);
   await syncNow();
 }
 export const fieldLabels: Record<string, string> = {

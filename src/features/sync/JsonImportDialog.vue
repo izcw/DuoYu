@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, shallowRef } from 'vue';
+import { ref, watch, shallowRef, computed, onUnmounted } from 'vue';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
 import {
   planJsonImport,
@@ -7,34 +7,49 @@ import {
   type ImportPlan,
 } from './import-json';
 import { syncNow } from './client';
-const open = defineModel<boolean>({ default: false });
+import { activeAccountKey } from '../../shared/storage/account';
+const open = defineModel<boolean>('open', { default: false });
 const input = ref<HTMLInputElement>();
 const file = ref<File>();
 const includeSettings = ref(false),
-  busy = ref(false),
+  previewing = ref(false),
+  saving = ref(false),
   error = ref(''),
   done = ref(false);
 const plan = shallowRef<ImportPlan>();
+const busy = computed(() => previewing.value || saving.value);
 let request = 0;
+let disposed = false;
+const currentRequest = (current: number) =>
+  !disposed && open.value && current === request;
+onUnmounted(() => {
+  disposed = true;
+  request++;
+});
 async function preview() {
   const current = ++request;
   plan.value = undefined;
   error.value = '';
   done.value = false;
-  if (!file.value) return;
-  busy.value = true;
+  previewing.value = false;
+  const selected = file.value,
+    settings = includeSettings.value;
+  if (!selected || saving.value || !open.value || disposed) return;
+  previewing.value = true;
   try {
-    if (file.value.size > 50 * 1024 * 1024) throw Error('JSON文件不能超过50MB');
+    if (selected.size > 50 * 1024 * 1024) throw Error('JSON文件不能超过50MB');
+    const account = activeAccountKey();
     const value = await planJsonImport(
-      await file.value.text(),
-      includeSettings.value,
+      await selected.text(),
+      settings,
+      account,
     );
-    if (current === request) plan.value = value;
+    if (currentRequest(current)) plan.value = value;
   } catch (e) {
-    if (current === request)
+    if (currentRequest(current))
       error.value = e instanceof Error ? e.message : '文件读取失败';
   } finally {
-    if (current === request) busy.value = false;
+    if (currentRequest(current)) previewing.value = false;
   }
 }
 function choose(event: Event) {
@@ -43,6 +58,10 @@ function choose(event: Event) {
 }
 watch(includeSettings, preview);
 watch(open, (value) => {
+  request++;
+  previewing.value = false;
+  plan.value = undefined;
+  if (input.value) input.value.value = '';
   if (value) {
     file.value = undefined;
     plan.value = undefined;
@@ -52,18 +71,23 @@ watch(open, (value) => {
   }
 });
 async function submit() {
-  if (!plan.value || busy.value) return;
-  busy.value = true;
+  if (!plan.value || busy.value || !open.value || disposed) return;
+  const current = request,
+    selected = plan.value;
+  saving.value = true;
   error.value = '';
   try {
-    await commitJsonImport(plan.value);
-    done.value = true;
-    plan.value = undefined;
+    await commitJsonImport(selected);
+    if (currentRequest(current)) {
+      done.value = true;
+      plan.value = undefined;
+    }
     await syncNow();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '导入失败';
+    if (currentRequest(current))
+      error.value = e instanceof Error ? e.message : '导入失败';
   } finally {
-    busy.value = false;
+    if (!disposed) saving.value = false;
   }
 }
 </script>

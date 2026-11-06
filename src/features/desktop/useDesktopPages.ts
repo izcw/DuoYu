@@ -2,13 +2,16 @@ import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 
 export function useDesktopPages(
   blocked: () => boolean,
-  step?: (direction: number) => void,
+  step: (direction: number) => void,
+  openWorkspace: () => void,
 ) {
   const page = ref(0);
   const root = ref<HTMLElement>();
   let total = 0;
   let lastWheel = 0;
   let lockedUntil = 0;
+  const busySurface =
+    '.radial-wheel[aria-hidden="false"], .ui-draggable-dragging, .grid-selection-dragging, .grid-selection-box, .widget-link-drag-preview, .library-editor, .library-context-menu, .library-page-row.is-dragging';
   async function go(value: number) {
     if (blocked()) return;
     total = 0;
@@ -25,9 +28,7 @@ export function useDesktopPages(
       event.ctrlKey ||
       event.buttons ||
       Math.abs(event.deltaX) > Math.abs(event.deltaY) ||
-      document.querySelector(
-        '.radial-wheel[aria-hidden="false"], .ui-draggable-dragging, .grid-selection-dragging, .grid-selection-box, .widget-link-drag-preview, .library-editor, .library-context-menu, .library-page-row.is-dragging',
-      ) ||
+      document.querySelector(busySurface) ||
       target.closest(
         'input, textarea, select, [role="listbox"], .search-suggestions, [role="dialog"]',
       )
@@ -58,15 +59,60 @@ export function useDesktopPages(
       const direction = Math.sign(total);
       total = 0;
       lockedUntil = now + 650;
-      if (step) step(direction);
-      else void go(direction > 0 ? 1 : 0);
+      step(direction);
     }
+  }
+  function keydown(event: KeyboardEvent) {
+    if (
+      blocked() ||
+      event.defaultPrevented ||
+      event.isComposing ||
+      event.keyCode === 229 ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey ||
+      event.repeat ||
+      !(event.target instanceof Element) ||
+      event.target.closest(
+        '.search-form, input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="listbox"]',
+      ) ||
+      document.querySelector(
+        busySurface +
+          ', dialog[open], [role="dialog"]:not([inert],[aria-hidden="true"]), [role="menu"]:not([inert],[aria-hidden="true"])',
+      )
+    )
+      return;
+    switch (event.key.toLowerCase()) {
+      case 'w':
+      case 'arrowup':
+        step(-1);
+        break;
+      case 's':
+      case 'arrowdown':
+        step(1);
+        break;
+      case 'a':
+      case 'arrowleft':
+      case 'escape':
+        if (page.value !== 0) void go(0);
+        break;
+      case 'd':
+      case 'arrowright':
+        openWorkspace();
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
   }
   onMounted(() => {
     root.value?.addEventListener('wheel', wheel, { passive: false });
+    window.addEventListener('keydown', keydown);
   });
   onUnmounted(() => {
     root.value?.removeEventListener('wheel', wheel);
+    window.removeEventListener('keydown', keydown);
   });
   return { page, root, go };
 }

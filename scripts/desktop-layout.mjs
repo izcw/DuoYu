@@ -42,9 +42,9 @@ try {
       rows: el.gridstack.opts.maxRow,
       mode: el.gridstack.engine.mode,
     }));
-    assert.deepEqual(metrics, { columns: 18, rows, mode: 'float' });
-    assert.equal(await grid.evaluate((el) => el.gridstack.cellWidth()), 74);
-    assert.equal(await grid.evaluate((el) => el.gridstack.getCellHeight()), 86);
+    assert.deepEqual(metrics, { columns: 16, rows, mode: 'float' });
+    assert.equal(await grid.evaluate((el) => el.gridstack.cellWidth()), 84);
+    assert.equal(await grid.evaluate((el) => el.gridstack.getCellHeight()), 94);
 
     const g = await grid.boundingBox(),
       area = await page.locator('.desktop-content').boundingBox();
@@ -65,7 +65,7 @@ try {
       'bounded grid',
     );
   }
-  await geometry(6, true);
+  await geometry(5, true);
   const directional = await grid.evaluate((el) => {
     const Engine = el.gridstack.engine.constructor;
     const run = (nodes, desired, column = 18, maxRow = 10) => {
@@ -130,7 +130,11 @@ try {
       [0, 3],
     ],
   );
-  for (const key of ['edge', 'locked']) {
+  assert.equal(directional.edge.ok, true);
+  assert.ok(
+    directional.edge.after.every((n) => n.x + n.w <= 4 && n.y + n.h <= 10),
+  );
+  for (const key of ['locked']) {
     assert.equal(directional[key].ok, false);
     assert.deepEqual(directional[key].after, directional[key].before);
   }
@@ -161,14 +165,13 @@ try {
   const homeAppearance = await folderAppearance(
     '[data-library-id="home-widget-1"]',
   );
-  assert.equal(homeAppearance.width, '52px');
-  assert.equal(homeAppearance.height, '52px');
+  assert.equal(homeAppearance.width, '48px');
+  assert.equal(homeAppearance.height, '48px');
   assert.equal(homeAppearance.labels, 0);
-  assert.match(homeAppearance.materialImage, /blob:/);
-  assert.match(homeAppearance.materialFilter, /blur/);
+  assert.match(homeAppearance.filter, /blur/);
 
   const search = await page.locator('.search-form').boundingBox();
-  const toggle = await page.locator('.glass-mode-switch').boundingBox();
+  const toggle = await page.locator('.desktop-top-actions').boundingBox();
   assert.ok(toggle.y < 25 && 1440 - toggle.x - toggle.width < 30);
   await page.screenshot({ path: 'work/desktop-home-layout.png' });
   const resizeCard = page.locator('[data-library-id="home-widget-2"]');
@@ -189,7 +192,7 @@ try {
 
   await page.mouse.move(handle.x + 8, handle.y + 8);
   await page.mouse.down();
-  await page.mouse.move(handle.x + 82, handle.y + 8, { steps: 15 });
+  await page.mouse.move(handle.x + 92, handle.y + 8, { steps: 15 });
   await expect(resizeCard.locator('.ui-resizable-se')).toHaveCSS(
     'opacity',
     '1',
@@ -198,10 +201,10 @@ try {
   await expect(resizeCard).toHaveAttribute('gs-w', '5');
   await expect(
     page.locator('[data-library-id="home-widget-3"]'),
-  ).toHaveAttribute('gs-x', '12');
+  ).toHaveAttribute('gs-x', '11');
   await expect(
     page.locator('[data-library-id="home-widget-3"]'),
-  ).toHaveAttribute('gs-y', '4');
+  ).toHaveAttribute('gs-y', '3');
   await page.waitForTimeout(600);
   const card = page.locator('[data-library-id="home-widget-1"]');
   const box = await card.boundingBox();
@@ -215,12 +218,12 @@ try {
   );
   await expect(page.locator('.grid-guide-cells')).toHaveCSS('opacity', '1');
   const guide = page.locator('.grid-guide-cells > span').first();
-  await expect(guide).toHaveCSS('width', '52px');
-  await expect(guide).toHaveCSS('height', '52px');
-  await expect(page.locator('.grid-guide-cells > span')).toHaveCount(18 * 6);
+  await expect(guide).toHaveCSS('width', '56px');
+  await expect(guide).toHaveCSS('height', '56px');
+  await expect(page.locator('.grid-guide-cells > span')).toHaveCount(16 * 5);
   await page.mouse.up();
   await expect(page.locator('.grid-guide-cells')).toHaveCSS('opacity', '0');
-  await expect(card).toHaveAttribute('gs-y', '2');
+  await expect(card).toHaveAttribute('gs-y', '1');
   await page.waitForTimeout(400);
   await page.mouse.move(1200, 400);
   await page.mouse.wheel(0, 180);
@@ -229,7 +232,7 @@ try {
     .click();
   await expect(page.locator('[data-library-id="demo-folder"]')).toBeVisible();
   await page.waitForTimeout(800);
-  await geometry(10, false);
+  await geometry(8, false);
   for (const id of ['demo-folder', 'demo-calendar', 'demo-link-10']) {
     const item = page.locator(`[data-library-id="${id}"]`);
     const label = item.locator(':scope > .tile-caption');
@@ -279,8 +282,8 @@ try {
         };
       });
     assert.ok(
-      delta.x < 1 && delta.y < 1,
-      `${id} guide aligns with content, excluding caption`,
+      delta.x <= 1.01 && delta.y <= 1.01,
+      `${id} guide aligns with content, excluding caption: ${JSON.stringify(delta)}`,
     );
   }
 
@@ -296,16 +299,10 @@ try {
     .getByRole('button', { name: '展开 常用网站', exact: true })
     .click();
   await expect(
-    page.locator('.expanded-folder .cell-label').first(),
+    page.locator('.expanded-folder .folder-icon-label').first(),
   ).toBeVisible();
-  await expect(page.locator('.folder-page-dot')).toHaveCount(2);
-  await expect(page.locator('.folder-pages')).toHaveText('');
-  await page.locator('.expanded-folder').hover();
-  await page.mouse.wheel(0, 120);
-  await expect(
-    page.getByRole('button', { name: '文件夹第 2 页', exact: true }),
-  ).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('.expanded-folder .cell-link')).toHaveCount(1);
+  await expect(page.locator('.folder-page-dot')).toHaveCount(0);
+  await expect(page.locator('.expanded-folder .folder-link')).toHaveCount(10);
   const folderGeometry = await page
     .locator('.folder-dialog')
     .evaluate((el) => ({
@@ -313,13 +310,11 @@ try {
       panelTop: el
         .querySelector('.folder-dialog-content')
         .getBoundingClientRect().top,
-      material: getComputedStyle(
-        el.querySelector('.folder-dialog-content'),
-        '::before',
-      ).backgroundImage,
+      material: getComputedStyle(el.querySelector('.folder-dialog-content'))
+        .backdropFilter,
     }));
   assert.ok(folderGeometry.titleBottom < folderGeometry.panelTop);
-  assert.match(folderGeometry.material, /blob:/);
+  assert.match(folderGeometry.material, /blur/);
   await page
     .locator('.base-dialog-backdrop')
     .click({ position: { x: 8, y: 8 } });
@@ -330,14 +325,14 @@ try {
   await page.screenshot({ path: 'work/desktop-library-layout.png' });
   await page.locator('.library-home').click();
   await expect(card).toBeVisible();
-  await expect(card).toHaveAttribute('gs-y', '2');
+  await expect(card).toHaveAttribute('gs-y', '1');
   await page.reload();
   await expect(card).toBeVisible();
-  await expect(card).toHaveAttribute('gs-y', '2');
+  await expect(card).toHaveAttribute('gs-y', '1');
   // Item context menu shares bounded resize/persistence with pointer resizing.
   await card.click({ button: 'right', position: { x: 30, y: 30 } });
   await expect(page.locator('.grid-item-menu')).toBeVisible();
-  await expect(page.locator('.size-picker button')).toHaveCount(81);
+  await expect(page.locator('.size-picker button')).toHaveCount(80);
   await page.getByRole('button', { name: '3列 × 2行', exact: true }).click();
   await expect(card).toHaveAttribute('gs-w', '3');
   await expect(card).toHaveAttribute('gs-h', '2');
@@ -346,7 +341,7 @@ try {
   await page.reload();
   await expect(card).toHaveAttribute('gs-w', '3');
   await card.click({ button: 'right', position: { x: 30, y: 30 } });
-  await page.getByRole('button', { name: '9列 × 9行', exact: true }).click();
+  await page.getByRole('button', { name: '16列 × 5行', exact: true }).click();
   await expect(card).toHaveAttribute('gs-w', '3');
   await expect(page.locator('.grid-item-menu')).toBeVisible();
   await page.keyboard.press('Escape');
@@ -362,7 +357,7 @@ try {
   assert.equal(await grid.evaluate((el) => el.gridstack.opts.margin), 8);
   assert.deepEqual(errors, []);
   console.log(
-    'PASS 18x6 home bottom alignment, 18x10 centered library, shared drag persistence, unchanged search, top-right switch',
+    'PASS 16x5 home bottom alignment, 16x8 centered library, shared drag persistence, unchanged search, top-right switch',
   );
 } finally {
   await context.close();

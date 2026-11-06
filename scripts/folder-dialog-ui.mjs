@@ -17,18 +17,22 @@ c.setDefaultTimeout(12000);
 try {
   const p = await c.newPage();
   await p.goto('chrome://newtab');
-  const icon = p.locator('.preview-icons button:has(img)').first();
-  await icon.waitFor();
-  await icon.scrollIntoViewIfNeeded();
+  const icon = p.locator('[data-library-id="home-widget-1"] .preview-icons button:has(img)').first();
+  await icon.hover();
   const geometry = el => {
     const box = el.getBoundingClientRect(), img = el.querySelector('img').getBoundingClientRect();
     return [box.width, box.height, img.width, img.height, img.x-box.x, img.y-box.y];
   };
-  const before = await icon.evaluate(geometry);
-  const rect = await icon.boundingBox();
-  const x = rect.x + rect.width/2, y = rect.y + rect.height/2;
-  await p.mouse.move(x,y);
+  // Start from the target hit by the real mouse, not a viewport coordinate
+  // sampled before the startup grid and its hover styles settled.
+  await icon.evaluate(el => el.addEventListener('mousedown', event => {
+    globalThis.__folderDragStart = { x:event.clientX, y:event.clientY };
+  }, {once:true}));
   await p.mouse.down();
+  const start = await p.evaluate(()=>globalThis.__folderDragStart);
+  expect(start, 'Mouse press must reach the seeded folder icon').toBeTruthy();
+  const {x,y}=start;
+  const before = await icon.evaluate(geometry);
   await p.mouse.move(x+8,y+2,{steps:3});
   const ghost = p.locator('.drag-landing-preview');
   await ghost.waitFor();

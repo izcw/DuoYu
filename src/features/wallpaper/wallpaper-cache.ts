@@ -320,32 +320,33 @@ export async function removeUploadedWallpaper() {
     });
     return;
   }
-  const current = await database.wallpapers.get('daily');
-  const selection =
-    current?.selection ||
-    (await database.preferences.get('wallpaperSelection'))?.value;
-  if (selection !== 'upload') {
-    await database.preferences.delete('savedWallpaper:upload');
-    return;
-  }
   await navigator.locks.request('duoyu:daily-wallpaper', async () => {
-    await database.transaction(
+    const changed = await database.transaction(
       'rw',
       database.wallpapers,
       database.preferences,
       async () => {
         await database.preferences.delete('savedWallpaper:upload');
-        await saveDesktopChoice('default', 'daily');
         const current = await database.wallpapers.get('daily');
-        if (current?.sourceUrl.startsWith('local:'))
+        const desktop = (await database.preferences.get('wallpaperDesktop:default'))?.value as
+          { selection?: string } | undefined;
+        const selection = desktop?.selection && desktop.selection !== 'legacy'
+          ? desktop.selection
+          : (await database.preferences.get('wallpaperSelection'))?.value ?? current?.selection;
+        if (current?.sourceUrl.startsWith('local:') &&
+            (current.selection === 'upload' || (!current.selection && selection === 'upload')))
           await database.wallpapers.delete('daily');
+        if (selection !== 'upload') return false;
+        await saveDesktopChoice('default', 'daily');
         await database.preferences.put({ id: 'wallpaperMode', value: null });
         await database.preferences.put({
           id: 'wallpaperSelection',
           value: 'daily',
         });
+        return true;
       },
     );
+    if (!changed) return;
     accountStorage.removeItem('duoyu:wallpaper-preview');
     rememberWallpaperChoice({ selection: 'daily' });
     accountStorage.removeItem('duoyu-wallpaper-mode');

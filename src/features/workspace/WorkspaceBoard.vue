@@ -22,7 +22,7 @@ import {
 import { useWorkspace, type BrowserTab } from './useWorkspace';
 import { createDragLanding } from '../../shared/drag-landing';
 import ReorderTransition from '../../shared/components/base/ReorderTransition.vue';
-import WorkspaceCardMain from "./WorkspaceCardMain.vue";
+import WorkspaceCardMain from './WorkspaceCardMain.vue';
 import WorkspaceFavicon from './WorkspaceFavicon.vue';
 import MenuEditorDialog from '../../shared/components/base/MenuEditorDialog.vue';
 import DesktopMenu from '../../shared/components/base/DesktopMenu.vue';
@@ -209,6 +209,26 @@ function switchSpace(id: string) {
   deletingSpace.value = false;
   closeSpaceMenu();
 }
+function stepSpace(direction: number) {
+  if (
+    busy.value ||
+    loading.value ||
+    sortingSpaces.value ||
+    drag.value ||
+    landing.committing ||
+    menu.value ||
+    spaceMenu.value
+  )
+    return;
+  const ids = ['marked', ...spaces.value.map((space) => space.id)];
+  const current = ids.indexOf(activeSpace.value);
+  switchSpace(ids[(current + direction + ids.length) % ids.length]!);
+}
+function focusSearch() {
+  searchInput.value?.focus();
+  searchInput.value?.select();
+}
+defineExpose({ stepSpace, focusSearch });
 async function reorderSpaces(ids: string[]) {
   sortingSpaces.value = true;
   try {
@@ -220,8 +240,7 @@ async function reorderSpaces(ids: string[]) {
 function workspaceKey(event: KeyboardEvent) {
   if (event.key.toLowerCase() === 'f' && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();
-    searchInput.value?.focus();
-    searchInput.value?.select();
+    focusSearch();
   } else if (
     event.key === 'Escape' &&
     (menu.value || spaceMenu.value || query.value)
@@ -323,7 +342,7 @@ function toggleAllCollections() {
 type Drag =
   | { kind: 'tab'; id: number }
   | { kind: 'saved'; group: string; id: string }
-  | { kind: 'collection'; id: string };
+  | { kind: 'collection'; id: string; spaceId: string };
 const landing = createDragLanding();
 onUnmounted(() => {
   clearTimeout(dragVisualTimer);
@@ -537,6 +556,18 @@ function overOpenTab(event: DragEvent, tab: BrowserTab) {
     Math.abs(slot.center - y) < Math.abs(best.center - y) ? slot : best,
   ).id;
 }
+// FLIP animation can expose the group between rows at the pointer's drop
+// position. Keep accepting the previously selected slot in that same group.
+function openTabGap(event: DragEvent, tabs: BrowserTab[], dropping = false) {
+  if (drag.value?.kind !== 'tab' || openTabSlot.value === undefined) return;
+  const target = tabs.find((tab) => tab.id === openTabSlot.value);
+  if (!target) return;
+  overOpenTab(event, target);
+  if (dropping) {
+    event.stopPropagation();
+    dropOnTab(target);
+  }
+}
 function startDrag(event: DragEvent, value: Drag) {
   if (
     landing.committing ||
@@ -690,7 +721,7 @@ function drop(group: string, before?: string, event?: DragEvent) {
         slot?.group ?? group,
         slot ? slot.before : before,
       );
-    else if (slot) await reorderCollection(value.id, slot.before);
+    else if (slot) await reorderCollection(value.id, slot.before, value.spaceId);
   });
 }
 function dropOnTab(tab: BrowserTab) {
@@ -853,7 +884,6 @@ function moveWithSelect(event: Event, group: string, id: string) {
           @click="
             run(async () => {
               await deleteSpace(activeSpace);
-              activeSpace = 'default';
               deletingSpace = false;
             })
           "
@@ -1057,7 +1087,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                   :aria-label="`拖动集合 ${group.name}`"
                   title="拖动集合排序"
                   @dragstart.stop="
-                    startDrag($event, { kind: 'collection', id: group.id })
+                    startDrag($event, { kind: 'collection', id: group.id, spaceId: activeSpace })
                   "
                 >
                   ⠿
@@ -1234,7 +1264,12 @@ function moveWithSelect(event: Event, group: string, id: string) {
                     @dragover.stop="over($event, tab.id)"
                     @drop.prevent.stop="drop(group.id, tab.id, $event)"
                   >
-                    <WorkspaceCardMain :title="tab.title" :url="tab.url" :icon="tab.icon" @open="run(() => openSaved([tab]))"><template #checkbox>
+                    <WorkspaceCardMain
+                      :title="tab.title"
+                      :url="tab.url"
+                      :icon="tab.icon"
+                      @open="run(() => openSaved([tab]))"
+                      ><template #checkbox>
                         <input
                           class="workspace-card-checkbox"
                           type="checkbox"
@@ -1409,6 +1444,8 @@ function moveWithSelect(event: Event, group: string, id: string) {
               :data-group-color="group.color"
               :data-group-id="group.id"
               :aria-label="group.label"
+              @dragover.self="openTabGap($event, group.tabs)"
+              @drop.self="openTabGap($event, group.tabs, true)"
             >
               <h3 key="heading" class="workspace-window-label">
                 <button

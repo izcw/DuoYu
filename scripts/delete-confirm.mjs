@@ -36,20 +36,32 @@ try {
   await page.waitForTimeout(700);
   const item = page.locator('[data-library-id="home-widget-1"]');
   const before = await item.boundingBox();
-  await item.click({button:'right'});
-  await page.getByRole('button',{name:'删除',exact:true}).click();
-  const dialog = page.getByRole('dialog',{name:'确认删除',exact:true});
+  await item.click({ button: 'right' });
+  await page.getByRole('button', { name: '删除', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '确认删除', exact: true });
   await expect(dialog).toBeVisible();
-  assert.deepEqual(await item.boundingBox(),before);
-  assert.equal(await dialog.evaluate(el=>el.closest('.library-board')===null),true);
-  await dialog.getByRole('button',{name:'取消',exact:true}).click();
+  const during = await item.boundingBox();
+  for (const key of ['x', 'y', 'width', 'height'])
+    assert.ok(
+      Math.abs(during[key] - before[key]) < 0.5,
+      `Dialog moved tile ${key}`,
+    );
+  assert.equal(
+    await dialog.evaluate((el) => el.closest('.library-board') === null),
+    true,
+  );
+  await dialog.getByRole('button', { name: '取消', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(item).toBeVisible();
-  await item.click({button:'right'});
-  await page.getByRole('button',{name:'删除',exact:true}).click();
-  await dialog.getByRole('button',{name:'确认删除',exact:true}).click();
+  await item.click({ button: 'right' });
+  await page.getByRole('button', { name: '删除', exact: true }).click();
+  await dialog.getByRole('button', { name: '确认删除', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(item).toHaveCount(0);
-  assert.deepEqual(errors,[]);
-  console.log('PASS floating confirmation leaves grid unchanged; cancel and delete work');
-} finally { await context.close(); }
+  assert.deepEqual(errors, []);
+  console.log(
+    'PASS floating confirmation leaves grid unchanged; cancel and delete work',
+  );
+} finally {
+  await context.close();
+}

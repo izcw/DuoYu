@@ -56,7 +56,9 @@ try {
   await page.mouse.up();
   await expect(folder).toBeVisible();
   await folder.getByRole('button', { name: '展开 常用网站' }).click();
-  await expect(page.getByRole('dialog').locator('.cell-link')).toHaveCount(9);
+  await expect(page.getByRole('dialog').locator('.folder-link')).toHaveCount(
+    10,
+  );
   await page.keyboard.press('Escape');
   await demoMenu.click();
   await expect(folder).toHaveCount(0);

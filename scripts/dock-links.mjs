@@ -41,7 +41,9 @@ try {
     const list = popup ? page.locator('.folder-dialog') : folder;
     const icon = list.locator('[data-folder-item]').first();
     const id = await icon.getAttribute('data-folder-item');
-    const a = await icon.locator('.folder-icon').boundingBox();
+    const handle = popup ? icon.locator('.folder-icon') : icon;
+    await handle.hover();
+    const a = await handle.boundingBox();
     const grid = await page.locator('.library-cell-grid').boundingBox();
     await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
     await page.mouse.down();
@@ -71,16 +73,29 @@ try {
   await page.mouse.move(d.x + d.width / 2, d.y + d.height / 2, { steps: 35 });
   const preview = page.locator('body > .desktop-transfer-preview');
   await expect(preview).toBeVisible();
-  assert.equal(await preview.evaluate(el => getComputedStyle(el).position), 'fixed');
-  assert.equal(await link.evaluate(el => getComputedStyle(el).visibility), 'hidden');
-  await page.screenshot({path:'work/dock-transfer-preview.png'});
+  assert.equal(
+    await preview.evaluate((el) => getComputedStyle(el).position),
+    'fixed',
+  );
+  assert.equal(
+    await link.evaluate((el) => getComputedStyle(el).visibility),
+    'hidden',
+  );
+  await page.screenshot({ path: 'work/dock-transfer-preview.png' });
   await page.mouse.up();
   await expect(preview).toHaveCount(0);
   await expect(dock.locator(`[data-dock-id="${id}"]`)).toBeVisible();
   await expect(page.locator(`[data-library-id="${id}"]`)).toHaveCount(0);
-  const icon = await dock.locator(`[data-dock-id="${id}"] img`).boundingBox();
-  assert.equal(icon.width,30);
-  assert.equal(icon.height,30);
+  // Measure both dimensions after the Dock landing/hover animation settles.
+  await page.mouse.move(900, 400);
+  await expect
+    .poll(async () => {
+      const box = await dock
+        .locator(`[data-dock-id="${id}"] img`)
+        .boundingBox();
+      return box && [box.width, box.height];
+    })
+    .toEqual([30, 30]);
   await page.reload();
   const dockLink = dock.locator(`[data-dock-id="${id}"]`);
   await expect(dockLink).toBeVisible();
@@ -114,6 +129,43 @@ try {
   await page.waitForTimeout(700);
   await page.locator('[data-library-page-id="library-demo"] button').click();
   await expect(page.locator(`[data-library-id="${id}"]`)).toBeVisible();
+  // Older imports may contain browser-internal URLs. Verify the error is
+  // accessible with the side menu closed and no privileged tab was opened.
+  await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const request = indexedDB.open('duoyu');
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction('libraryItems', 'readwrite');
+          tx.objectStore('libraryItems').put({
+            id: 'unsafe-dock',
+            pageId: '__dock',
+            parent: '',
+            name: '异常地址',
+            kind: 'link',
+            order: 1,
+            url: 'chrome://settings/',
+          });
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onerror = () => reject(tx.error);
+        };
+      }),
+  );
+  await page.reload();
+  const worker = context.serviceWorkers()[0];
+  const tabs = () =>
+    worker.evaluate(async () =>
+      (await chrome.tabs.query({})).map((tab) => tab.id),
+    );
+  const before = await tabs();
+  await page.locator('[data-dock-id="unsafe-dock"]').click();
+  await expect(dock.getByRole('alert')).toContainText('完整的网页地址');
+  assert.deepEqual(await tabs(), before);
   assert.deepEqual(errors, []);
   console.log(
     'PASS link moved into Dock and back to collection, persisted and return icon shown',

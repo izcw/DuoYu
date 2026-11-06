@@ -1,5 +1,7 @@
--- PostgreSQL schema proposal. Run only in the dedicated business database.
--- Runtime role and grants must be provisioned separately; no secrets here.
+-- Historical schema proposal retained for the original sync design.
+-- Production uses DuoYu-Backend/server/sync/schema.sql followed by
+-- DuoYu-Backend/server/backend/schema.sql and the deployment role grants.
+-- This example creates a separate schema and is intended only for a disposable database.
 BEGIN;
 CREATE SCHEMA IF NOT EXISTS duoyu_sync;
 

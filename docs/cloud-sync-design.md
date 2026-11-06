@@ -1,14 +1,14 @@
 # 多鱼云同步方案
 
-状态：第一版云同步 API 与扩展自动同步已实现并部署。本文保留设计原则；实际结构以 `server/sync/schema.sql` 为准，交付、限制和测试结果见 `cloud-sync-delivery.md`。
+本文保留云同步的设计原则。当前数据结构见[同步服务 schema](../../DuoYu-Backend/server/sync/schema.sql)，运行方式见[业务后端说明](../../DuoYu-Backend/server/backend/README.md)。
 
 ## 目标和边界
 
 云端是登录账号的权威版本，本地 IndexedDB 是缓存、离线工作副本及未提交修改的可靠队列。正常联网时自动双向同步；离线时允许修改并提示待同步。无法在断网期间承诺所有设备实时一致，目标是联网后收敛、不静默丢失修改、不串账号。
 
-拓扑：扩展 → HTTPS 同步业务 API → 独立 PostgreSQL 数据库 `duoyu_extensions`。账号中心仅负责身份认证，不保存收藏业务数据。扩展不直连 PostgreSQL，不携带数据库密码或宝塔密钥。建议独立 Go 服务，与现有 DuoYu ID 使用相同运维技术栈，但代码、数据库、运行账户和权限分离。
+扩展通过 HTTPS 请求 `sync.duoyu.link`。Go 网关验证身份和项目状态，直接处理文件、模板和管理操作，将同步操作转交本机 Node 服务。Node 在业务库 `duoyu_extensions` 中提交同步事务。统一账号登录与项目授权由 DuoYu ID 负责。
 
-账号键使用已验证的 `(issuer, sub)`，不使用邮箱、昵称或前端传入的 user_id。同步 API 必须验证供本服务使用的 Access Token，不能拿 ID Token 当 API 授权。上线前确认 DuoYu ID 的访问令牌格式、audience 和项目绑定方式：JWT 严格验签并验证受众；若为 opaque token，由服务端使用独立保密客户端和 introspection，校验 active、client_id、scope、sub。不能只解码 JWT 或仅依赖 CORS。当前公共扩展客户端没有 introspection secret，这是服务端接入需要确认的协议项。
+账号键来自已验证的 `(issuer, sub)`。扩展后台同时发送用于项目身份校验的 ID Token 和用于查询 UserInfo 的 Access Token。网关与 Node 同步入口分别验证签名、签发方、项目受众及主体匹配，再按账号访问业务数据。
 
 ## 同步范围
 

@@ -17,6 +17,48 @@ body {
   /* The root owns the startup color; an opaque body would cover the wallpaper. */
   background: transparent;
 }
+/* The offline light fallback is pure white. Use a dark foreground until an
+   actual wallpaper/preview or the workspace's dark focus layer is present. */
+html[data-fallback-theme='light']:not([data-wallpaper-preview='ready']):not(
+    [data-desktop-wallpaper='ready']
+  ):not(.workspace-active) {
+  body,
+  .clock-time,
+  .clock-date,
+  .search-box,
+  .search-box input,
+  .search-suggestions,
+  .glass-mode-switch button,
+  .newtab .library-board,
+  .newtab .desktop-icon-caption,
+  .newtab .side-menu,
+  .library-context-menu,
+  .grid-item-menu,
+  .wallpaper-status {
+    color: #222;
+    caret-color: #222;
+    text-shadow: none;
+  }
+  .clock-time {
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    -webkit-text-stroke: 0;
+    filter: none;
+  }
+  .search-box input::placeholder {
+    color: #555;
+  }
+  .search-box .search-action-icon,
+  .search-box .search-clear img,
+  .account-entry img,
+  .desktop-switch-entry img,
+  .dock-entry[data-dock-id^='duoyu-'] .dock-tile > img {
+    filter: brightness(0);
+  }
+  .dock-entry:focus-visible {
+    outline-color: #333;
+  }
+}
 button,
 input,
 textarea {
@@ -407,7 +449,14 @@ textarea:focus-visible {
 
 /* Size form controls and action buttons without changing icon tiles or cards. */
 input:not([type]):not(.desktop-header .search-form input),
-input:is([type='text'], [type='url'], [type='email'], [type='password'], [type='number'], [type='search']):not(.desktop-header .search-form input),
+input:is(
+    [type='text'],
+    [type='url'],
+    [type='email'],
+    [type='password'],
+    [type='number'],
+    [type='search']
+  ):not(.desktop-header .search-form input),
 select,
 .select-trigger,
 .select-options [role='option'],
@@ -415,21 +464,39 @@ select,
 .account-panel button,
 .setting-row button,
 .workspace-button,
-.base-dialog :is(form button[type='submit'], .page-editor-actions button, .library-form-actions button, .title-input-row > button) {
+.base-dialog
+  :is(
+    form button[type='submit'],
+    .page-editor-actions button,
+    .library-form-actions button,
+    .title-input-row > button
+  ) {
   box-sizing: border-box;
   height: var(--control-height);
 }
-
 
 /* A clickable card may also be a drag handle; its nested link shares its cursor. */
 [draggable='true']:not(:disabled),
 [draggable='true'] :is(.side-menu-choice, .workspace-link),
 [data-drag-handle='true'],
-.grid-stack-item:not(.ui-draggable-disabled) :is(.cell-link, .folder-border, .folder-link, .widget-card) {
+.grid-stack-item:not(.ui-draggable-disabled)
+  :is(.cell-link, .folder-border, .folder-link, .widget-card) {
   cursor: pointer !important;
 }
-html.mouse-sorting, html.mouse-sorting *,
-html:has(.drag-landing-preview, .ui-draggable-dragging, .grid-selection-dragging, .desktop-transfer-preview),
-html:has(.drag-landing-preview, .ui-draggable-dragging, .grid-selection-dragging, .desktop-transfer-preview) :is(*, #drag-cursor-priority) {
+html.mouse-sorting,
+html.mouse-sorting *,
+html:has(
+  .drag-landing-preview,
+  .ui-draggable-dragging,
+  .grid-selection-dragging,
+  .desktop-transfer-preview
+),
+html:has(
+    .drag-landing-preview,
+    .ui-draggable-dragging,
+    .grid-selection-dragging,
+    .desktop-transfer-preview
+  )
+  :is(*, #drag-cursor-priority) {
   cursor: grabbing !important;
 }

@@ -35,40 +35,35 @@ try {
 
   await expect(page.locator('[data-library-id="home-widget-1"]')).toBeVisible();
   await page.waitForTimeout(800);
-  const box = await page.locator('.library-cell-grid').boundingBox();
-  const y = box.y + box.height / 2;
-  await page.mouse.move(box.x / 2, y);
-  const hint = page.locator('.workspace-entry-hint');
-  await expect(hint).toHaveAttribute('data-side', 'left');
-  await expect(hint).toHaveCSS('color', 'rgb(255, 255, 255)');
-  await page.mouse.move((box.x + box.width + 1920) / 2, y);
-  await expect(hint).toHaveAttribute('data-side', 'right');
-  await page.mouse.move(box.x + box.width / 2, y);
-  await expect(hint).toHaveCount(0);
-  await page.mouse.move((box.x + box.width + 1920) / 2, y);
-  await page.mouse.click((box.x + box.width + 1920) / 2, y);
+  await page
+    .getByRole('navigation', { name: '快捷 Dock', exact: true })
+    .getByRole('button', { name: '标签工作区', exact: true })
+    .click();
   await expect(
     page.getByRole('dialog', { name: '工作区', exact: true }),
   ).toBeVisible();
-  await expect(hint).toHaveCount(0);
 
-  await expect(page.locator('.workspace-spaces')).toHaveCSS(
-    'background-color',
-    'rgba(0, 0, 0, 0)',
-  );
+  await expect(
+    page.getByRole('navigation', { name: '我的空间', exact: true }),
+  ).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
   await expect(page.locator('.workspace-space-settings')).toHaveCount(0);
   await page.getByRole('button', { name: '新建空间', exact: true }).click();
-  await expect(
-    page.getByRole('textbox', { name: '空间名称', exact: true }),
-  ).toHaveCount(0);
-  const space = page.locator('.workspace-space').filter({ hasText: '新空间1' });
+  const spaceName = page.getByRole('textbox', {
+    name: '空间名称',
+    exact: true,
+  });
+  await spaceName.fill('空间菜单测试');
+  await page.getByRole('button', { name: '添加', exact: true }).click();
+  const space = page
+    .locator('.workspace-space')
+    .filter({ hasText: '空间菜单测试' });
   await expect(space).toHaveAttribute('aria-pressed', 'true');
   await space.click({ button: 'right' });
   await page.getByRole('menuitem', { name: '重命名空间', exact: true }).click();
   await page
     .getByRole('textbox', { name: '空间名称', exact: true })
     .fill('已改名');
-  await page.getByRole('button', { name: '保存空间', exact: true }).click();
+  await page.getByRole('button', { name: '保存', exact: true }).click();
   await page
     .locator('.workspace-space')
     .filter({ hasText: '已改名' })

@@ -21,7 +21,11 @@ export async function blobBase64(blob: Blob) {
     text += String.fromCharCode(...bytes.subarray(i, i + 8192));
   return btoa(text);
 }
-export async function cacheAsset(blob: Blob) {
+export interface PreparedAsset {
+  id: string;
+  blob: Blob;
+}
+export async function prepareAsset(blob: Blob): Promise<PreparedAsset> {
   if (blob.size > 20 * 1024 * 1024)
     throw Object.assign(Error('图片不能超过20MB'), { status: 413 });
   if (
@@ -37,14 +41,22 @@ export async function cacheAsset(blob: Blob) {
   ]
     .map((x) => x.toString(16).padStart(2, '0'))
     .join('');
-  const saved = await database.syncAssets.get(sha);
+  return { id: sha, blob };
+}
+// Digest outside IndexedDB transactions. Only IndexedDB operations run here,
+// so the caller can include this write in the same transaction as its records.
+export async function storePreparedAsset({ id, blob }: PreparedAsset) {
+  const saved = await database.syncAssets.get(id);
   await database.syncAssets.put({
     ...saved,
-    id: sha,
+    id,
     blob,
     createdAt: Date.now(),
   });
-  return ASSET_PREFIX + sha;
+  return ASSET_PREFIX + id;
+}
+export async function cacheAsset(blob: Blob) {
+  return storePreparedAsset(await prepareAsset(blob));
 }
 export async function getAsset(reference: string): Promise<Blob> {
   const sha = reference.startsWith(ASSET_PREFIX)

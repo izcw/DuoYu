@@ -54,7 +54,7 @@ try {
   await first.hover();
   const handle = await first.locator(':scope > .ui-resizable-se').boundingBox();
   const cell = await grid.evaluate(
-    (el) => el.getBoundingClientRect().width / 18,
+    (el) => el.getBoundingClientRect().width / el.gridstack.getColumn(),
   );
   await page.mouse.move(
     handle.x + handle.width / 2,
@@ -71,6 +71,7 @@ try {
     page.locator(`[data-library-id="${neighbor.id}"]`),
   ).toHaveAttribute('gs-x', String(neighbor.x + 1));
   await page.mouse.up();
+  await page.waitForTimeout(400);
   await page.reload();
   await expect(first).toHaveAttribute('gs-w', String(source.w + 1));
   await expect(

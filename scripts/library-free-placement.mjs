@@ -100,8 +100,12 @@ try {
     const item = page.locator(`[data-library-id="${id}"]`);
     const box = await item.boundingBox();
     const bounds = await grid.boundingBox();
-    const cw = bounds.width / 12;
-    const ch = await grid.evaluate((el) => el.gridstack.getCellHeight());
+    const cw = await grid.evaluate(
+      (el) => el.getBoundingClientRect().width / el.gridstack.getColumn(),
+    );
+    const ch = await grid.evaluate(
+      (el) => el.getBoundingClientRect().height / el.gridstack.opts.maxRow,
+    );
     await page.mouse.move(box.x + 25, box.y + 20);
     await page.mouse.down();
     await page.mouse.move(bounds.x + x * cw + 25, bounds.y + y * ch + 20, {
@@ -110,20 +114,24 @@ try {
     await expect(grid).toHaveClass(/grid-guides-visible/);
     await expect
       .poll(() =>
-        grid.evaluate((el) => getComputedStyle(el, '::before').opacity),
+        grid
+          .locator('.grid-guide-cells')
+          .evaluate((el) => getComputedStyle(el).opacity),
       )
       .toBe('1');
     assert.equal(
-      await grid.evaluate(
-        (el) => getComputedStyle(el, '::before').pointerEvents,
-      ),
+      await grid
+        .locator('.grid-guide-cells')
+        .evaluate((el) => getComputedStyle(el).pointerEvents),
       'none',
     );
     await page.mouse.up();
     await expect(grid).not.toHaveClass(/grid-guides-visible/);
     await expect
       .poll(() =>
-        grid.evaluate((el) => getComputedStyle(el, '::before').opacity),
+        grid
+          .locator('.grid-guide-cells')
+          .evaluate((el) => getComputedStyle(el).opacity),
       )
       .toBe('0');
     await expect(item).toHaveAttribute('gs-x', String(x));

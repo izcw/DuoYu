@@ -49,11 +49,19 @@ try {
   const row = page.locator('.library-page-row').first();
   await row.click({ button: 'right' });
   await expect(page.getByRole('menu', { name: '收藏页操作' })).toBeVisible();
-  await page.getByRole('menuitem', { name: '重命名', exact: true }).click();
-  await page.getByRole('textbox', { name: '收藏页名称' }).fill('右键管理测试');
+  await page
+    .getByRole('menuitem', { name: '修改名称和图标', exact: true })
+    .click();
+  await page
+    .getByRole('textbox', { name: '收藏页名称', exact: true })
+    .fill('右键管理测试');
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await expect(row).toContainText('右键管理测试');
   await page.getByRole('button', { name: '添加收藏页', exact: true }).click();
+  await page
+    .getByRole('textbox', { name: '收藏页名称', exact: true })
+    .fill('待删除页面');
+  await page.getByRole('button', { name: '添加', exact: true }).click();
   const rows = page.locator('.library-page-row');
   await expect(rows).toHaveCount(3);
   await rows.last().click({ button: 'right' });
@@ -62,7 +70,10 @@ try {
   await row.click({ button: 'right' });
   await page.keyboard.press('Escape');
   await expect(page.getByRole('menu', { name: '收藏页操作' })).toHaveCount(0);
-  await page.getByRole('button', { name: '首页', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '快捷 Dock', exact: true })
+    .getByRole('button', { name: '首页', exact: true })
+    .click();
   await page.waitForTimeout(700);
   const folder = page.locator('[data-library-id="home-widget-1"]');
   // Place the fixture against the left boundary before requesting a full-width folder.
@@ -70,19 +81,19 @@ try {
     el.closest('.grid-stack').gridstack.update(el, { x: 0, y: 0 }),
   );
   await expect(folder).toHaveAttribute('gs-x', '0');
-  assert.equal(await folder.evaluate((el) => el.gridstackNode.maxW), 18);
+  assert.equal(await folder.evaluate((el) => el.gridstackNode.maxW), 16);
   await folder.click({ button: 'right', position: { x: 10, y: 10 } });
-  await page.getByRole('button', { name: '18列 × 1行', exact: true }).click();
-  await expect(folder).toHaveAttribute('gs-w', '18');
+  await page.getByRole('button', { name: '16列 × 1行', exact: true }).click();
+  await expect(folder).toHaveAttribute('gs-w', '16');
   await page.reload();
-  await expect(folder).toHaveAttribute('gs-w', '18');
+  await expect(folder).toHaveAttribute('gs-w', '16');
   await page.waitForTimeout(800);
   await page.mouse.move(900, 400);
   await page.mouse.wheel(0, 180);
   await expect(row).toContainText('右键管理测试');
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: page context rename/delete, folder 18-column resize, reload persistence',
+    'PASS: page context rename/delete, folder 16-column resize, reload persistence',
   );
 } finally {
   await context.close();

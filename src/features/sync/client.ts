@@ -9,6 +9,9 @@ import { database } from '../../shared/storage/database';
 import {
   ACCOUNT_STORAGE_KEY,
   activeAccountKey,
+  assertCurrentPageAccount,
+  pageAccountKey,
+  scopedKey,
 } from '../../shared/storage/account';
 import { AUTH_SESSION_KEY, type Account } from '../auth/config';
 import { syncResponse, syncTransportError } from './response';
@@ -47,6 +50,7 @@ export const syncState = ref({
   assetError: '',
 });
 export function stopCloud() {
+  accountSelection++;
   generation++;
   account = null;
   clearTimeout(timer);
@@ -57,6 +61,7 @@ let retry = 0;
 let firstWrite = 0;
 let retryAfter = 0;
 let generation = 0;
+let accountSelection = 0;
 let running: Promise<unknown> | undefined;
 export async function accountKey(a: Account) {
   const bytes = await crypto.subtle.digest(
@@ -68,7 +73,7 @@ export async function accountKey(a: Account) {
     .join('');
 }
 function switched() {
-  return activeAccountKey() !== database.name.replace('duoyu-account-', '');
+  return activeAccountKey() !== pageAccountKey;
 }
 export async function rpc(
   path: string,
@@ -80,6 +85,7 @@ export async function rpc(
   const current = account,
     g = generation;
   if (!current) throw Error('请先登录');
+  assertCurrentPageAccount();
   const r = await browser.runtime
     .sendMessage({
       type: 'duoyu-auth',
@@ -126,8 +132,9 @@ export async function applyRemote(
   conflict?: string,
   epoch?: string,
 ) {
-  if (switched()) throw Error('账号已切换');
+  if (!pageAccountKey || switched()) throw Error('账号已切换');
   await waitForInteraction();
+  assertCurrentPageAccount();
   const existing = full ? [] : await database.syncShadow.toArray();
   const next = new Map<string, Entity>(
     existing.map((r) => [
@@ -576,8 +583,10 @@ export function reloadSyncExtension() {
   browser.runtime.reload();
 }
 async function chooseAccount(next: Account | null) {
+  const selection = ++accountSelection;
   const key = next ? await accountKey(next) : '';
-  if (key !== activeAccountKey()) {
+  if (selection !== accountSelection) return false;
+  if (key !== activeAccountKey() || key !== pageAccountKey) {
     generation++;
     account = null;
     localStorage.setItem(ACCOUNT_STORAGE_KEY, key);
@@ -589,34 +598,23 @@ async function chooseAccount(next: Account | null) {
 }
 export async function initializeCloud() {
   connectAssetTransport(rpc);
-  syncState.value.lastSyncedAt = Number(
-    (await database.syncMeta.get('lastSyncedAt'))?.value || 0,
-  );
-  try {
-    const response = await browser.runtime.sendMessage({
-      type: 'duoyu-auth',
-      action: 'status',
-    });
-    if (response?.view && !(await chooseAccount(response.view.account)))
-      return false;
-    await restoreWallpaperChoice();
-    if (account) {
-      await syncNow();
-      await projectPreferences();
-    }
-  } catch {
-    syncState.value.status = '离线';
-  }
+  // Account changes must be observed even while startup authentication or the
+  // first sync is waiting on the network. Otherwise logout can leave the old
+  // account database visible until a manual reload.
+  const initialGeneration = generation;
+  let sessionChange: Promise<boolean> | undefined;
   browser.storage.session.onChanged.addListener((changes) => {
     if (AUTH_SESSION_KEY in changes) {
       const next = (changes[AUTH_SESSION_KEY].newValue as any)?.account ?? null;
-      void chooseAccount(next).then((ok) => {
+      sessionChange = chooseAccount(next);
+      void sessionChange.then((ok) => {
         if (ok) schedule(0);
       });
     }
   });
   window.addEventListener('storage', (e) => {
     if (e.key === ACCOUNT_STORAGE_KEY && switched()) {
+      accountSelection++;
       generation++;
       location.reload();
     }
@@ -634,25 +632,54 @@ export async function initializeCloud() {
           : key.startsWith('duoyu-layout-')
             ? 'layout:' + key.slice(13)
             : undefined;
-    if (account && id)
+    if (account && id && !switched())
       void database.preferences.put({ id, value }).catch(() => {});
   });
+  syncState.value.lastSyncedAt = Number(
+    (await database.syncMeta.get('lastSyncedAt'))?.value || 0,
+  );
+  try {
+    const response = await browser.runtime.sendMessage({
+      type: 'duoyu-auth',
+      action: 'status',
+    });
+    if (generation !== initialGeneration) return false;
+    // Session events received during startup take priority over the status
+    // request, which may have captured an earlier login.
+    const selected =
+      sessionChange ?? (response?.view && chooseAccount(response.view.account));
+    if (selected && !(await selected)) return false;
+    await restoreWallpaperChoice();
+    if (account && generation === initialGeneration) {
+      await syncNow();
+      await projectPreferences();
+    }
+  } catch {
+    if (generation === initialGeneration) syncState.value.status = '离线';
+  }
   return true;
 }
 export async function setSyncPreference(id: string, value: unknown) {
-  if (activeAccountKey()) {
+  assertCurrentPageAccount();
+  if (pageAccountKey) {
     await database.preferences.put({ id, value });
   } else await browser.storage.local.set({ [id]: value });
 }
 export async function getSyncPreference(id: string) {
-  if (activeAccountKey()) return (await database.preferences.get(id))?.value;
-  return (await browser.storage.local.get(id))[id];
+  assertCurrentPageAccount();
+  const value = pageAccountKey
+    ? (await database.preferences.get(id))?.value
+    : (await browser.storage.local.get(id))[id];
+  assertCurrentPageAccount();
+  return value;
 }
 async function projectPreferences() {
-  const oldWallpaperMode = localStorage.getItem(
-    `account:${activeAccountKey()}:duoyu-wallpaper-mode`,
-  );
-  for (const p of await database.preferences.toArray()) {
+  if (!pageAccountKey || switched()) return;
+  const modeKey = scopedKey('duoyu-wallpaper-mode');
+  const oldWallpaperMode = localStorage.getItem(modeKey);
+  const preferences = await database.preferences.toArray();
+  if (switched()) return;
+  for (const p of preferences) {
     const key =
       p.id === 'dockOrder'
         ? 'duoyu-dock-order'
@@ -662,11 +689,10 @@ async function projectPreferences() {
             ? 'duoyu-layout-' + p.id.slice(7)
             : '';
     if (key) {
-      if (p.value == null)
-        localStorage.removeItem(`account:${activeAccountKey()}:${key}`);
+      if (p.value == null) localStorage.removeItem(scopedKey(key));
       else
         localStorage.setItem(
-          `account:${activeAccountKey()}:${key}`,
+          scopedKey(key),
           typeof p.value === 'string' ? p.value : JSON.stringify(p.value),
         );
     }
@@ -674,21 +700,16 @@ async function projectPreferences() {
       document.documentElement.dataset.glassMode = String(p.value);
   }
   // Explicit selection is authoritative; a legacy mode can arrive independently.
-  const selection = (await database.preferences.get('wallpaperSelection'))
-    ?.value;
+  const selection = preferences.find(
+    (row) => row.id === 'wallpaperSelection',
+  )?.value;
   if (typeof selection === 'string') {
-    const key = `account:${activeAccountKey()}:duoyu-wallpaper-mode`;
-    if (selection === 'daily') localStorage.removeItem(key);
-    else localStorage.setItem(key, 'custom');
+    if (selection === 'daily') localStorage.removeItem(modeKey);
+    else localStorage.setItem(modeKey, 'custom');
   }
   window.dispatchEvent(new Event('duoyu-sync-preferences'));
-  if (
-    oldWallpaperMode !==
-    localStorage.getItem(`account:${activeAccountKey()}:duoyu-wallpaper-mode`)
-  ) {
-    localStorage.removeItem(
-      `account:${activeAccountKey()}:duoyu:wallpaper-preview`,
-    );
+  if (oldWallpaperMode !== localStorage.getItem(modeKey)) {
+    localStorage.removeItem(scopedKey('duoyu:wallpaper-preview'));
     window.dispatchEvent(new Event('duoyu-wallpaper-change'));
   }
 }

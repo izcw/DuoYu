@@ -40,10 +40,43 @@ try {
   const first = page.locator('[data-library-id="home-widget-1"]');
   const second = page.locator('[data-library-id="home-widget-2"]');
   const third = page.locator('[data-library-id="home-widget-3"]');
-  // A neighbor sits above the selected pair, in their destination.
-  await third.evaluate((el) =>
-    el.closest('.grid-stack').gridstack.update(el, { x: 7, y: 2 }),
-  );
+  // Establish an explicit collision fixture rather than depending on the
+  // evolving default home layout. All writes stay in this temporary profile.
+  await page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('duoyu');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('libraryItems', 'readwrite');
+        const store = tx.objectStore('libraryItems');
+        for (const [id, x, y] of [
+          ['home-widget-1', 3, 3],
+          ['home-widget-2', 7, 3],
+          ['home-widget-3', 7, 1],
+        ]) {
+          const request = store.get(id);
+          request.onsuccess = () =>
+            store.put({
+              ...request.result,
+              gridX: x,
+              gridY: y,
+              width: 4,
+              height: 1,
+            });
+        }
+        tx.oncomplete = resolve;
+        tx.onabort = () => reject(tx.error);
+        tx.onerror = () => reject(tx.error);
+      });
+    } finally {
+      db.close();
+    }
+  });
+  await page.reload();
+  await expect(first).toHaveAttribute('gs-y', '3');
   await page.waitForTimeout(400);
   const a = await first.boundingBox(),
     b = await second.boundingBox();
@@ -57,46 +90,41 @@ try {
   assert.equal(await page.locator('.folder-dialog').count(), 0);
   await page.mouse.move(a.x + 20, a.y + a.height - 45);
   await page.mouse.down();
-  await page.mouse.move(a.x + 20, a.y + a.height - 45 - 224, { steps: 15 });
+  const twoRows = await grid.evaluate(
+    (el) => (el.getBoundingClientRect().height / el.gridstack.opts.maxRow) * 2,
+  );
+  await page.mouse.move(a.x + 20, a.y + a.height - 45 - twoRows, { steps: 15 });
   await expect(page.locator('.grid-selection-dragging')).toHaveCount(2);
   await expect(third).toHaveClass(/grid-selection-pushed/);
-  await expect(third).toHaveAttribute('gs-y', '2');
+  await expect(third).toHaveAttribute('gs-y', '1');
   await expect
     .poll(() => third.evaluate((el) => el.style.transform))
-    .toBe('translate(0px, -224px)');
+    .toBe('translate(0px, -94px)');
   await page.mouse.up();
-  await expect(first).toHaveAttribute('gs-y', '2');
-  await expect(second).toHaveAttribute('gs-y', '2');
+  await expect(first).toHaveAttribute('gs-y', '1');
+  await expect(second).toHaveAttribute('gs-y', '1');
   await expect(third).toHaveAttribute('gs-y', '0');
   await expect(first).toHaveAttribute('gs-x', '3');
   await expect(second).toHaveAttribute('gs-x', '7');
   await expect(page.locator('.folder-dialog')).toHaveCount(0);
   await page.waitForTimeout(500);
   await page.reload();
-  await expect(first).toHaveAttribute('gs-y', '2');
-  await expect(second).toHaveAttribute('gs-y', '2');
-  await first
-    .locator('.folder-border')
-    .click({ modifiers: ['Control'], position: { x: 10, y: 60 } });
-  await second
-    .locator('.folder-border')
-    .click({ modifiers: ['Control'], position: { x: 10, y: 60 } });
+  await expect(first).toHaveAttribute('gs-y', '1');
+  await expect(second).toHaveAttribute('gs-y', '1');
+  await first.click({ modifiers: ['Control'], position: { x: 10, y: 20 } });
+  await second.click({ modifiers: ['Control'], position: { x: 10, y: 20 } });
   await expect(page.locator('.grid-selected')).toHaveCount(2);
-  await third
-    .locator('.folder-border')
-    .click({ modifiers: ['Shift'], position: { x: 10, y: 60 } });
+  await third.click({ modifiers: ['Shift'], position: { x: 10, y: 20 } });
   await expect(page.locator('.grid-selected')).toHaveCount(3);
-  await third
-    .locator('.folder-border')
-    .click({ modifiers: ['Control'], position: { x: 10, y: 60 } });
+  await third.click({ modifiers: ['Control'], position: { x: 10, y: 20 } });
   await expect(page.locator('.grid-selected')).toHaveCount(2);
   const moved = await first.boundingBox();
-  await page.mouse.move(moved.x + 20, moved.y + 100);
+  await page.mouse.move(moved.x + 20, moved.y + 20);
   await page.mouse.down();
   await page.mouse.move(moved.x + 104, moved.y - 24, { steps: 10 });
   await page.keyboard.press('Escape');
   await page.mouse.up();
-  await expect(first).toHaveAttribute('gs-y', '2');
+  await expect(first).toHaveAttribute('gs-y', '1');
   await expect(page.locator('.grid-selected')).toHaveCount(0);
   // Atomic engine moves push neighbors without leaving partial moves on failure.
   const result = await grid.evaluate((el) => {

@@ -9,6 +9,7 @@ db.version(1).stores({
   wallpapers: 'id',
   syncAssets: 'id',
   syncShadow: 'id',
+  syncConflicts: 'id',
 });
 const values = new Map([['duoyu-wallpaper-intent-migrated', '1']]);
 const storage = {
@@ -110,6 +111,21 @@ try {
     storage.getItem('duoyu-wallpaper-intent'),
     'deleted shadow is not acknowledgment',
   );
+  api.rememberWallpaperChoice(old);
+  await db.wallpapers.put({ id: 'daily', ...newer });
+  await db.syncConflicts.put({
+    id: 'waiting',
+    operation: { changes: [{ table: 'wallpapers', id: 'daily', value: old }] },
+  });
+  await api.restoreWallpaperChoice();
+  assert.equal(
+    (await db.wallpapers.get('daily')).contentHash,
+    newer.contentHash,
+    'unresolved version decisions must not reapply the saved intent',
+  );
+  await db.syncConflicts.update('waiting', { resolvedAt: Date.now() });
+  await api.restoreWallpaperChoice();
+  assert.equal((await db.wallpapers.get('daily')).contentHash, old.contentHash);
   console.log(
     'PASS: original restoration, newer choice survives delayed acknowledgment, successful settlement, daily idempotence, deleted shadow guard',
   );

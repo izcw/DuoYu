@@ -10,6 +10,7 @@ import ClockWidget from '../../features/clock/ClockWidget.vue';
 import SearchBox from '../../features/search/SearchBox.vue';
 import GlassModeSwitch from '../../features/desktop/GlassModeSwitch.vue';
 import DesktopDock from '../../features/desktop/DesktopDock.vue';
+import HomeNavigationHint from '../../features/desktop/HomeNavigationHint.vue';
 const SettingsDialog = defineAsyncComponent(() => import('../../features/desktop/SettingsDialog.vue'));
 import { settingsPage, settingsOpen } from '../../features/desktop/settings-state';
 import AccountButton from '../../features/auth/AccountButton.vue';
@@ -20,7 +21,16 @@ import LibraryPageMenu from '../../features/library/LibraryPageMenu.vue';
 import { pageDragActive } from '../../features/library/page-drag';
 import type { LibraryPage } from '../../shared/storage/database';
 const workspaceOpen = ref(false);
-const { page, root, go } = useDesktopPages(() => workspaceOpen.value, stepPage);
+function openWorkspace() {
+  workspaceOpen.value = true;
+}
+function returnHome() {
+  workspaceOpen.value = false;
+  if (page.value !== 0) void go(0);
+}
+const { page, root, go } = useDesktopPages(
+  () => workspaceOpen.value, stepPage, openWorkspace,
+);
 const libraryPage = ref(
   accountStorage.getItem('duoyu-library-page') || 'default',
 );
@@ -119,17 +129,14 @@ function stepPage(direction: number) {
       aria-hidden="true"
     />
   </Teleport>
-  <WallpaperWheel @workspace="workspaceOpen = true" />
-  <WorkspaceOverlay v-model="workspaceOpen" />
+  <WallpaperWheel @workspace="openWorkspace()" />
+  <WorkspaceOverlay v-model="workspaceOpen" @home="returnHome" />
   <DesktopDock
     :hidden="page === 0 && homeQuiet && !workspaceOpen"
     :home-active="page === 0 && !workspaceOpen"
     :workspace-active="workspaceOpen"
-    @home="
-      workspaceOpen = false;
-      go(0);
-    "
-    @workspace="workspaceOpen = true"
+    @home="returnHome"
+    @workspace="openWorkspace()"
   />
   <main
     ref="root"
@@ -143,6 +150,7 @@ function stepPage(direction: number) {
     :style="{ '--page-exit-y': slideDirection > 0 ? '-40vh' : '40vh' }"
     :inert="workspaceOpen"
   >
+    <HomeNavigationHint v-if="page === 0 && !homeQuiet && !workspaceOpen" />
     <LibraryPageMenu
       v-model="libraryPage"
       :visible="page === 1 || pageDragActive"
@@ -235,6 +243,9 @@ function stepPage(direction: number) {
   width: 100%;
   height: 100%;
   min-height: 0;
+}
+.desktop-pages:has(.home-nav-hint.stacked) {
+  padding-bottom: 148px;
 }
 .desktop-header {
   width: 100%;

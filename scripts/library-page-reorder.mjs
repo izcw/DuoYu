@@ -45,7 +45,15 @@ try {
   );
   await page.waitForTimeout(700);
   await page.getByRole('button', { name: '添加收藏页', exact: true }).click();
+  await page
+    .getByRole('textbox', { name: '收藏页名称', exact: true })
+    .fill('排序页面一');
+  await page.getByRole('button', { name: '添加', exact: true }).click();
   await page.getByRole('button', { name: '添加收藏页', exact: true }).click();
+  await page
+    .getByRole('textbox', { name: '收藏页名称', exact: true })
+    .fill('排序页面二');
+  await page.getByRole('button', { name: '添加', exact: true }).click();
   const rows = page.locator('.library-page-row');
   await expect(rows).toHaveCount(4);
   await page.waitForTimeout(500);
@@ -66,8 +74,8 @@ try {
   await page.waitForTimeout(220);
   await expect(page.locator('.library-page-row.is-dragging')).toHaveCount(1);
   const expected = [...original.slice(1), original[0]];
-  await expect(page.locator('.library-page-row.drop-after')).toHaveCount(1);
-  assert.deepEqual(await order(), original);
+  await expect(page.locator('.drag-landing-preview')).toBeVisible();
+  await expect.poll(order).toEqual(expected);
   for (let n = 0; n < 12; n++) {
     // Browsers continuously emit dragover while the pointer rests on animating rows.
     await page.locator('.library-page-menu').dispatchEvent('dragover', {
@@ -77,7 +85,7 @@ try {
       cancelable: true,
     });
     await page.waitForTimeout(35);
-    assert.deepEqual(await order(), original);
+    assert.deepEqual(await order(), expected);
   }
   await page.mouse.up();
   await expect(page.locator('.library-page-row.is-dragging')).toHaveCount(0);
@@ -95,7 +103,7 @@ try {
   await expect.poll(order).toEqual(expected);
   await page.waitForTimeout(700);
   // Cancelled sorting restores the order and never persists its preview.
-  const source = rows.last();
+  const source = page.locator(`[data-library-page-id="${expected.at(-1)}"]`);
   const dt = await page.evaluateHandle(() => new DataTransfer());
   await source.dispatchEvent('dragstart', { dataTransfer: dt });
   const top = await rows.first().boundingBox();
@@ -104,13 +112,15 @@ try {
     clientY: top.y + 2,
     dataTransfer: dt,
   });
-  await expect(page.locator('.library-page-row.drop-before')).toHaveCount(1);
-  assert.deepEqual(await order(), expected);
+  await expect.poll(order).toEqual([expected.at(-1), ...expected.slice(0, -1)]);
   await source.dispatchEvent('dragend', { dataTransfer: dt });
+  await expect.poll(order).toEqual(expected);
+  await expect(page.locator('.drag-landing-preview')).toHaveCount(0);
+  await page.reload();
   await expect.poll(order).toEqual(expected);
   assert.deepEqual(errors, []);
   console.log(
-    'PASS stable native page reorder, stationary pointer during animation, persisted order and cancelled preview',
+    'PASS page reorder, stable live preview under a stationary pointer, persisted order and cancelled preview',
   );
 } finally {
   await context.close();

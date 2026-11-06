@@ -35,27 +35,65 @@ try {
 
   const dock = page.getByRole('navigation', { name: '快捷 Dock' });
   await expect(dock).toBeVisible();
-  await expect(dock.getByRole('button',{name:'首页',exact:true})).toHaveAttribute('draggable','false');
-  await expect(dock.getByRole('button',{name:'标签工作区',exact:true})).toHaveAttribute('draggable','false');
-  const source = await dock.getByRole('button',{name:'画布',exact:true}).boundingBox();
-  const target = await dock.getByRole('button',{name:'首页',exact:true}).boundingBox();
-  await page.mouse.move(source.x+source.width/2,source.y+source.height/2);
+  await expect(
+    dock.getByRole('button', { name: '首页', exact: true }),
+  ).toHaveAttribute('draggable', 'false');
+  await expect(
+    dock.getByRole('button', { name: '标签工作区', exact: true }),
+  ).toHaveAttribute('draggable', 'false');
+  const source = await dock
+    .getByRole('button', { name: '画布', exact: true })
+    .boundingBox();
+  const target = await dock
+    .getByRole('button', { name: '首页', exact: true })
+    .boundingBox();
+  await page.mouse.move(
+    source.x + source.width / 2,
+    source.y + source.height / 2,
+  );
   await page.mouse.down();
-  await page.mouse.move(source.x+source.width/2-10,source.y+source.height/2,{steps:5});
-  await page.mouse.move(target.x+2,target.y+target.height/2,{steps:20});
-  await expect(page.locator('.dock-drag-image img')).toHaveCount(1);
-  assert.equal(await page.locator('.dock-dragging').evaluate(el=>getComputedStyle(el).outlineStyle),'none');
+  await page.mouse.move(
+    source.x + source.width / 2 - 10,
+    source.y + source.height / 2,
+    { steps: 5 },
+  );
+  await page.mouse.move(target.x + 2, target.y + target.height / 2, {
+    steps: 20,
+  });
+  await expect(page.locator('.drag-landing-preview')).toBeVisible();
+  assert.equal(
+    await page
+      .locator('.dock-dragging')
+      .evaluate((el) => getComputedStyle(el).outlineStyle),
+    'none',
+  );
   await page.mouse.up();
-  const expected = ['duoyu-home','duoyu-workspace','duoyu-canvas','duoyu-memo','duoyu-translate'];
-  assert.deepEqual(await dock.locator('.dock-entry').evaluateAll(els=>els.map(el=>el.dataset.dockId)),expected);
-  await expect(page.locator('.dock-drag-image')).toHaveCount(0);
+  const expected = [
+    'duoyu-home',
+    'duoyu-workspace',
+    'duoyu-canvas',
+    'duoyu-memo',
+    'duoyu-translate',
+  ];
+  assert.deepEqual(
+    await dock
+      .locator('.dock-entry')
+      .evaluateAll((els) => els.map((el) => el.dataset.dockId)),
+    expected,
+  );
+  await expect(page.locator('.drag-landing-preview')).toHaveCount(0);
   await page.reload();
   await expect(dock).toBeVisible();
-  assert.deepEqual(await dock.locator('.dock-entry').evaluateAll(els=>els.map(el=>el.dataset.dockId)),expected);
-  await page.getByRole('button',{name:'隐藏首页组件',exact:true}).click();
+  assert.deepEqual(
+    await dock
+      .locator('.dock-entry')
+      .evaluateAll((els) => els.map((el) => el.dataset.dockId)),
+    expected,
+  );
+  await page.getByRole('button', { name: '隐藏首页组件', exact: true }).click();
   await expect(dock).toBeHidden();
-  await expect(page.locator('.desktop-dock')).toHaveAttribute('inert','');
-  await page.getByRole('button',{name:'显示首页组件',exact:true}).click();
+  await expect(page.locator('.desktop-dock')).toHaveAttribute('inert', '');
+  await page.getByRole('button', { name: '显示首页组件', exact: true }).click();
   await expect(dock).toBeVisible();
   const before = await dock.boundingBox();
   await dock.getByRole('button', { name: '标签工作区', exact: true }).click();

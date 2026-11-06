@@ -1,3 +1,8 @@
+import {
+  readMetadataHTML,
+  readResponseBytes,
+} from '../../shared/response-body';
+
 /** Resolve only website-provided icons; do not send browsing URLs to third parties. */
 export function iconCandidates(html: string, page: string) {
   const result: string[] = [];
@@ -43,9 +48,10 @@ export async function websiteIcon(page: string) {
     });
     if (response.ok)
       candidates = iconCandidates(
-        (await response.text()).slice(0, 500000),
+        await readMetadataHTML(response),
         response.url || url.href,
       );
+    else await response.body?.cancel();
   } catch {
     /* A blocked HTML page may still serve a public favicon. */
   }
@@ -58,10 +64,15 @@ export async function websiteIcon(page: string) {
       });
       const type =
         response.headers.get('content-type')?.split(';')[0]?.trim() || '';
-      if (!response.ok || !type.startsWith('image/')) continue;
-      if (Number(response.headers.get('content-length')) > 1024 * 1024)
+      if (
+        !response.ok ||
+        !type.startsWith('image/') ||
+        Number(response.headers.get('content-length')) > 1024 * 1024
+      ) {
+        await response.body?.cancel();
         continue;
-      const bytes = new Uint8Array(await response.arrayBuffer());
+      }
+      const bytes = await readResponseBytes(response, 1024 * 1024);
       if (!bytes.length || bytes.length > 1024 * 1024) continue;
       let binary = '';
       for (let i = 0; i < bytes.length; i += 8192)

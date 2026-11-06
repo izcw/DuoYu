@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { mkdtemp, mkdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
+import { openGridMenu } from './ui-helpers.mjs';
 await mkdir('work', { recursive: true });
 const extension = path.resolve('.output/chrome-mv3');
 const context = await chromium.launchPersistentContext(
@@ -38,35 +39,18 @@ try {
   await page.waitForTimeout(800);
 
   const rect = await grid.boundingBox();
+  const cellWidth = await grid.evaluate(
+    (el) => el.getBoundingClientRect().width / el.gridstack.getColumn(),
+  );
   async function menu(x, y) {
     if (x === undefined) {
-      const point = await grid.evaluate((el) => {
-        const grid = el.gridstack,
-          rect = el.getBoundingClientRect();
-        for (let row = 0; row < grid.opts.maxRow; row++)
-          for (let col = 0; col < grid.getColumn(); col++)
-            if (
-              grid.engine.nodes.every(
-                (n) =>
-                  col < n.x ||
-                  col >= n.x + n.w ||
-                  row < n.y ||
-                  row >= n.y + n.h,
-              )
-            )
-              return {
-                x: rect.left + col * grid.cellWidth() + 20,
-                y: rect.top + row * grid.getCellHeight() + 20,
-              };
-        throw new Error('No empty grid cell');
-      });
-      x = point.x;
-      y = point.y;
+      await openGridMenu(page, grid);
+      return;
     }
     await page.mouse.click(x, y, { button: 'right' });
     await expect(page.getByRole('menu', { name: '收藏页菜单' })).toBeVisible();
   }
-  await menu(rect.x + 6 * 74 + 20, rect.y + 20);
+  await menu(rect.x + 6 * cellWidth + 20, rect.y + 20);
   for (const name of ['组件商店', '换壁纸', '图标搜索', '立即备份', '设置']) {
     await expect(
       page.getByRole('menuitem', { name, exact: true }),
@@ -96,7 +80,7 @@ try {
     .locator('.base-dialog-backdrop')
     .click({ position: { x: 8, y: 8 } });
   await expect(page.locator('.folder-dialog')).toHaveCount(0);
-  await menu(rect.x + 10 * 74 + 20, rect.y + 20);
+  await menu(rect.x + 10 * cellWidth + 20, rect.y + 20);
   await page.getByRole('menuitem', { name: '添加网址' }).click();
   await expect(
     page.getByRole('dialog', { name: '添加网址', exact: true }),
@@ -113,7 +97,7 @@ try {
     .filter({ has: page.locator('.tile-caption', { hasText: '位置测试' }) });
   await expect(link).toHaveAttribute('gs-x', '10');
   await expect(link).toHaveAttribute('gs-y', '0');
-  await menu(rect.x + 12 * 74 + 20, rect.y + 20);
+  await menu(rect.x + 12 * cellWidth + 20, rect.y + 20);
   await page.getByRole('menuitem', { name: '组件商店', exact: true }).click();
   await page.getByRole('button', { name: '日历' }).click();
   const calendar = page
@@ -135,23 +119,38 @@ try {
   await expect(page.locator('.tool-results .tool-entry')).toHaveCount(1);
   await page.keyboard.press('Escape');
   await menu();
-  const downloading = page.waitForEvent('download');
   await page.getByRole('menuitem', { name: '立即备份', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText(
+    '请先登录账号再创建云端备份',
+  );
+  await menu();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: '备份与恢复', exact: true }).click();
+  const downloading = page.waitForEvent('download');
+  await page.getByRole('button', { name: '导出备份', exact: true }).click();
   const download = await downloading;
   assert.match(download.suggestedFilename(), /^duoyu-backup.*json$/);
+  const exported = JSON.parse(await readFile(await download.path(), 'utf8'));
+  assert.equal(exported.format, 'duoyu-backup');
+  await page.keyboard.press('Escape');
   await menu();
   await page.getByRole('menuitem', { name: '换壁纸', exact: true }).click();
   await expect(
     page.getByRole('dialog', { name: '壁纸商店', exact: true }),
   ).toBeVisible();
-  await page.getByLabel('导入壁纸').setInputFiles({
-    name: 'test.svg',
-    mimeType: 'image/svg+xml',
-    buffer: Buffer.from(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="pink"/></svg>',
-    ),
+  await page.getByRole('button', { name: '我的壁纸', exact: true }).click();
+  const choosing = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: /上传壁纸/ }).click();
+  await (
+    await choosing
+  ).setFiles({
+    name: 'test.png',
+    mimeType: 'image/png',
+    buffer: await readFile('public/icons/128.png'),
   });
-  await expect(page.getByRole('status')).toHaveText('壁纸已应用');
+  await expect(
+    page.getByRole('button', { name: '删除上传图片', exact: true }),
+  ).toBeVisible();
   assert.equal(
     await page.evaluate(() => localStorage.getItem('duoyu-wallpaper-mode')),
     'custom',
@@ -177,11 +176,12 @@ try {
   await expect(
     page.getByRole('dialog', { name: '设置', exact: true }),
   ).toBeVisible();
-  await page.getByLabel('当前页面布局').selectOption('free');
   await page
-    .getByRole('dialog', { name: '设置', exact: true })
-    .getByLabel('玻璃效果')
-    .selectOption('soft');
+    .getByRole('combobox', { name: '当前页面布局', exact: true })
+    .click();
+  await page.getByRole('option', { name: '自由布局', exact: true }).click();
+  await page.getByRole('combobox', { name: '玻璃效果', exact: true }).click();
+  await page.getByRole('option', { name: '柔和', exact: true }).click();
   await expect(
     page.locator('.glass-mode-switch button[aria-pressed="true"]'),
   ).toHaveText('柔和');

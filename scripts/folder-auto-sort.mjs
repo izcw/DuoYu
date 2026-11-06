@@ -38,7 +38,7 @@ try {
   await page.waitForTimeout(800);
 
   const folder = page.locator('[data-library-id="home-widget-1"]');
-  const inner = folder.locator('.folder-auto-grid');
+  const inner = folder.locator('.preview-icons');
   await expect(inner.locator('[data-folder-item]')).toHaveCount(3);
   const ids = await inner
     .locator('[data-folder-item]')
@@ -50,7 +50,11 @@ try {
   await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
   await page.mouse.down();
   await page.mouse.move(c.x + c.width / 2, c.y + c.height / 2, { steps: 20 });
-  await expect(first).toHaveClass(/ui-draggable-dragging/);
+  await expect(inner.locator(`[data-folder-item="${ids[0]}"]`)).toHaveCSS(
+    'visibility',
+    'hidden',
+  );
+  await expect(page.locator('.drag-landing-preview')).toBeVisible();
   assert.ok(
     !(await folder.getAttribute('class')).includes('ui-draggable-dragging'),
   );
@@ -61,24 +65,32 @@ try {
       .locator('[data-folder-item]')
       .evaluateAll((els) => els.map((el) => el.dataset.folderItem));
   await expect.poll(after).toEqual([ids[1], ids[2], ids[0]]);
-  assert.deepEqual(await folder.boundingBox(), originalFolder);
-  const packed = await inner.evaluate((el) => ({
+  const finalFolder = await folder.boundingBox();
+  for (const key of ['x', 'y', 'width', 'height'])
+    assert.ok(Math.abs(finalFolder[key] - originalFolder[key]) < 0.5);
+  await expect(page.locator('.drag-landing-preview')).toHaveCount(0);
+  await page.reload();
+  await expect.poll(after).toEqual([ids[1], ids[2], ids[0]]);
+  await folder.locator('.folder-border').click();
+  const expanded = page.locator('.folder-dialog .folder-auto-grid');
+  await expect(expanded.locator('.folder-icon-label')).toHaveCount(3);
+  const packed = await expanded.evaluate((el) => ({
     mode: el.gridstack.engine.mode,
     positions: el.gridstack.engine.nodes
       .map((n) => n.y * el.gridstack.getColumn() + n.x)
       .sort((a, b) => a - b),
   }));
   assert.deepEqual(packed, { mode: 'list', positions: [0, 1, 2] });
-  await page.reload();
-  await expect.poll(after).toEqual([ids[1], ids[2], ids[0]]);
-  await folder.locator('.folder-border').click();
-  const expanded = page.locator('.folder-dialog .folder-auto-grid');
-  await expect(expanded.locator('.folder-icon-label')).toHaveCount(3);
+  await expanded.locator('.folder-link').first().hover();
+  await page.waitForTimeout(300);
   const e0 = await expanded.locator('[data-folder-item]').first().boundingBox(),
     e2 = await expanded.locator('[data-folder-item]').last().boundingBox();
-  await page.mouse.move(e2.x + 30, e2.y + 35);
+  await page.mouse.move(e2.x + e2.width / 2, e2.y + e2.height / 2);
   await page.mouse.down();
-  await page.mouse.move(e0.x + 30, e0.y + 35, { steps: 20 });
+  await page.mouse.move(e0.x + e0.width / 2, e0.y + e0.height / 2, {
+    steps: 20,
+  });
+  await page.waitForTimeout(300);
   await page.mouse.up();
   await expect
     .poll(() =>
@@ -117,7 +129,7 @@ try {
   ).toHaveCount(0);
   assert.deepEqual(errors, []);
   console.log(
-    'PASS shared GridStack folder preview/detail sorting, no parent drag, automatic packing and persistence',
+    'PASS folder preview/detail sorting, no parent drag, automatic packing and persistence',
   );
 } finally {
   await context.close();

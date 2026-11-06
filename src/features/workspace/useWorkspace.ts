@@ -2,7 +2,6 @@ import {
   collectionColor,
   type CollectionColor,
 } from '../../shared/collection-colors';
-import { accountStorage } from '../../shared/storage/account';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { liveQuery } from 'dexie';
 import { browser, type Browser } from 'wxt/browser';
@@ -12,7 +11,7 @@ import {
   type TabCollection,
   type WorkspaceSpace,
 } from '../../shared/storage/database';
-import { addTabs, createCollection, webUrl } from './collections';
+import { addTabs, createCollection, removeCollection, restoreCollection, webUrl } from './collections';
 import { ensureDefaultSpace } from './spaces';
 
 export type BrowserTab = Browser.tabs.Tab;
@@ -20,13 +19,7 @@ export type BrowserTab = Browser.tabs.Tab;
 export function useWorkspace() {
   const allCollections = ref<TabCollection[]>([]);
   const spaces = ref<WorkspaceSpace[]>([]);
-  const activeSpace = ref('default');
-  try {
-    activeSpace.value =
-      accountStorage.getItem('duoyu:active-space') || 'default';
-  } catch {
-    /* Optional preference. */
-  }
+  const activeSpace = ref('');
   const isMarkedSpace = computed(() => activeSpace.value === 'marked');
   const collections = computed(() =>
     isMarkedSpace.value
@@ -57,13 +50,8 @@ export function useWorkspace() {
     if (!value.some((c) => c.id === destination.value))
       destination.value = value[0]?.id || '';
   });
-  watch(activeSpace, (id) => {
-    query.value = '';
-    try {
-      accountStorage.setItem('duoyu:active-space', id);
-    } catch {
-      /* Optional preference. */
-    }
+  watch(activeSpace, (_, previousSpace) => {
+    if (previousSpace) query.value = '';
   });
   const notice = ref('');
   const error = ref('');
@@ -305,25 +293,8 @@ export function useWorkspace() {
     );
   }
   async function removeGroup(id: string) {
-    const previous = await database.tabCollections.get(id);
-    if (!previous) return;
-    await database.tabCollections.delete(id);
-    undo.value = async () => {
-      await database.transaction(
-        'rw',
-        database.tabCollections,
-        database.workspaceSpaces,
-        async () => {
-          const space = await database.workspaceSpaces.get(
-            previous.spaceId || 'default',
-          );
-          await database.tabCollections.add({
-            ...previous,
-            spaceId: space?.id || 'default',
-          });
-        },
-      );
-    };
+    const previous = await removeCollection(id);
+    undo.value = () => restoreCollection(previous);
     notice.value = `已删除「${previous.name}」`;
   }
   async function removeTab(group: string, id: string) {
@@ -371,10 +342,11 @@ export function useWorkspace() {
         allCollections.value = value.groups;
         spaces.value = value.spaces;
         if (
-          activeSpace.value !== 'marked' &&
-          !value.spaces.some((s) => s.id === activeSpace.value)
+          !activeSpace.value ||
+          (activeSpace.value !== 'marked' &&
+            !value.spaces.some((s) => s.id === activeSpace.value))
         )
-          activeSpace.value = 'default';
+          activeSpace.value = value.spaces[0]?.id || '';
         loading.value = false;
       },
       error() {

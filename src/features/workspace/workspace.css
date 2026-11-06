@@ -836,9 +836,12 @@
   font-size: 17px;
 }
 
-/* Blur wallpaper details and soften its colors with a neutral white veil. */
+/* Keep white workspace controls readable even on a white/offline wallpaper. */
 .workspace-overlay:has(> .workspace-board) {
   padding: clamp(16px, 2vw, 32px) clamp(16px, 2vw, 32px) 100px;
+  background: rgb(0 0 0 / 68%);
+  --glass-alpha-start: 0.18;
+  --glass-alpha-end: 0.12;
 }
 .workspace-board {
   column-gap: clamp(12px, 2vw, 28px);
@@ -879,7 +882,7 @@
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 15%);
 }
 .workspace-board .workspace-message {
-  bottom: 24px;
+  bottom: 104px;
 }
 .workspace-board.is-list-view .workspace-saved-tab {
   min-height: 58px;
@@ -892,7 +895,8 @@
 }
 @media (max-width: 680px) {
   .workspace-overlay:has(> .workspace-board) {
-    padding: 12px 12px 100px;
+    /* The fixed 54px space menu must not cover collection controls. */
+    padding: 64px 12px 100px 64px;
   }
   .workspace-board .workspace-saved-tab {
     min-height: 116px;
@@ -1051,7 +1055,8 @@
 }
 @media (min-width: 681px) {
   .workspace-overlay:has(> .workspace-board) {
-    padding: 16px 16px 96px;
+    /* Leave the persistent account / appearance controls their own top row. */
+    padding: 64px 16px 96px;
   }
   .workspace-board .workspace-tabs {
     grid-column: 3;
@@ -1121,7 +1126,8 @@
 }
 
 .workspace-board .workspace-saved-tab.transfer-out {
-  position: absolute;
+  /* Retain the source slot until commit so collections below it cannot jump
+     beneath a stationary pointer during a cross-collection preview. */
   opacity: 0;
   pointer-events: none;
 }

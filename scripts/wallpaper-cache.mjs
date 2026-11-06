@@ -211,7 +211,10 @@ try {
           : query,
       );
   });
-  await timed.clock.install({ time: new Date('2026-10-21T06:59:59+08:00') });
+  // Keep the initial assertion on the night side of the boundary even when
+  // extension startup takes more than one second.
+  await timed.clock.install({ time: new Date('2026-10-21T06:59:00+08:00') });
+  await timed.clock.pauseAt(new Date('2026-10-21T06:59:59+08:00'));
   await timed.goto('chrome://newtab');
   await expect(timed.locator('html')).toHaveAttribute(
     'data-fallback-theme',

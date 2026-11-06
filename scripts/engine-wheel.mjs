@@ -90,9 +90,9 @@ async function searchAndCheck(host, key) {
       return create(properties, ...rest);
     };
   });
-  await page.locator('input').fill(text);
+  await page.locator('#search-input').fill(text);
   const created = context.waitForEvent('page');
-  await page.locator('input').press('Enter');
+  await page.locator('#search-input').press('Enter');
   const target = await created;
   const requested = new URL(
     await page.evaluate(() => window.__requestedSearch),
@@ -100,27 +100,27 @@ async function searchAndCheck(host, key) {
   assert.equal(requested.hostname, host);
   assert.equal(requested.searchParams.get(key), text);
   assert.ok(page.url().startsWith('chrome-extension:'));
-  await expect(page.locator('input')).toHaveValue(text);
+  await expect(page.locator('#search-input')).toHaveValue(text);
   await target.close();
 }
 try {
   await page.goto('chrome://newtab');
   await trigger.waitFor();
-  await expect(page.locator('input')).toBeFocused();
+  await expect(page.locator('#search-input')).toBeFocused();
   // This checks DOM focus in headless Chromium only. It cannot verify whether
   // a visible browser's omnibox retains keyboard focus after Ctrl+T.
   const createdTab = context.waitForEvent('page');
   await page.evaluate(() => chrome.tabs.create({ active: true }));
   const freshTab = await createdTab;
-  await freshTab.locator('input').waitFor();
-  await expect(freshTab.locator('input')).toBeFocused();
+  await freshTab.locator('#search-input').waitFor();
+  await expect(freshTab.locator('#search-input')).toBeFocused();
   assert.equal(await freshTab.evaluate(() => document.hasFocus()), true);
   await freshTab.keyboard.type('new tab focus');
-  await expect(freshTab.locator('input')).toHaveValue('new tab focus');
+  await expect(freshTab.locator('#search-input')).toHaveValue('new tab focus');
   await freshTab.reload();
-  await expect(freshTab.locator('input')).toBeFocused();
+  await expect(freshTab.locator('#search-input')).toBeFocused();
   await freshTab.keyboard.type('refresh focus');
-  await expect(freshTab.locator('input')).toHaveValue('refresh focus');
+  await expect(freshTab.locator('#search-input')).toHaveValue('refresh focus');
   await freshTab.close();
   await expect(trigger).toHaveAttribute(
     'aria-label',
@@ -171,7 +171,7 @@ try {
   );
   await searchAndCheck('www.google.com', 'q');
   await page.reload();
-  await expect(page.locator('input')).toBeFocused();
+  await expect(page.locator('#search-input')).toBeFocused();
   await expect(trigger).toHaveAttribute(
     'aria-label',
     '切换搜索引擎，当前 Google',

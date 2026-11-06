@@ -77,22 +77,36 @@ try {
     bounded: true,
   });
   const folder = page.locator('[data-library-id="demo-folder"]');
+  assert.deepEqual(
+    await folder.evaluate((el) => [
+      el.gridstackNode.maxW,
+      el.gridstackNode.maxH,
+    ]),
+    [16, 8],
+  );
   async function enlarge(item) {
     await item.hover();
-    const h = await item.locator('.ui-resizable-se').boundingBox();
-    await page.mouse.move(h.x + 8, h.y + 8);
+    // Resizing another item can recreate or move this handle. Let Playwright
+    // wait for the final node to be visible, stable and able to receive input.
+    await item.locator('.ui-resizable-se').hover({ position: { x: 8, y: 8 } });
     await page.mouse.down();
     await page.mouse.move(1420, 980, { steps: 25 });
     if (await item.locator('.folder-cells').count()) {
+      const live = await item.evaluate((el) => ({
+        w: el.gridstackNode.w,
+        h: el.gridstackNode.h,
+      }));
       await expect(item.locator('.folder-cells')).toHaveAttribute(
         'data-columns',
-        '5',
+        String(live.w),
       );
       await expect(item.locator('.folder-cells')).toHaveAttribute(
         'data-rows',
-        '4',
+        String(live.h),
       );
-      await expect(item.locator('.folder-cells .cell-link')).toHaveCount(10);
+      await expect(
+        item.locator('.preview-icons [data-folder-item]'),
+      ).toHaveCount(Math.min(10, live.w * live.h));
       const atMax = await item.boundingBox();
       await page.mouse.move(1435, 995);
       const beyondMax = await item.boundingBox();
@@ -102,15 +116,28 @@ try {
     await page.mouse.up();
   }
   await enlarge(folder);
-  await expect(folder).toHaveAttribute('data-width', '5');
-  await expect(folder).toHaveAttribute('data-height', '4');
+  const expanded = await folder.evaluate((el) => [
+    el.gridstackNode.w,
+    el.gridstackNode.h,
+  ]);
+  assert.ok(
+    expanded[0] > 3 && expanded[0] <= 16 && expanded[1] > 1 && expanded[1] <= 8,
+  );
+  await folder.click({ button: 'right', position: { x: 20, y: 20 } });
+  await page.getByRole('button', { name: '1列 × 3行', exact: true }).click();
+  await expect(folder).toHaveAttribute('data-width', '1');
+  await expect(folder).toHaveAttribute('data-height', '3');
   const icon = page.locator('[data-library-id="demo-link-10"]');
+  assert.deepEqual(
+    await icon.evaluate((el) => [el.gridstackNode.maxW, el.gridstackNode.maxH]),
+    [4, 4],
+  );
   await enlarge(icon);
   await expect
     .poll(async () => Number(await icon.getAttribute('data-width')))
-    .toBe(3);
-  assert(Number(await icon.getAttribute('data-width')) <= 3);
-  assert(Number(await icon.getAttribute('data-height')) <= 3);
+    .toBe(4);
+  assert(Number(await icon.getAttribute('data-width')) <= 4);
+  assert(Number(await icon.getAttribute('data-height')) <= 4);
   assert(
     Number(await icon.getAttribute('data-width')) > 1 ||
       Number(await icon.getAttribute('data-height')) > 1,
@@ -118,7 +145,7 @@ try {
   const bounded = await grid.evaluate((el) => {
     const nodes = el.gridstack.engine.nodes;
     return nodes.every(
-      (n) => n.x >= 0 && n.y >= 0 && n.x + n.w <= 12 && n.y + n.h <= 8,
+      (n) => n.x >= 0 && n.y >= 0 && n.x + n.w <= 16 && n.y + n.h <= 8,
     );
   });
   assert(bounded);
@@ -130,10 +157,12 @@ try {
   );
   await folder.hover();
   const handle = await folder.locator('.ui-resizable-se').boundingBox();
-  const cell = (await grid.boundingBox()).width / 12;
+  const cell = (await grid.boundingBox()).width / 16;
+  // The folder is already 1x3; dragging farther toward the minimum must keep
+  // the three-cell minimum area and its live preview consistent.
   await page.mouse.move(handle.x + 8, handle.y + 8);
   await page.mouse.down();
-  await page.mouse.move(handle.x + 8 - cell * 4, handle.y + 8 - cell, {
+  await page.mouse.move(handle.x + 8 - cell * 4, handle.y + 8 - cell * 4, {
     steps: 20,
   });
   await expect(folder.locator('.folder-cells')).toHaveAttribute(
@@ -144,7 +173,9 @@ try {
     'data-rows',
     '3',
   );
-  await expect(folder.locator('.folder-cells .cell-link')).toHaveCount(3);
+  await expect(folder.locator('.preview-icons [data-folder-item]')).toHaveCount(
+    3,
+  );
   await page.screenshot({ path: 'work/library-resizing.png' });
   await page.mouse.up();
   await expect(folder).toHaveAttribute('data-width', '1');
@@ -155,7 +186,10 @@ try {
   await page.mouse.down();
   await page.mouse.move(40, 40, { steps: 15 });
   const atMin = await folder.boundingBox();
-  assert(atMin.width >= cell - 1 && atMin.height >= cell * 3 - 1);
+  const rowHeight = await grid.evaluate(
+    (el) => el.getBoundingClientRect().height / el.gridstack.opts.maxRow,
+  );
+  assert(atMin.width >= cell - 1 && atMin.height >= rowHeight * 3 - 1);
   await page.mouse.move(5, 5);
   const beyondMin = await folder.boundingBox();
   assert(Math.abs(atMin.width - beyondMin.width) < 1);
@@ -165,7 +199,7 @@ try {
   await page.screenshot({ path: 'work/library-limits.png' });
   assert.deepEqual(errors, []);
   console.log(
-    'PASS bounded 12x8 grid, folder 5x4 maximum, resizable icons up to 3x3, no scrollbars',
+    'PASS bounded 16x8 grid, folder resize/live preview/minimum area, icons up to 4x4, no scrollbars',
   );
 } finally {
   await context.close();

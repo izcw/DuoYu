@@ -48,6 +48,17 @@ function open() {
   clearTimeout(closeTimer);
   expanded.value = true;
   emit('visibility-change', true);
+  // On narrow screens the parent shifts the search field to make room for
+  // the wheel. Position it against the resulting layout, not the old pivot.
+  void nextTick(() => {
+    if (!expanded.value) return;
+    const moved = trigger.value?.getBoundingClientRect();
+    if (moved)
+      center.value = {
+        x: moved.x + moved.width / 2,
+        y: moved.y + moved.height / 2,
+      };
+  });
 }
 function toggle() {
   if (expanded.value) close();

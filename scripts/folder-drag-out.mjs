@@ -41,7 +41,9 @@ try {
     const list = popup ? page.locator('.folder-dialog') : folder;
     const icon = list.locator('[data-folder-item]').first();
     const id = await icon.getAttribute('data-folder-item');
-    const a = await icon.locator('.folder-icon').boundingBox();
+    const handle = popup ? icon.locator('.folder-icon') : icon;
+    await handle.hover();
+    const a = await handle.boundingBox();
     const grid = await page.locator('.library-cell-grid').boundingBox();
     await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
     await page.mouse.down();

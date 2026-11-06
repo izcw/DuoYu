@@ -1,5 +1,5 @@
 import { Dexie, type EntityTable } from 'dexie';
-import { activeAccountKey } from './account';
+import { activeAccountKey, guardAccountWrites, pageAccountKey } from './account';
 import {
   installSyncCapture,
   type CapturedOperation,
@@ -82,7 +82,7 @@ export interface LibraryItem {
 
 /** Shared IndexedDB entry point. Add future tables through versioned migrations. */
 export const database = new Dexie(
-  activeAccountKey() ? 'duoyu-account-' + activeAccountKey() : 'duoyu',
+  pageAccountKey ? 'duoyu-account-' + pageAccountKey : 'duoyu',
 ) as Dexie & {
   preferences: EntityTable<{ id: string; value: unknown }, 'id'>;
   syncOutbox: EntityTable<CapturedOperation, 'id'>;
@@ -117,6 +117,16 @@ export const database = new Dexie(
   libraryPages: EntityTable<LibraryPage, 'id'>;
   workspaceSpaces: EntityTable<WorkspaceSpace, 'id'>;
 };
+
+guardAccountWrites(database);
+// Another tab can change the shared account marker before this page reloads.
+// The Dexie instance itself stays bound to its original database.
+export function isCurrentDatabaseAccount(account: string) {
+  return (
+    activeAccountKey() === account &&
+    database.name === (account ? 'duoyu-account-' + account : 'duoyu')
+  );
+}
 
 database.version(1).stores({
   wallpapers: 'id',
@@ -163,7 +173,7 @@ database.version(8).stores({
   syncMeta: 'id',
   syncConflicts: 'id,createdAt',
 });
-installSyncCapture(database, !!activeAccountKey());
+installSyncCapture(database, !!pageAccountKey);
 database.version(9).stores({ syncAssets: 'id' });
 
 database

@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { getSyncPreference, setSyncPreference } from '../sync/client';
+import { setSyncPreference } from '../sync/client';
+import { liveQuery } from 'dexie';
+import { activeAccountKey, pageAccountKey } from '../../shared/storage/account';
+import { database } from '../../shared/storage/database';
 import { inject, ref, onMounted, onUnmounted, watch } from 'vue';
 import { browser } from 'wxt/browser';
 import type { GlassMode } from './glass/renderer';
@@ -18,22 +21,28 @@ const glassModes = [
   { id: 'natural', label: '自然' },
   { id: 'soft', label: '柔和' },
 ] as const;
-function syncMode(changes: Record<string, { newValue?: unknown }>) {
-  const value = changes.glassMode?.newValue;
-  if (value === 'real' || value === 'natural' || value === 'soft')
-    glassMode.value = value;
+function applyMode(value: unknown) {
+  if (activeAccountKey() === pageAccountKey)
+    glassMode.value = value === 'natural' || value === 'soft' ? value : 'real';
 }
-onMounted(() => browser.storage.local.onChanged.addListener(syncMode));
-onUnmounted(() => browser.storage.local.onChanged.removeListener(syncMode));
-async function cloudMode() {
-  syncMode({ glassMode: { newValue: await getSyncPreference('glassMode') } });
+function guestChanged(changes: Record<string, { newValue?: unknown }>) {
+  if (changes.glassMode) applyMode(changes.glassMode.newValue);
 }
-onMounted(() => window.addEventListener('duoyu-sync-preferences', cloudMode));
-onUnmounted(() =>
-  window.removeEventListener('duoyu-sync-preferences', cloudMode),
-);
+let subscription: { unsubscribe(): void } | undefined;
+onMounted(() => {
+  if (pageAccountKey) {
+    subscription = liveQuery(() => database.preferences.get('glassMode')).subscribe(
+      (record) => applyMode(record?.value),
+    );
+  } else browser.storage.local.onChanged.addListener(guestChanged);
+});
+onUnmounted(() => {
+  subscription?.unsubscribe();
+  if (!pageAccountKey) browser.storage.local.onChanged.removeListener(guestChanged);
+});
 let modeQueue = Promise.resolve();
 function setGlassMode(mode: GlassMode) {
+  notice.value = '';
   glassMode.value = mode;
   modeQueue = modeQueue
     .then(() => setSyncPreference('glassMode', mode))

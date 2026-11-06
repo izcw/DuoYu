@@ -52,7 +52,7 @@ try {
     card.locator('.folder-cells .folder-icon').evaluateAll((icons) =>
       icons.map((icon) => {
         const r = icon.getBoundingClientRect(),
-          p = icon.closest('.folder-link').getBoundingClientRect();
+          p = icon.closest('.cell-panel').getBoundingClientRect();
         return {
           width: r.width,
           height: r.height,
@@ -81,7 +81,11 @@ try {
     el.closest('.library-cell-grid').gridstack.update(el, { y: 1 }),
   );
   await resize(1, 3);
-  assert.ok((await check()).every((i) => i.fits && i.width === i.height));
+  const vertical = await check();
+  assert.ok(
+    vertical.every((i) => i.fits && Math.abs(i.width - i.height) < 0.1),
+    JSON.stringify(vertical),
+  );
   await page.mouse.move(900, 400);
   await page.mouse.wheel(0, 180);
   await expect(page.locator('.desktop-pages')).toHaveAttribute(
@@ -93,8 +97,8 @@ try {
   await expect(icon).toBeVisible();
   await expect(icon).toHaveCSS('width', '56px');
   await expect(icon).toHaveCSS('height', '56px');
-  assert.equal(await grid.evaluate((el) => el.gridstack.getCellHeight()), 112);
-  assert.equal(await grid.evaluate((el) => el.gridstack.cellWidth()), 92);
+  assert.equal(await grid.evaluate((el) => el.gridstack.getCellHeight()), 94);
+  assert.equal(await grid.evaluate((el) => el.gridstack.cellWidth()), 84);
   await icon.click({ button: 'right' });
   const picker = page.locator('.size-picker');
   await expect(picker.locator('button')).toHaveCount(16);
@@ -128,7 +132,7 @@ try {
   }));
   const iconRect = await icon.boundingBox();
   const cell = await grid.evaluate(
-    (el) => el.getBoundingClientRect().width / 18,
+    (el) => el.getBoundingClientRect().width / el.gridstack.getColumn(),
   );
   await page.mouse.move(
     iconRect.x + iconRect.width / 2,
@@ -146,7 +150,7 @@ try {
   await page.screenshot({ path: 'work/grid-fit-56.png' });
   assert.deepEqual(errors, []);
   console.log(
-    'PASS 56px icons, 48px folder icons, 92x112 grid, unclipped 3x1 and 1x3 folders',
+    'PASS 56px icons, 48px folder icons, 84x94 grid, unclipped 3x1 and 1x3 folders',
   );
 } finally {
   await context.close();

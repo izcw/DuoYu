@@ -464,7 +464,10 @@ function nativeEnd() {
   if (session && !session.switched) cancelPageDrag();
 }
 function key(event: KeyboardEvent) {
-  if (event.key === 'Escape') cancelPageDrag();
+  if (event.key === 'Escape' && session) {
+    event.preventDefault();
+    cancelPageDrag();
+  }
 }
 export function connectPageDrag(select: (id: string) => void) {
   navigate = select;

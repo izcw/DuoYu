@@ -64,7 +64,6 @@ function deletePage() {
 let disconnectDrag: (() => void) | undefined;
 let disposed = false;
 let subscription: { unsubscribe(): void } | undefined;
-let savingOrder = false;
 function select(page: LibraryPage) {
   active.value = page.id;
   emit('title', page.name);
@@ -104,10 +103,11 @@ function rename() {
       emit('title', name.value.trim());
       emit('navigate');
     } else {
-      await database.libraryPages.update(editing.value, {
+      const updated = await database.libraryPages.update(editing.value, {
         name: name.value.trim().slice(0, 30),
         icon: icon.value,
       });
+      if (!updated) throw new Error('该收藏页已被删除，请重新选择');
       if (active.value === editing.value) emit('title', name.value.trim());
     }
     editing.value = '';
@@ -122,17 +122,15 @@ function choose(id: string) {
   }
 }
 function reorder(ids: string[]) {
+  if (busy.value) return;
   const original = pages.value;
   pages.value = ids.flatMap((id) => original.filter((p) => p.id === id));
-  savingOrder = true;
   void run(async () => {
     try {
       await orderLibraryPages(ids);
     } catch (e) {
-      pages.value = original;
+      pages.value = await database.libraryPages.orderBy('order').toArray();
       throw e;
-    } finally {
-      savingOrder = false;
     }
   });
 }
@@ -164,7 +162,7 @@ onMounted(async () => {
     database.libraryPages.orderBy('order').toArray(),
   ).subscribe({
     next(value) {
-      if (!savingOrder) pages.value = value;
+      pages.value = value;
       emit('pages', value);
       const selected = value.find((p) => p.id === active.value) || value[0];
       if (selected) select(selected);

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { openWebTab } from '../../shared/open-web-tab';
 import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 import AddShortcutDialog from './components/AddShortcutDialog.vue';
 import RadialWheel from '../../shared/components/composite/RadialWheel.vue';
@@ -99,7 +100,9 @@ function select(id: string) {
   } else if (id === 'add') {
     dialog.value = true;
   } else if (item.url) {
-    void browser.tabs.create({ url: item.url });
+    void openWebTab(item.url).catch((error) => {
+      notice.value = error instanceof Error ? error.message : '无法打开网页';
+    });
   }
 }
 function contextMenu(event: MouseEvent) {
@@ -117,7 +120,7 @@ function contextMenu(event: MouseEvent) {
   open(event.clientX, event.clientY);
 }
 function down(event: PointerEvent) {
-  if (dialog.value || !event.isPrimary) return;
+  if (dialog.value || !event.isPrimary || event.defaultPrevented) return;
   const target = event.target as Element;
   if (event.button === interaction.clickButton) {
     ignoreContext = false;
@@ -154,8 +157,18 @@ function outsidePointer(event: PointerEvent) {
     visible.value &&
     event.target instanceof Element &&
     !event.target.closest('.wallpaper-wheel')
-  )
+  ) {
+    // Capture closes the wheel before the bubbling gesture handler runs. Consume
+    // a blank right click so that the same release cannot reopen it elsewhere.
+    if (
+      event.button === interaction.clickButton &&
+      blank(event.target, event)
+    ) {
+      event.preventDefault();
+      ignoreContext = true;
+    }
     close();
+  }
 }
 function move(event: PointerEvent) {
   if (gesture?.id === event.pointerId && gesture.holding)
@@ -182,7 +195,8 @@ function cancel() {
   close();
 }
 function keydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') {
+  if (event.key === 'Escape' && (visible.value || gesture || dialog.value)) {
+    event.preventDefault();
     if (dialog.value) dialog.value = false;
     cancel();
   }

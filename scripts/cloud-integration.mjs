@@ -67,6 +67,7 @@ if (!navigator.locks)
   });
 await mkdir('work/sync-integration', { recursive: true });
 const replacements = {
+  "'../library/grid-config'": "'./grid-config.mjs'",
   "'../wallpaper/wallpaper-intent'": "'./wallpaper-intent.mjs'",
   "'../../shared/collection-colors'": "'./collection-colors.mjs'",
   "'./pending-wallpaper'": "'./pending-wallpaper.mjs'",
@@ -94,6 +95,7 @@ for (const [name, path] of Object.entries({
   assets: 'src/features/sync/assets.ts',
   conflicts: 'src/features/sync/conflicts.ts',
   importer: 'src/features/sync/import-json.ts',
+  'grid-config': 'src/features/library/grid-config.ts',
   database: 'src/shared/storage/database.ts',
   account: 'src/shared/storage/account.ts',
 })) {
@@ -289,6 +291,7 @@ try {
   let calledWrongAccount = false;
   await assert.rejects(resolution.fetchRemoteConflicts(async()=>{calledWrongAccount=true;return {conflicts:[]};}),/账号/);
   assert.equal(calledWrongAccount,false);
+  await assert.rejects(resolution.retryConflict(blocked.id), /账号/);
   data.set('duoyu-sync-account',accountStorageKey);
   console.log('PASS resolved conflict persistence and switched-account isolation');
   const pngSha = (await database.syncAssets.toArray())[0].id;

@@ -10,6 +10,7 @@ const context = await chromium.launchPersistentContext(
   {
     channel: process.env.TEST_BROWSER_CHANNEL || 'chromium',
     headless: true,
+    colorScheme: 'light',
     hasTouch: true,
     ignoreDefaultArgs: ['--disable-extensions'],
     viewport: { width: 1440, height: 900 },
@@ -59,7 +60,7 @@ async function run(name, handler, test) {
   });
   try {
     await page.goto('chrome://newtab');
-    await page.locator('input').waitFor();
+    await page.locator('#search-input').waitFor();
     await test(page, requests);
     passed.push(name);
     console.log(`PASS ${name}`);
@@ -89,14 +90,14 @@ try {
     reply,
     async (p) => {
       const text = '你好 & hello # /';
-      await p.locator('input').fill(text);
+      await p.locator('#search-input').fill(text);
       await expect(p.getByRole('option')).toHaveCount(10);
       await expect(p.locator('.translation-option')).toBeVisible();
       assert.equal(
         await p
           .locator('.search-suggestions')
           .evaluate((el) => getComputedStyle(el).color),
-        'rgb(255, 255, 255)',
+        'rgb(34, 34, 34)',
       );
       await p.locator('.translation-option').click();
       await expect
@@ -105,7 +106,7 @@ try {
       const url = new URL(p.searchResult.url());
       assert.equal(url.searchParams.get('query'), text);
       assert.equal(url.searchParams.get('lang'), 'auto2en');
-      await expect(p.locator('input')).toHaveValue(text);
+      await expect(p.locator('#search-input')).toHaveValue(text);
     },
   );
   await run(
@@ -113,8 +114,8 @@ try {
     reply,
     async (p, requests) => {
       await expect(p.getByRole('button', { name: '开始搜索' })).toBeDisabled();
-      await p.locator('input').fill('   ');
-      await p.locator('input').press('Enter');
+      await p.locator('#search-input').fill('   ');
+      await p.locator('#search-input').press('Enter');
       assert.equal(requests.length, 0);
       await expect(p.getByRole('option')).toHaveCount(0);
     },
@@ -126,15 +127,15 @@ try {
       await reply(r, q);
     },
     async (p) => {
-      await p.locator('input').fill('fast');
+      await p.locator('#search-input').fill('fast');
       await expect(p.getByRole('option')).toHaveCount(1);
-      await p.locator('input').press('ArrowDown');
+      await p.locator('#search-input').press('ArrowDown');
       await expect(p.getByRole('option')).toHaveCount(10);
       await expect(p.getByRole('option').first()).toHaveAttribute(
         'aria-selected',
         'true',
       );
-      await p.locator('input').press('Enter');
+      await p.locator('#search-input').press('Enter');
       await waitForSearch(p);
       assert.equal(new URL(p.searchResult.url()).searchParams.get('q'), 'fast');
     },
@@ -146,7 +147,7 @@ try {
         json: [q, [' a ', 'A', '', null, '<img src=x onerror=alert(1)>', 'a']],
       }),
     async (p) => {
-      await p.locator('input').fill('a');
+      await p.locator('#search-input').fill('a');
       await expect(p.getByRole('option')).toHaveCount(2);
       await expect(p.getByRole('option').nth(1)).toContainText(
         '<img src=x onerror=alert(1)>',
@@ -161,9 +162,9 @@ try {
       await reply(r, q);
     },
     async (p, requests) => {
-      await p.locator('input').fill('old');
+      await p.locator('#search-input').fill('old');
       await expect.poll(() => requests.includes('old')).toBe(true);
-      await p.locator('input').fill('new');
+      await p.locator('#search-input').fill('new');
       await expect(p.getByRole('option')).toHaveCount(10);
       await delay(400);
       await expect(p.getByRole('option').nth(1)).toContainText(
@@ -178,10 +179,10 @@ try {
       await reply(r, q);
     },
     async (p) => {
-      await p.locator('input').fill('clear');
+      await p.locator('#search-input').fill('clear');
       await p.getByRole('button', { name: '清空搜索' }).click();
-      await expect(p.locator('input')).toBeFocused();
-      await expect(p.locator('input')).toHaveValue('');
+      await expect(p.locator('#search-input')).toBeFocused();
+      await expect(p.locator('#search-input')).toHaveValue('');
       await delay(300);
       await expect(p.getByRole('option')).toHaveCount(0);
     },
@@ -190,7 +191,7 @@ try {
     'IME enter confirms composition without searching',
     reply,
     async (p, requests) => {
-      const input = p.locator('input');
+      const input = p.locator('#search-input');
       await input.dispatchEvent('compositionstart');
       await input.fill('中文输入');
       await input.press('Enter');
@@ -214,14 +215,14 @@ try {
         : reply(r, q),
     async (p, requests) => {
       const text = '如何使用vue开发浏览器插件的新标签页';
-      await p.locator('input').fill(text);
+      await p.locator('#search-input').fill(text);
       await expect(p.getByText('相关', { exact: true }).first()).toBeVisible();
       const count = requests.length;
       await p.getByRole('button', { name: '清空搜索' }).click();
-      await p.locator('input').fill(text);
+      await p.locator('#search-input').fill(text);
       await expect(p.getByText('相关', { exact: true }).first()).toBeVisible();
       assert.equal(requests.length, count);
-      await p.locator('input').press('Enter');
+      await p.locator('#search-input').press('Enter');
       await waitForSearch(p);
       assert.equal(new URL(p.searchResult.url()).searchParams.get('q'), text);
     },
@@ -230,7 +231,7 @@ try {
     'all-empty response keeps direct search and stops after bounded fallbacks',
     (r) => r.fulfill({ status: 204 }),
     async (p, requests) => {
-      await p.locator('input').fill('没有联想内容的长句测试');
+      await p.locator('#search-input').fill('没有联想内容的长句测试');
       await expect(
         p.getByRole('status').filter({ hasText: '暂无更多建议' }),
       ).toBeVisible();
@@ -242,7 +243,7 @@ try {
     'network failure leaves direct search usable',
     (r) => r.abort(),
     async (p) => {
-      await p.locator('input').fill('offline');
+      await p.locator('#search-input').fill('offline');
       await expect(p.getByText('联想暂不可用，仍可直接搜索')).toBeVisible();
       await p.getByRole('button', { name: '开始搜索' }).click();
       await waitForSearch(p);
@@ -252,9 +253,23 @@ try {
     'malformed response shows recoverable failure',
     (r) => r.fulfill({ body: 'not-json' }),
     async (p) => {
-      await p.locator('input').fill('bad');
+      await p.locator('#search-input').fill('bad');
       await expect(p.getByText('联想暂不可用，仍可直接搜索')).toBeVisible();
       await expect(p.getByRole('option')).toHaveCount(1);
+    },
+  );
+  await run(
+    'oversized suggestion payload falls back and the next search recovers',
+    (r, q) =>
+      q === 'oversized'
+        ? r.fulfill({ json: [q, ['unexpected'], 'x'.repeat(300000)] })
+        : reply(r, q),
+    async (p) => {
+      const input = p.locator('#search-input');
+      await input.fill('oversized');
+      await expect(p.getByText('联想暂不可用，仍可直接搜索')).toBeVisible();
+      await input.fill('recovered');
+      await expect(p.getByRole('option')).toHaveCount(10);
     },
   );
   await run(
@@ -264,7 +279,7 @@ try {
       await reply(r, q);
     },
     async (p) => {
-      await p.locator('input').fill('slow');
+      await p.locator('#search-input').fill('slow');
       await expect(p.getByText('联想暂不可用，仍可直接搜索')).toBeVisible({
         timeout: 6000,
       });
@@ -276,11 +291,11 @@ try {
     reply,
     async (p) => {
       await p.setViewportSize({ width: 390, height: 700 });
-      await p.locator('input').fill('keyboard');
+      await p.locator('#search-input').fill('keyboard');
       await expect(p.getByRole('option')).toHaveCount(10);
-      await p.locator('input').press('Escape');
+      await p.locator('#search-input').press('Escape');
       await expect(p.getByRole('option')).toHaveCount(0);
-      await p.locator('input').press('ArrowUp');
+      await p.locator('#search-input').press('ArrowUp');
       await expect(p.getByRole('option').last()).toHaveAttribute(
         'aria-selected',
         'true',
@@ -288,7 +303,7 @@ try {
       assert.ok(
         await p.locator('.suggestion-list').evaluate((el) => el.scrollTop > 0),
       );
-      await p.locator('input').press('Enter');
+      await p.locator('#search-input').press('Enter');
       await waitForSearch(p);
       assert.equal(
         new URL(p.searchResult.url()).searchParams.get('q'),
@@ -300,9 +315,9 @@ try {
     'search button uses typed query instead of highlighted suggestion',
     reply,
     async (p) => {
-      await p.locator('input').fill('typed');
+      await p.locator('#search-input').fill('typed');
       await expect(p.getByRole('option')).toHaveCount(10);
-      await p.locator('input').press('ArrowUp');
+      await p.locator('#search-input').press('ArrowUp');
       await p.getByRole('button', { name: '开始搜索' }).click();
       await waitForSearch(p);
       assert.equal(
@@ -316,11 +331,11 @@ try {
     reply,
     async (p) => {
       await p.setViewportSize({ width: 320, height: 740 });
-      await p.locator('input').fill('touch');
+      await p.locator('#search-input').fill('touch');
       await expect(p.getByRole('option')).toHaveCount(10);
       await p.locator('.clock-time').click();
       await expect(p.getByRole('option')).toHaveCount(0);
-      await p.locator('input').click();
+      await p.locator('#search-input').click();
       await expect(p.getByRole('option')).toHaveCount(10);
       assert.ok(
         await p.evaluate(

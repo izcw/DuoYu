@@ -19,6 +19,7 @@ const busy = ref(false);
 const progress = ref<WallpaperProgress>();
 const applying = ref<string>();
 const error = ref('');
+const previewError = ref('');
 type Choice = { selection: string; blob?: Blob | string; contentHash?: string };
 const store = ref<Choice>({ selection: 'daily' });
 const upload = ref<Choice>();
@@ -56,22 +57,15 @@ const subscription = liveQuery(async () => ({
     owned.push(url);
     return url;
   }
-  try {
-    const [a, b] = await Promise.all([
-      preview(store.value),
-      preview(upload.value),
-    ]);
-    if (request !== generation) {
-      owned.forEach(URL.revokeObjectURL);
-      return;
-    }
-    urls.forEach(URL.revokeObjectURL);
-    urls = owned;
-    previews.value = { store: a, upload: b };
-  } catch {
+  const [a, b] = await Promise.allSettled([preview(store.value), preview(upload.value)]);
+  if (request !== generation) {
     owned.forEach(URL.revokeObjectURL);
-    if (request === generation) error.value = '壁纸预览暂未加载完成';
+    return;
   }
+  urls.forEach(URL.revokeObjectURL);
+  urls = owned;
+  previews.value = { store: a.status === 'fulfilled' ? a.value : '', upload: b.status === 'fulfilled' ? b.value : '' };
+  previewError.value = a.status === 'rejected' || b.status === 'rejected' ? '壁纸预览暂未加载完成' : '';
 });
 onUnmounted(() => {
   generation++;
@@ -184,7 +178,7 @@ async function choose(event: Event) {
     </div>
   </div>
   <input ref="input" hidden type="file" accept="image/*" @change="choose" />
-  <p v-if="error" role="alert">{{ error }}</p>
+  <p v-if="error || previewError" role="alert">{{ error || previewError }}</p>
 </template>
 <style scoped>
 .my-wallpapers {

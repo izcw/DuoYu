@@ -57,11 +57,20 @@ watchEffect((cleanup) => {
   });
 });
 const customFailed = ref(false);
+const pageAddress = computed(() => {
+  if (!props.pageUrl) return null;
+  try {
+    const url = new URL(props.pageUrl);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
+});
 const failed = ref(false);
 const hdFailed = ref(false);
 const discoveredIcon = ref('');
 watch(
-  () => [props.pageUrl, props.refreshKey, props.src] as const,
+  () => [pageAddress.value?.href, props.refreshKey, props.src] as const,
   async ([url, refresh], _, cleanup) => {
     let current = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -72,7 +81,6 @@ watch(
     discoveredIcon.value = '';
     if (
       !url ||
-      !/^https?:\/\//i.test(url) ||
       (appearance.value && appearance.value.mode !== 'auto') ||
       (!appearance.value && props.src)
     )
@@ -125,8 +133,8 @@ const source = computed(() => {
     value.length < 200000
   )
     return value;
-  if (props.pageUrl && /^https?:\/\//i.test(props.pageUrl)) {
-    const host = new URL(props.pageUrl).hostname;
+  if (pageAddress.value) {
+    const host = pageAddress.value.hostname;
     if (
       !hdFailed.value &&
       (host === 'douyin.com' || host.endsWith('.douyin.com'))
@@ -134,7 +142,7 @@ const source = computed(() => {
       return '/images/douyin-hd.png';
     if (discoveredIcon.value) return discoveredIcon.value;
     const url = new URL('/_favicon/', browser.runtime.getURL('/'));
-    url.searchParams.set('pageUrl', props.pageUrl);
+    url.searchParams.set('pageUrl', pageAddress.value.href);
     url.searchParams.set('size', '128');
     if (props.refreshKey)
       url.searchParams.set('refresh', String(props.refreshKey));

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
+import { openGridMenu } from './ui-helpers.mjs';
 await mkdir('work', { recursive: true });
 const extension = path.resolve('.output/chrome-mv3');
 const context = await chromium.launchPersistentContext(
@@ -38,16 +39,14 @@ try {
   await page.waitForTimeout(800);
 
   async function checkBoundary() {
-    const rect = await grid.boundingBox();
-    const inside = { x: rect.x + 20, y: rect.y + 20 };
-    const outside = { x: rect.x - 3, y: rect.y + 25 };
-    await page.mouse.click(inside.x, inside.y, { button: 'right' });
+    const outside = { x: 720, y: 60 };
+    const inside = await openGridMenu(page, grid, { waitForItem: false });
     await expect(page.getByRole('menu', { name: '收藏页菜单' })).toBeVisible();
     await expect(
       page.locator('.radial-wheel[aria-hidden="false"]'),
     ).toHaveCount(0);
     await page.keyboard.press('Escape');
-    await page.mouse.click(inside.x, inside.y);
+    await grid.click({ position: inside });
     await expect(page.locator('.workspace-overlay')).toHaveCount(0);
     await page.mouse.click(outside.x, outside.y, { button: 'right' });
     await expect(page.locator('.radial-wheel[aria-hidden="false"]')).toHaveCSS(
@@ -62,6 +61,13 @@ try {
     ).toHaveCount(0);
     await expect(page.locator('.workspace-overlay')).toHaveCount(0);
     await page.mouse.click(outside.x, outside.y);
+    // Blank wallpaper clicks no longer open a workspace; its explicit Dock
+    // and wheel entries own navigation.
+    await expect(page.locator('.workspace-overlay')).toHaveCount(0);
+    await page
+      .getByRole('navigation', { name: '快捷 Dock', exact: true })
+      .getByRole('button', { name: '标签工作区', exact: true })
+      .click();
     await expect(page.locator('.workspace-overlay')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('.workspace-overlay')).toHaveCount(0);
@@ -87,9 +93,16 @@ try {
   );
   await page.waitForTimeout(700);
   await checkBoundary();
+  // Escape from the workspace now returns to home, whose page chooser opens on focus.
+  await expect(page.locator('.desktop-pages')).toHaveAttribute('data-desktop-page', '0');
+  await page.locator('.desktop-menu[aria-label="收藏页面"]').focus();
+  await page
+    .locator('[data-library-page-id="library-demo"] .library-page-choice')
+    .click();
+  await checkBoundary();
   assert.deepEqual(errors, []);
   console.log(
-    'PASS home/library grid menus, outside wheel/workspace, wheel dismissal, long-press release',
+    'PASS home/library grid menus, wallpaper wheel, explicit workspace navigation, wheel dismissal, long-press release',
   );
 } finally {
   await context.close();

@@ -12,8 +12,6 @@ import GridItemMenu from './GridItemMenu.vue';
 import WorkspaceFavicon from '../workspace/WorkspaceFavicon.vue';
 import { beginPageDrag, pageDragActive } from './page-drag';
 import {
-  itemMaxColumns,
-  itemMaxRows,
   FOLDER_DIALOG_COLUMNS,
   FOLDER_DIALOG_ROWS,
   DESKTOP_ICON_SIZE,
@@ -23,7 +21,7 @@ import {
   LIBRARY_GRID_ROWS,
 } from './grid-config';
 import { resizeLibraryItem } from './library';
-import { normalizeSize, layoutLibraryItems } from './grid-layout';
+import { normalizeSize, layoutLibraryItems, sizeLimits } from './grid-layout';
 const props = withDefaults(
   defineProps<{
     automatic?: boolean;
@@ -62,6 +60,9 @@ const pageCount = computed(() =>
     ),
   ),
 );
+watch(pageCount, (count) => {
+  folderPage.value = Math.min(folderPage.value, count - 1);
+});
 const size = (item: LibraryItem) =>
   normalizeSize(
     item.width || (item.kind === 'link' ? 1 : 3),
@@ -137,10 +138,11 @@ function syncGrid(grid: GridStack) {
   grid.removeAll(false, false);
   for (const { item, x, y } of layout.value.items) {
     const el = gridElement.value?.querySelector<HTMLElement>(
-      `[gs-id="${item.id}"]`,
+      `[gs-id="${CSS.escape(item.id)}"]`,
     );
     if (!el) continue;
     const dimensions = size(item);
+    const limits = sizeLimits(item.kind, item.widgetSize);
     grid.makeWidget(el, {
       id: item.id,
       x,
@@ -148,10 +150,10 @@ function syncGrid(grid: GridStack) {
       autoPosition: false,
       w: dimensions.width,
       h: dimensions.height,
-      minW: item.widgetSize?.minWidth ?? 1,
-      minH: item.widgetSize?.minHeight ?? 1,
-      maxW: item.widgetSize?.maxWidth ?? itemMaxColumns(item.kind),
-      maxH: Math.min(props.rows, item.widgetSize?.maxHeight ?? itemMaxRows(item.kind)),
+      minW: limits.minWidth,
+      minH: Math.min(props.rows, limits.minHeight),
+      maxW: limits.maxWidth,
+      maxH: Math.min(props.rows, limits.maxHeight),
       noResize: false,
       noMove: false,
     });
@@ -360,7 +362,7 @@ let dragBounds: { item: LibraryItem; rect: DOMRect }[] = [];
 function captureDragBounds() {
   dragBounds = props.items.flatMap((entry) => {
     const tile = gridElement.value?.querySelector<HTMLElement>(
-      `[gs-id="${entry.id}"]`,
+      `[gs-id="${CSS.escape(entry.id)}"]`,
     );
     return tile ? [{ item: entry, rect: tile.getBoundingClientRect() }] : [];
   });

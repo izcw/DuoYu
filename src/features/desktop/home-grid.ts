@@ -5,7 +5,7 @@ import { DESKTOP_GRID_COLUMNS, HOME_GRID_ROWS } from '../library/grid-config';
 
 /** Copy existing home groups once; all pages subsequently share LibraryGrid storage. */
 export async function ensureHomeGrid() {
-  if (activeAccountKey()) return;
+  if (database.name !== 'duoyu' || activeAccountKey()) return;
   await database.transaction(
     'rw',
     database.libraryItems,

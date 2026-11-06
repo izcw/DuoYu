@@ -7,7 +7,7 @@ import { useWallpaperSelection } from '../wallpaper/useWallpaperSelection';
 const selectedWallpaper = useWallpaperSelection();
 import { computed, ref, watch, onUnmounted } from 'vue';
 import { liveQuery } from 'dexie';
-import { browser } from 'wxt/browser';
+import { openWebTab } from '../../shared/open-web-tab';
 import DialogLayout from '../../shared/components/base/DialogLayout.vue';
 import CloudCatalog from './CloudCatalog.vue';
 import MyWallpapers from '../wallpaper/MyWallpapers.vue';
@@ -137,7 +137,7 @@ watch(
 );
 async function open(item: LibraryItem) {
   if (item.kind === 'link')
-    await run(() => browser.tabs.create({ url: item.url }));
+    await run(() => openWebTab(item.url));
   else selected.value = item;
 }
 </script>

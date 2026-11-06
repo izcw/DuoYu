@@ -17,7 +17,7 @@ import {
   prepareLocalPreview,
   previewResolutionChanges,
 } from './conflict-preview';
-const open = defineModel<boolean>({ default: false });
+const open = defineModel<boolean>('open', { default: false });
 const records = ref<SyncConflict[]>([]),
   shadow = ref<Entity[]>([]),
   selected = ref(''),
@@ -184,10 +184,14 @@ async function apply(side: 'local' | 'cloud') {
     if (
       !refreshed ||
       refreshed.id !== group.id ||
+      refreshed.records.length !== remaining.length ||
       refreshed.records.some((record) => !chosenIds.has(record.id))
     )
       throw Error('刷新后冲突分组已变化，请查看更新后的预览并重新选择');
-    if (resolving.value && side === 'local') {
+    if (
+      refreshed.records.some((record) => record.state === 'resolving') &&
+      side === 'local'
+    ) {
       await syncNow();
       await refreshConflictPreview();
       const pending = await database.syncOutbox.toArray();
@@ -203,10 +207,16 @@ async function apply(side: 'local' | 'cloud') {
     const map = new Map(
       shadow.value.map((e) => [e.table + ':' + e.id, e.revision]),
     );
-    const resolved =
-      side === 'local'
-        ? previewResolutionChanges(shadow.value, changes.value, local.value)
-        : changes.value;
+    let resolved = refreshed.changes;
+    if (side === 'local') {
+      const layout = prepareLocalPreview(shadow.value, resolved);
+      if (layout.overflow) throw Error('刷新后的桌面空间不足，请重新查看预览');
+      resolved = previewResolutionChanges(
+        shadow.value,
+        resolved,
+        layout.entities,
+      );
+    }
     const expected = Object.fromEntries(
       resolved.map((c) => [
         c.table + ':' + c.id,

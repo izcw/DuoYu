@@ -8,7 +8,7 @@ const context = await chromium.launchPersistentContext(
   {
     channel: 'msedge',
     headless: true,
-    viewport: { width: 1440, height: 900 },
+    viewport: { width: 1440, height: 1800 },
     ignoreDefaultArgs: ['--disable-extensions'],
     args: [`--load-extension=${ext}`, `--disable-extensions-except=${ext}`],
   },
@@ -29,9 +29,7 @@ try {
   await page.waitForTimeout(230);
   await expect(wallpaper).toHaveCount(0);
   await page.mouse.up();
-  // Blank left clicks now enter the workspace; close it before testing the wheel.
-  await page.locator('.workspace-board').waitFor();
-  await page.keyboard.press('Escape');
+  // Workspace navigation is explicit; a blank left click has no navigation effect.
   await expect(page.locator('.workspace-overlay')).toHaveCount(0);
   await page.mouse.down({ button: 'right' });
   await page.waitForTimeout(300);
@@ -56,11 +54,14 @@ try {
   );
   await expect(wallpaper.locator('.radial-marker')).toHaveCSS('opacity', '0');
   await page.mouse.up({ button: 'right' });
+  await expect(wallpaper).not.toHaveClass(/is-open/);
+  await page.waitForTimeout(250);
+  await page.mouse.click(720, 500, { button: 'right' });
   await expect(wallpaper).toHaveClass(/is-open/);
   await page.mouse.move(830, 500);
   await expect(wallpaper.locator('.radial-marker')).toHaveAttribute(
     'data-target',
-    'xiaohongshu',
+    'sspai',
   );
   await page.mouse.move(730, 505);
   await expect(wallpaper.locator('.radial-marker')).toHaveAttribute(

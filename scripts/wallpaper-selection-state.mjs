@@ -20,6 +20,7 @@ const code = ts
 const database = new Dexie('wallpaper-selection-test-' + Date.now());
 database.version(1).stores({ wallpapers: 'id', preferences: 'id' });
 const events = new EventTarget();
+const activeDesktop = ref('default');
 const useSelection = new Function(
   'ref',
   'onUnmounted',
@@ -40,7 +41,7 @@ const useSelection = new Function(
   { getItem: () => 'custom' },
   events,
   'wallpaperDesktop:',
-  ref('default'),
+  activeDesktop,
 );
 // Real Vue mount/unmount lifecycle and real Dexie transactions/notifications.
 const renderer = createRenderer({
@@ -98,6 +99,18 @@ try {
   await database.preferences.put({ id: 'wallpaperMode', value: 'custom' });
   const legacy = mount();
   await expectSelection(legacy, 'cloud:older');
+  await database.preferences.put({
+    id: 'wallpaperDesktop:second',
+    value: { selection: 'upload' },
+  });
+  activeDesktop.value = 'second';
+  events.dispatchEvent(new Event('duoyu-wallpaper-change'));
+  await expectSelection(legacy, 'upload');
+  await database.preferences.put({
+    id: 'wallpaperDesktop:second',
+    value: { selection: 'cloud:second' },
+  });
+  await expectSelection(legacy, 'cloud:second');
   legacy.unmount();
   console.log(
     'PASS: real Vue remount + Dexie selection restoration, stale cache/mode, live updates, legacy fallback',

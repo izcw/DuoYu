@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser';
+import { readMetadataHTML } from '../shared/response-body';
 import { websiteTitle } from '../features/library/website-title';
 import { websiteIcon } from '../features/library/website-icon';
 import { remoteMetadata } from '../features/library/remote-metadata';
@@ -103,7 +104,7 @@ export default defineBackground(() => {
           signal: AbortSignal.timeout(8000),
         });
         if (!response.ok) throw new Error(`网站返回 HTTP ${response.status}`);
-        const html = (await response.text()).slice(0, 500000);
+        const html = await readMetadataHTML(response);
         respond({
           title: websiteTitle(html, url),
           error:

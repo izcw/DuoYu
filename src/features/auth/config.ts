@@ -2,7 +2,7 @@
 export const authConfig = {
   issuer: import.meta.env.VITE_AUTH_ISSUER.replace(/\/+$/, ''),
   clientId: import.meta.env.VITE_AUTH_CLIENT_ID,
-  scope: import.meta.env.VITE_AUTH_SCOPE,
+  scope: [...new Set((import.meta.env.VITE_AUTH_SCOPE + ' offline_access').split(/\s+/).filter(Boolean))].join(' '),
 };
 export const AUTH_SESSION_KEY = 'duoyuAuthSession';
 export interface Account {

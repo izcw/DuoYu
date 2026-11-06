@@ -1,3 +1,5 @@
+import { readResponseBytes } from '../../shared/response-body';
+
 export interface SuggestionResult {
   items: string[];
   related: boolean;
@@ -64,8 +66,13 @@ async function fetchSuggestions(
     credentials: 'omit',
     referrerPolicy: 'no-referrer',
   });
-  if (!response.ok) throw new Error('Suggestion service unavailable');
-  const body = response.status === 204 ? '' : await response.text();
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error('Suggestion service unavailable');
+  }
+  const body = new TextDecoder().decode(
+    await readResponseBytes(response, 256 * 1024),
+  );
   const data: unknown = body.trim() ? JSON.parse(body) : [query, []];
   if (!Array.isArray(data) || !Array.isArray(data[1]))
     throw new Error('Invalid suggestion response');

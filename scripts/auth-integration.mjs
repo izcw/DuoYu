@@ -50,6 +50,7 @@ function sql(q) {
   }
 }
 let context;
+let fixtureCreated = false;
 try {
   assert.equal(
     (
@@ -58,9 +59,6 @@ try {
       ).then((r) => r.json())
     ).issuer,
     'http://localhost:8080',
-  );
-  sql(
-    `INSERT INTO users(id,email,name,password_hash) VALUES('${id}','${email}','扩展联调用户','${hash}')`,
   );
   await mkdir('work', { recursive: true });
   const extension = path.resolve('.output/chrome-mv3');
@@ -94,10 +92,19 @@ try {
     chrome.identity.getRedirectURL('oidc'),
   );
   assert.match(redirect, /^https:\/\/[a-p]{32}\.chromiumapp\.org\/oidc$/);
-  // Register only the local extension client; no shared secrets or production changes.
-  sql(
-    `UPDATE apps SET platform='extension',redirects=ARRAY['${redirect}'],allowed_origins=ARRAY['chrome-extension://${extensionId}'] WHERE id='duoyu_extensions_local' AND public`,
+  // Existing local registrations may be shared by multiple developer profiles.
+  // Check the exact entry without replacing or temporarily broadening its allowlist.
+  assert.equal(
+    sql(
+      `SELECT EXISTS(SELECT 1 FROM apps WHERE id='duoyu_extensions_local' AND public AND platform='extension' AND '${redirect}'=ANY(redirects) AND 'chrome-extension://${extensionId}'=ANY(allowed_origins))`,
+    ),
+    't',
+    'Register this local callback and origin before running the legacy browser fixture',
   );
+  sql(
+    `INSERT INTO users(id,email,name,password_hash) VALUES('${id}','${email}','扩展联调用户','${hash}')`,
+  );
+  fixtureCreated = true;
   console.log('Local callback:', redirect);
   const page = await context.newPage();
   await page.goto(`chrome-extension://${extensionId}/newtab.html`);
@@ -138,6 +145,7 @@ try {
   await popup.locator('[data-mode="password"]').click();
   await popup.locator('#email').fill(email);
   await popup.locator('#password').fill(password);
+  await popup.locator('#legal-accept').check();
   await popup.locator('#submit').click();
   await popup.locator('#continue').click();
   await page
@@ -334,6 +342,7 @@ try {
   await crashLogin.locator('[data-mode="password"]').click();
   await crashLogin.locator('#email').fill(email);
   await crashLogin.locator('#password').fill(password);
+  await crashLogin.locator('#legal-accept').check();
   await crashLogin.locator('#submit').click();
   await crashLogin.locator('#continue').click();
   await page.getByRole('button', { name: '我的账号', exact: true }).waitFor();
@@ -386,8 +395,12 @@ try {
     'PASS extension reload clears session storage and requires new authorization',
   );
 } finally {
-  await context?.close();
-  sql(
-    `DELETE FROM sessions WHERE user_id='${id}'; DELETE FROM access_tokens WHERE user_id='${id}'; DELETE FROM app_users WHERE user_id='${id}'; DELETE FROM auth_requests WHERE body->>'UserID'='${id}'; DELETE FROM logout_jobs WHERE user_id='${id}'; DELETE FROM users WHERE id='${id}';`,
-  );
+  try {
+    await context?.close();
+  } finally {
+    if (fixtureCreated)
+      sql(
+        `DELETE FROM sessions WHERE user_id='${id}'; DELETE FROM access_tokens WHERE user_id='${id}'; DELETE FROM app_users WHERE user_id='${id}'; DELETE FROM auth_requests WHERE body->>'UserID'='${id}'; DELETE FROM logout_jobs WHERE user_id='${id}'; DELETE FROM users WHERE id='${id}';`,
+      );
+  }
 }

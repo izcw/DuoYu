@@ -191,6 +191,8 @@ function click(event: MouseEvent, id: string) {
 }
 async function key(event: KeyboardEvent, index: number) {
   if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
     emit('close');
     return;
   }

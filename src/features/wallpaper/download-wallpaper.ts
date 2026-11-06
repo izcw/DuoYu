@@ -14,20 +14,26 @@ export async function downloadWallpaper(
       ? AbortSignal.any([options.signal, AbortSignal.timeout(30_000)])
       : AbortSignal.timeout(30_000),
   });
-  if (!response.ok) throw Error('壁纸下载失败，请重试');
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw Error('壁纸下载失败，请重试');
+  }
   const limit = 20 * 1024 * 1024;
   const length = Number(response.headers.get('content-length'));
   const total =
     length > 0 && !response.headers.get('content-encoding')
       ? length
       : undefined;
-  if (total && total > limit) throw Error('壁纸超过20MB');
+  if (total && total > limit) {
+    await response.body?.cancel();
+    throw Error('壁纸超过20MB');
+  }
   const reader = response.body?.getReader();
   if (!reader) throw Error('无法读取壁纸下载内容');
   const chunks: Uint8Array<ArrayBuffer>[] = [];
   let loaded = 0;
-  onProgress({ loaded, total, complete: false });
   try {
+    onProgress({ loaded, total, complete: false });
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;

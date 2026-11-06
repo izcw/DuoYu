@@ -16,7 +16,8 @@ function compile(source, bindings, exports) {
     code + '\nreturn {' + exports + '};',
   )(...Object.values(bindings));
 }
-let decodeCount = 0, stallDecode = false;
+let decodeCount = 0,
+  stallDecode = false;
 const storage = new Map();
 const preferences = new Map();
 let record,
@@ -27,10 +28,11 @@ const cache = compile(
   await readFile('src/features/wallpaper/wallpaper-cache.ts', 'utf8'),
   {
     setTimeout: (fn, delay) => setTimeout(fn, delay === 3000 ? 25 : delay),
-    getAsset: async () => new Blob(['saved'],{type:'image/png'}),
-    activeDesktop: {value:'default'},
-    saveDesktopChoice: async (id,selection,asset) => preferences.set('wallpaperDesktop:'+id,{id,selection,asset}),
-    rememberWallpaperChoice:()=>{},
+    getAsset: async () => new Blob(['saved'], { type: 'image/png' }),
+    activeDesktop: { value: 'default' },
+    saveDesktopChoice: async (id, selection, asset) =>
+      preferences.set('wallpaperDesktop:' + id, { id, selection, asset }),
+    rememberWallpaperChoice: () => {},
     cacheAsset: async () => 'duoyu-asset:' + 'a'.repeat(64),
     accountStorage: {
       getItem: (k) => storage.get(k),
@@ -49,7 +51,8 @@ const cache = compile(
         },
       },
       preferences: {
-        get: async id => ({value:preferences.get(id)}),
+        get: async (id) => ({ value: preferences.get(id) }),
+        delete: async (id) => preferences.delete(id),
         put: async (value) => {
           assert(transaction);
           preferences.set(value.id, value.value);
@@ -58,7 +61,7 @@ const cache = compile(
       transaction: async (...args) => {
         transaction = true;
         try {
-          await args.at(-1)();
+          return await args.at(-1)();
         } finally {
           transaction = false;
         }
@@ -76,7 +79,10 @@ const cache = compile(
     Image: class {
       naturalWidth = 10;
       naturalHeight = 10;
-      decode() { decodeCount++; return stallDecode ? new Promise(() => {}) : Promise.resolve(); }
+      decode() {
+        decodeCount++;
+        return stallDecode ? new Promise(() => {}) : Promise.resolve();
+      }
     },
     saveWallpaperPreview: () => {},
     window: { dispatchEvent: () => {} },
@@ -85,7 +91,7 @@ const cache = compile(
       throw Error('Unexpected daily download');
     },
   },
-  'importWallpaper, refreshWallpaper, selectDailyWallpaper, readWallpaperForDisplay',
+  'importWallpaper, refreshWallpaper, selectDailyWallpaper, readWallpaperForDisplay, removeUploadedWallpaper',
 );
 await cache.importWallpaper(
   new Blob(['chosen'], { type: 'image/png' }),
@@ -116,30 +122,91 @@ console.log(
 stallDecode = true;
 await cache.readWallpaperForDisplay();
 stallDecode = false;
-await cache.importWallpaper(new Blob(['after-timeout'], {type:'image/png'}), 'cloud:after-timeout');
+await cache.importWallpaper(
+  new Blob(['after-timeout'], { type: 'image/png' }),
+  'cloud:after-timeout',
+);
 assert.equal(record.selection, 'cloud:after-timeout');
 preferences.set('wallpaperMode', null);
 storage.delete('duoyu-wallpaper-mode');
-record = {...record, selection: undefined, sourceUrl:'old-daily'};
+record = { ...record, selection: undefined, sourceUrl: 'old-daily' };
 await cache.readWallpaperForDisplay();
 assert.equal(record.selection, 'cloud:after-timeout');
-assert.equal(storage.get('duoyu-wallpaper-mode'),'custom');
-console.log('PASS persisted selection restores the selected original before daily refresh');
-console.log('PASS stalled startup preview releases the wallpaper lock and subsequent saving completes');
+assert.equal(storage.get('duoyu-wallpaper-mode'), 'custom');
+console.log(
+  'PASS persisted selection restores the selected original before daily refresh',
+);
+// A synced selection can arrive before its local preview blob.
+record = { ...record, selection: 'upload', sourceUrl: 'local:old-upload' };
+preferences.set('wallpaperDesktop:default', {
+  id: 'default',
+  selection: 'cloud:new',
+});
+preferences.set('wallpaperSelection', 'cloud:new');
+await cache.removeUploadedWallpaper();
+assert.equal(preferences.get('wallpaperSelection'), 'cloud:new');
+assert.equal(
+  preferences.get('wallpaperDesktop:default').selection,
+  'cloud:new',
+);
+assert.ok(!preferences.has('savedWallpaper:upload'));
+preferences.set('wallpaperDesktop:default', {
+  id: 'default',
+  selection: 'upload',
+});
+record = { ...record, selection: 'cloud:cached', sourceUrl: 'local:other' };
+await cache.removeUploadedWallpaper();
+assert.equal(preferences.get('wallpaperSelection'), 'daily');
+assert.equal(record.selection, 'cloud:cached');
+assert.equal(storage.has('duoyu-wallpaper-mode'), false);
+console.log(
+  'PASS stalled startup preview releases the wallpaper lock and subsequent saving completes',
+);
 
-const cloudSource = (await readFile('src/features/desktop/CloudCatalog.vue','utf8')).match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1].replaceAll('import.meta.env.VITE_SYNC_URL', JSON.stringify('https://sync.duoyu.link'));
+const cloudSource = (
+  await readFile('src/features/desktop/CloudCatalog.vue', 'utf8')
+)
+  .match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1]
+  .replaceAll(
+    'import.meta.env.VITE_SYNC_URL',
+    JSON.stringify('https://sync.duoyu.link'),
+  );
 let finishSave;
-const cloud = compile(cloudSource, {
-  ref:value=>({value}),watch:()=>{},defineProps:()=>({kind:'wallpapers'}),defineEmits:()=>()=>{},useWallpaperSelection:()=>({value:''}),
-  downloadWallpaper:async (_url,progress)=>{progress({loaded:10,total:10,complete:true});return new Blob(['image'],{type:'image/png'})},
-  importWallpaper:()=>new Promise(resolve=>{finishSave=resolve}),
-},'apply,busy,applying,progress,error');
-const saving=cloud.apply({id:'test',payload:{url:'https://sync.duoyu.link/catalog-assets/'+'a'.repeat(64)}});
-await new Promise(resolve=>setTimeout(resolve,0));
-assert.equal(cloud.busy.value,true);assert.equal(cloud.progress.value.complete,true);
-finishSave();await saving;
-assert.equal(cloud.busy.value,false);assert.equal(cloud.applying.value,undefined);assert.equal(cloud.progress.value,undefined);
-console.log('PASS featured wallpaper saving clears its progress state after local persistence');
+const cloud = compile(
+  cloudSource,
+  {
+    ref: (value) => ({ value }),
+    watch: () => {},
+    onUnmounted: () => {},
+    defineProps: () => ({ kind: 'wallpapers' }),
+    defineEmits: () => () => {},
+    useWallpaperSelection: () => ({ value: '' }),
+    downloadWallpaper: async (_url, progress) => {
+      progress({ loaded: 10, total: 10, complete: true });
+      return new Blob(['image'], { type: 'image/png' });
+    },
+    importWallpaper: () =>
+      new Promise((resolve) => {
+        finishSave = resolve;
+      }),
+  },
+  'apply,busy,applying,progress,error',
+);
+const saving = cloud.apply({
+  id: 'test',
+  payload: { url: 'https://sync.duoyu.link/catalog-assets/' + 'a'.repeat(64) },
+});
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(cloud.busy.value, true);
+assert.equal(cloud.progress.value.complete, true);
+finishSave();
+await saving;
+assert.equal(cloud.busy.value, false);
+assert.equal(cloud.applying.value, undefined);
+assert.equal(cloud.progress.value, undefined);
+console.log(
+  'PASS featured wallpaper saving clears its progress state after local persistence',
+);
 let resolveOld;
 const oldUrl = new Promise((resolve) => {
   resolveOld = resolve;
@@ -173,4 +240,53 @@ await oldDisplay;
 assert.equal(background.source.value, 'blob:new');
 console.log(
   'PASS delayed old image decoding cannot replace the newest selection',
+);
+const previewSource = (
+  await readFile('src/features/wallpaper/MyWallpapers.vue', 'utf8')
+).match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1];
+let publish, dispose, resolveAsset;
+const pendingAsset = new Promise((resolve) => {
+  resolveAsset = resolve;
+});
+const liveUrls = new Set();
+const previewState = compile(
+  previewSource,
+  {
+    ref: (value) => ({ value }),
+    useWallpaperSelection: () => ({ value: 'daily' }),
+    liveQuery: () => ({
+      subscribe(fn) {
+        publish = fn;
+        return { unsubscribe() {} };
+      },
+    }),
+    onUnmounted: (fn) => {
+      dispose = fn;
+    },
+    getAsset: (key) =>
+      key === 'slow' ? pendingAsset : Promise.reject(new Error('unavailable')),
+    URL: {
+      createObjectURL() {
+        liveUrls.add('blob:slow');
+        return 'blob:slow';
+      },
+      revokeObjectURL(url) {
+        liveUrls.delete(url);
+      },
+    },
+  },
+  'previews',
+);
+const previewUpdate = publish({
+  store: { selection: 'cloud:store', blob: 'missing' },
+  upload: { selection: 'upload', blob: 'slow' },
+});
+await new Promise((resolve) => setTimeout(resolve, 0));
+resolveAsset(new Blob(['preview']));
+await previewUpdate;
+assert.equal(previewState.previews.value.upload, 'blob:slow');
+dispose();
+assert.equal(liveUrls.size, 0);
+console.log(
+  'PASS one preview failure preserves its sibling and all object URLs are released',
 );

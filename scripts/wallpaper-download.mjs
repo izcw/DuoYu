@@ -50,6 +50,26 @@ try {
     downloadWallpaper('https://example.test/image', () => {}),
   );
   let cancelled = false;
+  for (const init of [
+    { status: 503 },
+    { headers: { 'content-length': String(21 * 1024 * 1024) } },
+  ]) {
+    cancelled = false;
+    globalThis.fetch = async () =>
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        init,
+      );
+    await assert.rejects(
+      downloadWallpaper('https://example.test/image', () => {}),
+    );
+    assert.equal(cancelled, true);
+  }
+  cancelled = false;
   globalThis.fetch = async () =>
     new Response(
       new ReadableStream({

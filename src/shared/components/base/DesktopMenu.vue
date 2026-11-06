@@ -244,6 +244,11 @@ function drop(event: DragEvent) {
     width: 54px;
     padding: 0 2px 0 6px;
   }
+  /* The hidden menu must not cover the search controls near the left edge. */
+  .desktop-menu:not(.is-hovered) {
+    width: 12px;
+    padding: 0;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .desktop-menu > nav {

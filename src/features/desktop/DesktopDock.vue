@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { accountStorage, scopedKey } from '../../shared/storage/account';
-import { computed, ref, onUnmounted } from 'vue';
+import { computed, ref, onUnmounted, watch } from 'vue';
 import { liveQuery } from 'dexie';
 import { database, type LibraryItem } from '../../shared/storage/database';
 import WorkspaceFavicon from '../workspace/WorkspaceFavicon.vue';
@@ -9,9 +9,8 @@ import {
   cancelPageDrag,
   dockIncomingItemId,
   dockInsertBeforeId,
-  pageDragError,
 } from '../library/page-drag';
-import { browser } from 'wxt/browser';
+import { openWebTab } from '../../shared/open-web-tab';
 import { shortcutActions } from '../shortcuts/actions';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
 import FolderIconGrid from '../library/FolderIconGrid.vue';
@@ -128,6 +127,10 @@ const dockEntries = computed(() => {
   return entries;
 });
 const openedFolder = ref('');
+const dockError = ref('');
+watch(openedFolder, () => {
+  dockError.value = '';
+});
 const folderPage = ref(0);
 const folder = computed(() =>
   links.value.find(
@@ -148,8 +151,17 @@ const folderPages = computed(() =>
     ),
   ),
 );
-function openFolderLink(item: LibraryItem) {
-  if (item.url) void browser.tabs.create({ url: item.url });
+watch(folderPages, (count) => {
+  folderPage.value = Math.min(folderPage.value, count - 1);
+});
+async function openFolderLink(item: { url?: string }) {
+  dockError.value = '';
+  if (!item.url) return;
+  try {
+    await openWebTab(item.url);
+  } catch (error) {
+    dockError.value = error instanceof Error ? error.message : '无法打开网页';
+  }
 }
 const dragged = ref('');
 let original: string[] = [];
@@ -162,6 +174,7 @@ function isActive(id: string) {
 }
 function activate(item: (typeof items.value)[number]) {
   if (suppressClick || dragged.value) return;
+  dockError.value = '';
   if (item.id === 'duoyu-home') emit('home');
   else if (item.id === 'duoyu-workspace') emit('workspace');
   else if (
@@ -169,7 +182,7 @@ function activate(item: (typeof items.value)[number]) {
   ) {
     openedFolder.value = item.id;
     folderPage.value = 0;
-  } else if (item.url) void browser.tabs.create({ url: item.url });
+  } else void openFolderLink(item);
 }
 let stopGesture: (() => void) | undefined;
 function press(event: MouseEvent, id: string) {
@@ -274,7 +287,7 @@ async function drop(event: MouseEvent) {
     order.value = next;
   } catch (error) {
     order.value = previous;
-    pageDragError.value =
+    dockError.value =
       error instanceof Error ? error.message : 'Dock 排序保存失败';
   } finally {
     savingOrder.value = false;
@@ -297,6 +310,9 @@ async function drop(event: MouseEvent) {
       @dragover="over"
       @drop.prevent.stop="drop"
     >
+      <p v-if="dockError && !folder" role="alert" class="dock-error">
+        {{ dockError }}
+      </p>
       <ReorderTransition class="dock-items">
         <template v-for="item in dockEntries" :key="item.id">
           <span
@@ -319,7 +335,9 @@ async function drop(event: MouseEvent) {
             }"
             :data-dock-id="item.id"
             :draggable="false"
-            :data-drag-handle="!pinned.includes(item.id) && !savingOrder || undefined"
+            :data-drag-handle="
+              (!pinned.includes(item.id) && !savingOrder) || undefined
+            "
             :aria-label="item.name"
             :title="item.name"
             :aria-current="isActive(item.id) ? 'page' : undefined"
@@ -367,6 +385,7 @@ async function drop(event: MouseEvent) {
     @update:open="openedFolder = ''"
   >
     <div class="dock-folder-content">
+      <p v-if="dockError" role="alert">{{ dockError }}</p>
       <FolderIconGrid
         :items="folderChildren"
         :columns="FOLDER_DIALOG_COLUMNS"
@@ -395,6 +414,19 @@ async function drop(event: MouseEvent) {
   </BaseDialog>
 </template>
 <style scoped>
+.dock-error {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(90vw, 30rem);
+  padding: 6px 12px;
+  color: white;
+  background: rgb(24 25 30 / 90%);
+  border-radius: 8px;
+  font-size: 13px;
+}
 .desktop-dock {
   position: fixed;
   left: 50%;

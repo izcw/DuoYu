@@ -1,4 +1,4 @@
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile, mkdir, mkdtemp } from 'node:fs/promises';
@@ -154,9 +154,10 @@ await applyOperation(
     ),
   ]),
 );
+const origins = [];
 const server = createSyncServer({
   pool,
-  origins: ['chrome-extension://kklcklehkoeinjgfekeogcokngihdbmh'],
+  origins,
   authenticate: async () => account,
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -221,6 +222,7 @@ try {
     context.serviceWorkers()[0] ||
     (await context.waitForEvent('serviceworker'));
   const id = new URL(worker.url()).host;
+  origins.push(`chrome-extension://${id}`);
   const page = await context.newPage(),
     errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -235,6 +237,25 @@ try {
     0,
   );
   assert.equal(await page.getByText(/导出冲突副本/).count(), 0);
+  // A fresh account initializes its built-in wallpaper wheel before the
+  // preview opens. Do not attribute that expected migration to preview writes.
+  await expect
+    .poll(
+      async () =>
+        (
+          await pool.query(
+            "SELECT 1 FROM sync_entities WHERE account_id=$1 AND entity_type='shortcuts' AND entity_id='wallpaper' AND NOT deleted",
+            [account.id],
+          )
+        ).rowCount,
+    )
+    .toBe(1);
+  const previewRevision = (
+    await pool.query(
+      'SELECT head_revision::text FROM sync_accounts WHERE id=$1',
+      [account.id],
+    )
+  ).rows[0].head_revision;
   await page.getByRole('button', { name: /处理同步更改/ }).click();
   const localPanel = page.locator('.version-panel[data-version="local"]'),
     cloudPanel = page.locator('.version-panel[data-version="cloud"]');
@@ -281,7 +302,7 @@ try {
         [account.id],
       )
     ).rows[0].head_revision,
-    '2',
+    previewRevision,
     'opening and zooming previews must not commit desktop writes',
   );
   await page.setViewportSize({ width: 390, height: 844 });
@@ -402,7 +423,7 @@ try {
     ]),
   );
   await page.getByRole('button', { name: '刷新预览', exact: true }).click();
-  await page.getByText('这个位置已被其他项目占用', { exact: true }).waitFor();
+  await expect(page.getByLabel('冲突菜单')).toBeVisible();
   await localPanel
     .locator('[data-library-id="i"].conflict-highlight')
     .waitFor();
@@ -420,9 +441,12 @@ try {
     0,
     'displaced cloud tile must move exactly as previewed',
   );
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
-  await page.locator('.account-entry').click();
-  await page.getByRole('button', { name: '导入JSON文件', exact: true }).click();
+  await page
+    .getByRole('dialog', { name: '处理同步更改', exact: true })
+    .getByRole('button', { name: '关闭', exact: true })
+    .click();
+  await page.getByRole('button', { name: '备份与恢复', exact: true }).click();
+  await page.getByRole('button', { name: '导入备份', exact: true }).click();
   const backup = {
     format: 'duoyu-backup',
     version: 1,
@@ -433,6 +457,42 @@ try {
       ],
     },
   };
+  // Delay the actual File.text read across close/reopen. The reopened dialog
+  // must not expose an import action for the previous file.
+  await page.evaluate(() => {
+    const original = File.prototype.text;
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    window.__releaseImportRead = () => {
+      File.prototype.text = original;
+      release();
+    };
+    File.prototype.text = async function () {
+      await gate;
+      return original.call(this);
+    };
+  });
+  await page.locator('input[type=file]').setInputFiles({
+    name: 'old.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(backup)),
+  });
+  await page
+    .getByRole('dialog', { name: '导入JSON文件', exact: true })
+    .getByRole('button', { name: '取消', exact: true })
+    .click();
+  await page.getByRole('button', { name: '导入备份', exact: true }).click();
+  await page.evaluate(() => window.__releaseImportRead());
+  await page.waitForTimeout(150);
+  assert.equal(
+    await page
+      .getByRole('button', { name: '导入数据', exact: true })
+      .isDisabled(),
+    true,
+  );
+  assert.equal(await page.locator('.import-summary').count(), 0);
   await page.locator('input[type=file]').setInputFiles({
     name: 'backup.json',
     mimeType: 'application/json',
@@ -480,6 +540,7 @@ try {
   await context.close();
   await new Promise((r) => server.close(r));
   for (const table of [
+    'sync_user_backups',
     'sync_assets',
     'sync_asset_deletions',
     'sync_conflicts',

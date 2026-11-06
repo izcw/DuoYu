@@ -1,11 +1,25 @@
+import {
+  DESKTOP_GRID_COLUMNS,
+  LIBRARY_GRID_ROWS,
+} from '../library/grid-config';
 import { collectionColor } from '../../shared/collection-colors';
-import { database } from '../../shared/storage/database';
+import {
+  database,
+  isCurrentDatabaseAccount,
+} from '../../shared/storage/database';
 import { activeAccountKey } from '../../shared/storage/account';
-import { cacheAsset, collectAssets, ASSET_PREFIX } from './assets';
+import {
+  prepareAsset,
+  storePreparedAsset,
+  collectAssets,
+  ASSET_PREFIX,
+  type PreparedAsset,
+} from './assets';
 import { rowChanges, type Row } from './model';
 export interface ImportPlan {
+  account: string;
   tables: Record<string, Row[]>;
-  assets: Blob[];
+  assets: PreparedAsset[];
   digest: string;
   counts: Record<string, number>;
 }
@@ -66,10 +80,42 @@ function image(data: string) {
   }
 }
 const finite = (v: any, fallback = 0) => (Number.isFinite(v) ? v : fallback);
+function requireImportTarget(account: string) {
+  if (!isCurrentDatabaseAccount(account))
+    throw Error('账号已切换，请在当前账号重新预览备份');
+}
+type ImportGrid = { id: string; occupied: Set<number> };
+function placeOnPage(item: Row, grid: ImportGrid) {
+  const { width, height } = item;
+  if (
+    DESKTOP_GRID_COLUMNS * LIBRARY_GRID_ROWS - grid.occupied.size <
+    width * height
+  )
+    return false;
+  for (let y = 0; y <= LIBRARY_GRID_ROWS - height; y++) {
+    candidate: for (let x = 0; x <= DESKTOP_GRID_COLUMNS - width; x++) {
+      for (let dy = 0; dy < height; dy++)
+        for (let dx = 0; dx < width; dx++) {
+          if (grid.occupied.has((y + dy) * DESKTOP_GRID_COLUMNS + x + dx))
+            continue candidate;
+        }
+      item.pageId = grid.id;
+      item.gridX = x;
+      item.gridY = y;
+      for (let dy = 0; dy < height; dy++)
+        for (let dx = 0; dx < width; dx++)
+          grid.occupied.add((y + dy) * DESKTOP_GRID_COLUMNS + x + dx);
+      return true;
+    }
+  }
+  return false;
+}
 export async function planJsonImport(
   content: string,
   includeSettings = false,
+  account = activeAccountKey(),
 ): Promise<ImportPlan> {
+  requireImportTarget(account);
   if (content.length > 50 * 1024 * 1024) throw Error('JSON文件不能超过50MB');
   let source;
   try {
@@ -95,7 +141,7 @@ export async function planJsonImport(
       preferences: [],
       wallpapers: [],
     },
-    assets: Blob[] = [];
+    assets: PreparedAsset[] = [];
   const pages = array(raw.libraryPages),
     items = array(raw.libraryItems),
     spaces = array(raw.workspaceSpaces),
@@ -129,13 +175,14 @@ export async function planJsonImport(
     }
     return id;
   }
+  const sourceKinds = new Map(items.map((item) => [item.id, item.kind]));
   for (const original of items) {
     if (!['link', 'folder', 'widget'].includes(original.kind))
       throw Error('备份项目类型不支持');
     if (
       original.parent &&
       (!itemIds.has(original.parent) ||
-        items.find((i) => i.id === original.parent)?.kind !== 'folder' ||
+        sourceKinds.get(original.parent) !== 'folder' ||
         original.kind !== 'link')
     )
       throw Error('备份文件夹关系不正确');
@@ -152,11 +199,14 @@ export async function planJsonImport(
       width: Math.max(
         1,
         Math.min(
-          16,
+          DESKTOP_GRID_COLUMNS,
           Math.floor(finite(original.width, original.kind === 'link' ? 1 : 3)),
         ),
       ),
-      height: Math.max(1, Math.min(8, Math.floor(finite(original.height, 1)))),
+      height: Math.max(
+        1,
+        Math.min(LIBRARY_GRID_ROWS, Math.floor(finite(original.height, 1))),
+      ),
     };
     if (original.kind === 'widget') {
       if (!['calendar', 'weather', 'note'].includes(original.widget))
@@ -168,48 +218,31 @@ export async function planJsonImport(
   }
   // Additive import gets dedicated pages and bounded positions, leaving existing
   // cloud items untouched. Overflow creates another imported page.
-  const occupied = new Map<string, Set<number>>();
-  for (const item of tables.libraryItems!.filter((i) => !i.parent)) {
-    let page = item.pageId;
-    let placed = false;
-    while (!placed) {
-      const cells = occupied.get(page) ?? new Set<number>();
-      occupied.set(page, cells);
-      outer: for (let y = 0; y <= 8 - item.height; y++)
-        for (let x = 0; x <= 16 - item.width; x++) {
-          if (
-            Array.from({ length: item.height }, (_, dy) =>
-              Array.from({ length: item.width }, (_, dx) =>
-                cells.has((y + dy) * 16 + x + dx),
-              ),
-            )
-              .flat()
-              .some(Boolean)
-          )
-            continue;
-          item.pageId = page;
-          item.gridX = x;
-          item.gridY = y;
-          for (let dy = 0; dy < item.height; dy++)
-            for (let dx = 0; dx < item.width; dx++)
-              cells.add((y + dy) * 16 + x + dx);
-          placed = true;
-          break outer;
-        }
-      if (!placed) {
-        page = crypto.randomUUID();
-        tables.libraryPages!.push({
-          id: page,
-          name: '导入的收藏（续）',
-          order: tables.libraryPages!.length,
-        });
-      }
+  const gridsBySource = new Map<string, ImportGrid[]>();
+  const importedItems = tables.libraryItems!;
+  for (const item of importedItems) {
+    if (item.parent) continue;
+    const sourcePage = item.pageId;
+    let grids = gridsBySource.get(sourcePage);
+    if (!grids) {
+      grids = [{ id: sourcePage, occupied: new Set() }];
+      gridsBySource.set(sourcePage, grids);
     }
+    if (grids.some((grid) => placeOnPage(item, grid))) continue;
+    const next = { id: crypto.randomUUID(), occupied: new Set<number>() };
+    tables.libraryPages!.push({
+      id: next.id,
+      name: '导入的收藏（续）',
+      order: tables.libraryPages!.length,
+    });
+    grids.push(next);
+    // Dimensions were bounded above, so the item fits an empty page.
+    placeOnPage(item, next);
   }
-  for (const item of tables.libraryItems!.filter((i) => i.parent))
-    item.pageId = tables.libraryItems!.find(
-      (i) => i.id === item.parent,
-    )!.pageId;
+  const byId = new Map(importedItems.map((item) => [item.id, item]));
+  for (const item of importedItems) {
+    if (item.parent) item.pageId = byId.get(item.parent)!.pageId;
+  }
   for (const s of spaces)
     tables.workspaceSpaces!.push({
       id: spaceIds.get(s.id),
@@ -258,16 +291,9 @@ export async function planJsonImport(
   for (const entry of array(source.assets)) {
     if (!object(entry) || typeof entry.data !== 'string')
       throw Error('备份图片资源格式不正确');
-    const blob = image(entry.data);
-    const sha = [
-      ...new Uint8Array(
-        await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()),
-      ),
-    ]
-      .map((x) => x.toString(16).padStart(2, '0'))
-      .join('');
-    if (entry.id !== sha) throw Error('备份图片校验失败');
-    assets.push(blob);
+    const asset = await prepareAsset(image(entry.data));
+    if (entry.id !== asset.id) throw Error('备份图片校验失败');
+    assets.push(asset);
   }
   if (includeSettings) {
     for (const r of array(raw.preferences)) {
@@ -312,26 +338,7 @@ export async function planJsonImport(
       }
     }
   }
-  const known = new Set(
-    assets.length
-      ? await Promise.all(
-          assets.map(
-            async (blob) =>
-              ASSET_PREFIX +
-              [
-                ...new Uint8Array(
-                  await crypto.subtle.digest(
-                    'SHA-256',
-                    await blob.arrayBuffer(),
-                  ),
-                ),
-              ]
-                .map((x) => x.toString(16).padStart(2, '0'))
-                .join(''),
-          ),
-        )
-      : [],
-  );
+  const known = new Set(assets.map((asset) => ASSET_PREFIX + asset.id));
   for (const ref of collectAssets(tables))
     if (
       !known.has(ref) &&
@@ -359,7 +366,9 @@ export async function planJsonImport(
   ]
     .map((x) => x.toString(16).padStart(2, '0'))
     .join('');
+  requireImportTarget(account);
   return {
+    account,
     tables,
     assets,
     digest,
@@ -375,12 +384,26 @@ export async function planJsonImport(
 }
 export async function commitJsonImport(plan: ImportPlan) {
   if (!activeAccountKey()) throw Error('请先登录再导入账号数据');
-  for (const blob of plan.assets) await cacheAsset(blob);
-  await database.transaction('rw', database.tables, async () => {
-    const key = 'import:' + plan.digest;
-    if (await database.syncMeta.get(key)) throw Error('这个文件已经导入过了');
-    for (const [table, rows] of Object.entries(plan.tables))
-      if (rows.length) await database.table(table).bulkPut(rows);
-    await database.syncMeta.put({ id: key, value: Date.now() });
-  });
+  requireImportTarget(plan.account);
+  try {
+    await database.transaction('rw', database.tables, async () => {
+      const key = 'import:' + plan.digest;
+      if (await database.syncMeta.get(key)) throw Error('这个文件已经导入过了');
+      for (const asset of plan.assets) await storePreparedAsset(asset);
+      for (const [table, rows] of Object.entries(plan.tables))
+        if (rows.length) await database.table(table).bulkPut(rows);
+      await database.syncMeta.put({ id: key, value: Date.now() });
+      requireImportTarget(plan.account);
+    });
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.name === 'QuotaExceededError')
+        throw Error('本机存储空间不足，导入未保存，请释放空间后重试', {
+          cause: error,
+        });
+      if (['AbortError', 'TransactionInactiveError'].includes(error.name))
+        throw Error('导入中断，数据未保存，请重试', { cause: error });
+    }
+    throw error;
+  }
 }

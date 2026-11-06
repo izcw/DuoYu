@@ -1,5 +1,12 @@
 import { browser } from 'wxt/browser';
-import { database } from '../../shared/storage/database';
+import {
+  database,
+  isCurrentDatabaseAccount,
+} from '../../shared/storage/database';
+import {
+  ACCOUNT_STORAGE_KEY,
+  activeAccountKey,
+} from '../../shared/storage/account';
 import { collectAssets, getAsset, ASSET_PREFIX } from '../sync/assets';
 function blobData(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -10,6 +17,12 @@ function blobData(blob: Blob): Promise<string> {
   });
 }
 export async function backupDesktop() {
+  const account = activeAccountKey();
+  const verifyAccount = () => {
+    if (!isCurrentDatabaseAccount(account))
+      throw Error('账号已切换，请在当前账号重新导出备份');
+  };
+  verifyAccount();
   const tables: Record<string, unknown[]> = {};
   // Read a consistent snapshot before encoding binary wallpaper data.
   await database.transaction('r', database.tables, async () => {
@@ -38,13 +51,25 @@ export async function backupDesktop() {
   );
   // Explicit preference allowlist: authentication and future secrets must never
   // enter portable backups (or become candidates for cloud synchronization).
-  const storage = await browser.storage.local.get([
-    'glassMode',
-    'searchEngine',
-  ]);
+  const portableSettings = ['glassMode', 'searchEngine'];
+  const storage = account
+    ? Object.fromEntries(
+        (tables.preferences as { id: string; value: unknown }[])
+          .filter((row) => portableSettings.includes(row.id))
+          .map((row) => [row.id, row.value]),
+      )
+    : await browser.storage.local.get(portableSettings);
+  const prefix = account ? `account:${account}:` : '';
   const preferences = Object.fromEntries(
-    Object.entries(localStorage).filter(([key]) => key.startsWith('duoyu')),
+    Object.entries(localStorage)
+      .filter(
+        ([key]) =>
+          key.startsWith(prefix + 'duoyu') &&
+          key !== prefix + ACCOUNT_STORAGE_KEY,
+      )
+      .map(([key, value]) => [key.slice(prefix.length), value]),
   );
+  verifyAccount();
   const blob = new Blob(
     [
       JSON.stringify(
