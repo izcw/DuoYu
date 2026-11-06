@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { pageIconGroups, pageIcons } from '../../page-icons';
+import { usePickerFold } from '../../usePickerFold';
 import PageIcon from './PageIcon.vue';
 
 const selected = defineModel<string>({ required: true });
 const viewport = ref<HTMLElement>();
+const scheduleFold = usePickerFold(viewport);
 const cursor = ref(
   pageIcons.some((icon) => icon.id === selected.value)
     ? selected.value
@@ -45,14 +47,14 @@ function navigate(event: KeyboardEvent) {
     case 'ArrowUp':
     case 'ArrowDown': {
       // Category boundaries can have a short final row. Follow the visual column.
-      const origin = target.getBoundingClientRect();
+      const originY = target.offsetTop,
+        originX = target.offsetLeft;
       const direction = event.key === 'ArrowDown' ? 1 : -1;
       let rowDistance = Infinity,
         columnDistance = Infinity;
       for (const button of buttons) {
-        const rect = button.getBoundingClientRect();
-        const dy = (rect.top - origin.top) * direction;
-        const dx = Math.abs(rect.left - origin.left);
+        const dy = (button.offsetTop - originY) * direction;
+        const dx = Math.abs(button.offsetLeft - originX);
         if (
           dy > 1 &&
           (dy < rowDistance || (dy === rowDistance && dx < columnDistance))
@@ -74,7 +76,13 @@ function navigate(event: KeyboardEvent) {
 </script>
 <template>
   <div class="page-icon-picker" role="group" aria-label="选择页面图标">
-    <div ref="viewport" class="icon-scroll" @keydown="navigate" @wheel.stop>
+    <div
+      ref="viewport"
+      class="icon-scroll"
+      @scroll.passive="scheduleFold"
+      @keydown="navigate"
+      @wheel.stop
+    >
       <section
         v-for="group in pageIconGroups"
         :key="group.name"
@@ -94,12 +102,11 @@ function navigate(event: KeyboardEvent) {
             @focus="cursor = icon.id"
             @click="selected = icon.id"
           >
-            <span class="fold"
-              ><PageIcon
-                :name="icon.id"
-                :active="selected === icon.id"
-                :size="25"
-            /></span>
+            <PageIcon
+              :name="icon.id"
+              :active="selected === icon.id"
+              :size="25"
+            />
           </button>
         </div>
       </section>
@@ -108,19 +115,23 @@ function navigate(event: KeyboardEvent) {
 </template>
 <style scoped>
 .page-icon-picker {
-  color: inherit;
+  color: #f2f2f2;
+  background: #222;
+  border-radius: 14px;
+  overflow: hidden;
   min-width: 0;
 }
 .icon-scroll {
-  height: clamp(120px, 30svh, 228px);
+  position: relative;
+  height: clamp(132px, 35svh, 304px);
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  padding: 0 5px;
+  padding: 0 12px 10px;
   scroll-padding-block: 12px;
 }
 h3 {
-  margin: 12px 0 5px;
+  margin: 16px 0 7px;
   font-size: 12px;
   font-weight: 600;
   color: inherit;
@@ -153,33 +164,6 @@ button[aria-pressed='true'] {
 button:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: -2px;
-}
-.fold {
-  display: grid;
-  place-items: center;
-}
-@supports (animation-timeline: view()) {
-  @media (prefers-reduced-motion: no-preference) {
-    .fold {
-      animation: edge-fold linear both;
-      animation-timeline: view(block);
-    }
-    @keyframes edge-fold {
-      0% {
-        transform: perspective(110px) rotateX(-65deg) scaleY(0.76);
-        opacity: 0.45;
-      }
-      20%,
-      80% {
-        transform: perspective(110px) rotateX(0) scaleY(1);
-        opacity: 1;
-      }
-      100% {
-        transform: perspective(110px) rotateX(65deg) scaleY(0.76);
-        opacity: 0.45;
-      }
-    }
-  }
 }
 @media (max-width: 420px) {
   .choices {

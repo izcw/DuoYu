@@ -25,6 +25,7 @@ import {
 } from './library';
 import './library.css';
 import { isWallpaperBlank } from '../wallpaper/blank-area';
+import EditorDialog from '../../shared/components/base/EditorDialog.vue';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
 import { backupCloudNow } from '../sync/client';
 import { openSettings } from '../desktop/settings-state';
@@ -534,20 +535,8 @@ onUnmounted(() => subscription?.unsubscribe());
       </button>
       <span>{{ current?.name }}</span>
     </nav>
-    <BaseDialog
-      :open="editing"
-      close-button
-      solid
-      :width="680"
-      :title="editingId ? '编辑网址' : '添加网址'"
-      @update:open="editing = $event"
-    >
-      <form
-        v-if="editing"
-        class="library-editor floating-editor"
-        aria-label="编辑收藏"
-        @submit.prevent="submit"
-      >
+    <EditorDialog :open="editing" :title="editingId ? '编辑网址' : '添加网址'"
+      form-label="编辑收藏" submit-label="保存" :disabled="busy" @close="editing = false" @submit="submit">
         <label v-if="draft.kind === 'link'"
           >网址<span class="title-input-row"
             ><span class="input-with-icon"
@@ -610,20 +599,8 @@ onUnmounted(() => subscription?.unsubscribe());
             :title="draft.name"
           />
         </template>
-        <div class="library-form-actions">
-          <button
-            type="button"
-            class="glass-control glass-interactive"
-            @click="editing = false"
-          >
-            取消</button
-          ><button class="glass-control glass-interactive" :disabled="busy">
-            保存
-          </button>
-        </div>
-        <p v-if="error" role="alert">{{ error }}</p>
-      </form>
-    </BaseDialog>
+      <template #feedback><p v-if="error" role="alert">{{ error }}</p></template>
+    </EditorDialog>
     <BaseDialog
       :open="!!removing"
       title="确认删除"
@@ -787,194 +764,14 @@ onUnmounted(() => subscription?.unsubscribe());
   display: inline-flex;
   flex: 0 0 18px;
 }
-.floating-editor {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  background: none;
-  box-shadow: none;
-}
-.floating-editor label {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.floating-editor :deep(input),
-.floating-editor :deep(select) {
-  height: 36px;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 7px 10px;
-  border: 1px solid rgb(239 239 237 / 20%);
-  border-radius: 9px;
-  background: #fafafa;
-  color: inherit;
-}
-</style>
-
-<style scoped>
-.title-field {
-  display: grid;
-  gap: 8px;
-}
-.title-input-row {
-  display: flex;
-  align-items: stretch;
-  gap: 10px;
-}
-.title-input-row input {
-  min-width: 0;
-  flex: 1;
-}
-.fetch-title {
-  flex-shrink: 0;
-  border: 1px solid #ccc;
-  border-radius: 9px;
-  padding: 0 14px;
-  color: #333;
-  background: #f5f5f5;
-  cursor: pointer;
-}
-.fetch-title:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.title-status {
-  margin: 0;
-  font-size: 12px;
-  color: #777;
-}
-</style>
-
-<style scoped>
-.floating-editor .fetch-title,
-.floating-editor .library-form-actions button {
-  height: 36px;
-  box-sizing: border-box;
-}
-</style>
-
-<style scoped>
-.input-with-icon {
-  position: relative;
-  display: block;
-  flex: 1;
-  min-width: 0;
-}
-.input-with-icon input {
-  padding-left: 38px !important;
-}
-.input-leading-icon {
-  position: absolute;
-  left: 13px;
-  top: 9px;
-  width: 18px;
-  height: 18px;
-  display: grid;
-  place-items: center;
-  font-size: 17px;
-  line-height: 18px;
-  color: #888;
-  pointer-events: none;
-}
-</style>
-
-<style scoped>
-.floating-editor {
-  gap: 18px;
-}
-.floating-editor label {
-  font-size: 13px;
-  line-height: 20px;
-  color: #444;
-  font-weight: 500;
-}
-.floating-editor :deep(input) {
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 20px;
-}
-.floating-editor :deep(input::placeholder) {
-  color: #aaa;
-}
-.floating-editor .library-form-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 4px;
-  padding-top: 18px;
-  padding-bottom: 16px;
-  border-top: 1px solid #eee;
-}
-.floating-editor .library-form-actions button {
-  min-width: 82px;
-  border-radius: 9px;
-  padding: 0 20px;
-  font-size: 14px;
-}
-.fetch-title {
-  font-size: 13px;
-  transition: background 140ms ease;
-}
-.fetch-title:not(:disabled):hover {
-  background: #eaeaea;
-}
-.title-status {
-  font-size: 12px;
-  line-height: 18px;
-}
-</style>
-
-<style scoped>
-.floating-editor :deep(input),
-.floating-editor :deep(textarea),
-.floating-editor :deep(button:not(.color-row button)) {
-  border: 0 !important;
-}
-</style>
-
-<style scoped>
-.floating-editor :deep(input:not(.inline-icon-editor)),
-.floating-editor :deep(textarea) {
-  background: #f5f5f7;
-  border-radius: 6px;
-}
-.floating-editor .fetch-title,
-.floating-editor .library-form-actions button {
-  border-radius: 6px;
-  background: #f5f5f7;
-  transition: opacity 140ms ease;
-}
-.floating-editor .library-form-actions button:last-child {
-  background: #000;
-  color: #fff;
-}
-.floating-editor .fetch-title:not(:disabled):hover,
-.floating-editor .library-form-actions button:not(:disabled):hover {
-  opacity: 0.7;
-  background: #f5f5f7;
-}
-.floating-editor .library-form-actions button:last-child:not(:disabled):hover {
-  background: #000;
-}
-</style>
-
-<style scoped>
-.floating-editor {
-  --editor-section-gap: 18px;
-  --editor-label-gap: 8px;
-  gap: var(--editor-section-gap);
-}
-.floating-editor label,
-.floating-editor :deep(legend) {
-  font-size: 13px;
-  line-height: 20px;
-  font-weight: 500;
-  color: #444;
-}
-.floating-editor label,
-.title-field {
-  gap: var(--editor-label-gap);
-}
+.title-field {display:grid;gap:var(--editor-label-gap)}
+.title-input-row {display:flex;align-items:stretch;gap:10px}
+.title-input-row input {min-width:0;flex:1}
+.fetch-title {flex-shrink:0;height:36px;padding:0 14px;border:0;border-radius:6px;color:#333;background:#f5f5f7;font-size:13px;cursor:pointer}
+.fetch-title:disabled {opacity:.5;cursor:default}
+.fetch-title:hover:not(:disabled) {opacity:.7}
+.title-status {margin:0;font-size:12px;line-height:18px;color:#777}
+.input-with-icon {position:relative;display:block;flex:1;min-width:0}
+.input-with-icon input {padding-left:38px!important}
+.input-leading-icon {position:absolute;left:13px;top:9px;width:18px;height:18px;display:grid;place-items:center;font-size:17px;line-height:18px;color:#888;pointer-events:none}
 </style>

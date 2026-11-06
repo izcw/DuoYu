@@ -20,6 +20,10 @@ export async function verifyPageIcons(page) {
     for (const group of await groups.all())
       assert.ok((await group.getByRole('button').count()) >= 16);
   };
+  await expect(dialog).toHaveClass(/solid-dialog/);
+  await expect(
+    dialog.getByRole('button', { name: '关闭', exact: true }),
+  ).toBeVisible();
   await checkGroups(picker);
   const pixels = await page.evaluate(async () => {
     const ids = Array.from(
@@ -48,7 +52,7 @@ export async function verifyPageIcons(page) {
     .toBeGreaterThan(20);
   await expect
     .poll(() =>
-      picker.locator('.fold').evaluateAll((elements) =>
+      picker.locator('h3, [data-choice]').evaluateAll((elements) =>
         elements.some((el) => {
           const r = el.getBoundingClientRect(),
             v = el.closest('.icon-scroll').getBoundingClientRect();
@@ -80,13 +84,15 @@ export async function verifyPageIcons(page) {
   await page.keyboard.press('ArrowUp');
   await expect(lastInGroup).toBeFocused();
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  assert.equal(
-    await picker
-      .locator('.fold')
-      .first()
-      .evaluate((el) => getComputedStyle(el).animationName),
-    'none',
-  );
+  await expect
+    .poll(() =>
+      picker
+        .locator('[data-choice]')
+        .evaluateAll((nodes) =>
+          nodes.every((el) => getComputedStyle(el).transform === 'none'),
+        ),
+    )
+    .toBe(true);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await button(picker, '唱片').click();
   await name.fill('测试影集');
