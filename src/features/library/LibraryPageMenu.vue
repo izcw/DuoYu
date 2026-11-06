@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vAccountEdit } from '../auth/edit-access';
 import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { liveQuery } from 'dexie';
 import { connectPageDrag, pageDragError } from './page-drag';
@@ -227,7 +228,7 @@ onUnmounted(() => {
         role="menuitem"
         class="glass-control glass-interactive"
         :disabled="busy"
-        @click="editPage"
+        v-account-edit @click="editPage"
       >
         修改名称和图标
       </button>
@@ -236,7 +237,7 @@ onUnmounted(() => {
         class="glass-control glass-interactive"
         :disabled="pages.length < 2 || busy"
         title="删除页面，收藏移至其他页面"
-        @click="deletePage"
+        v-account-edit @click="deletePage"
       >
         删除页面
       </button>

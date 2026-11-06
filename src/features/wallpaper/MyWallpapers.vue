@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vAccountEdit } from '../auth/edit-access';
 import WallpaperDownloadProgress from './WallpaperDownloadProgress.vue';
 import type { WallpaperProgress } from './download-wallpaper';
 import WallpaperSelectionMark from './WallpaperSelectionMark.vue';
@@ -118,7 +119,7 @@ async function choose(event: Event) {
       class="store-card wallpaper-card"
       :disabled="busy"
       :aria-pressed="selected === store.selection"
-      @click="apply(store)"
+      v-account-edit @click="apply(store)"
     >
       <img v-if="previews.store" :src="previews.store" alt="商店壁纸" />
       <WallpaperSelectionMark :selected="selected === store.selection" />
@@ -142,7 +143,7 @@ async function choose(event: Event) {
         class="store-card wallpaper-card"
         :disabled="busy"
         :aria-pressed="selected === 'upload'"
-        @click="apply(upload)"
+        v-account-edit @click="apply(upload)"
       >
         <img
           v-if="previews.upload"
@@ -161,7 +162,7 @@ async function choose(event: Event) {
         v-if="upload"
         class="replace-upload"
         :disabled="busy"
-        @click="input?.click()"
+        v-account-edit @click="input?.click()"
       >
         更换图片
       </button>
@@ -171,7 +172,7 @@ async function choose(event: Event) {
         :disabled="busy"
         aria-label="删除上传图片"
         title="删除上传图片"
-        @click="run(removeUploadedWallpaper)"
+        v-account-edit @click="run(removeUploadedWallpaper)"
       >
         ×
       </button>

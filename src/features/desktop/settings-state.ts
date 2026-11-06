@@ -1,4 +1,3 @@
-import { guestMode } from '../../shared/storage/account';
 import { ref } from 'vue';
 export type SettingsSection = 'account' | 'general' | 'backup';
 export const settingsOpen = ref(false);
@@ -8,7 +7,7 @@ export function openSettings(
   section: SettingsSection = 'general',
   pageId?: string,
 ) {
-  settingsSection.value = guestMode ? 'account' : section;
+  settingsSection.value = section;
   if (pageId) settingsPage.value = pageId;
   settingsOpen.value = true;
 }

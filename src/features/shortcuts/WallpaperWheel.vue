@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { requireAccount } from '../auth/edit-access';
 import { guestMode } from '../../shared/storage/account';
 import { openWebTab } from '../../shared/open-web-tab';
 import { nextTick, onMounted, onUnmounted, ref } from 'vue';
@@ -100,6 +101,7 @@ function select(id: string) {
       emit('workspace');
     }, 220);
   } else if (id === 'add') {
+    if (!requireAccount()) return;
     dialog.value = true;
   } else if (item.url) {
     void openWebTab(item.url).catch((error) => {
@@ -220,7 +222,8 @@ onMounted(async () => {
     if (guestMode) {
       const read = async () => {
         const row = await database.shortcuts.get('wallpaper');
-        items.value = (row?.items ?? actions).filter((item) => item.id !== 'add');
+        const entries = row?.items ?? actions;
+        items.value = entries.some(item => item.id === 'add') ? entries : [...entries, defaults[defaults.length - 1]!];
       };
       await read();
       window.addEventListener('duoyu-sync-preferences', read);

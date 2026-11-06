@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { guestMode } from '../../shared/storage/account';
+import { requireAccount } from '../auth/edit-access';
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import {
   SEARCH_ENGINES,
@@ -92,6 +92,7 @@ function click(event: MouseEvent) {
   toggle();
 }
 function select(id: string) {
+  if (!requireAccount()) { close(); return; }
   if (id === 'add') emit('add-engine');
   else if (SEARCH_ENGINES.some((item) => item.id === id))
     emit('update:modelValue', id as SearchEngineId);
@@ -176,7 +177,7 @@ onUnmounted(() => {
         @close="close"
     /></Teleport>
     <button
-      ref="trigger" :disabled="guestMode"
+      ref="trigger"
       class="engine-trigger glass-control glass-interactive"
       type="button"
       :aria-label="`切换搜索引擎，当前 ${current.name}`"

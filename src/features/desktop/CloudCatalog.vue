@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { requireAccount } from '../auth/edit-access';
 import type { WidgetSize } from '../../shared/storage/database';
 import WallpaperDownloadProgress from '../wallpaper/WallpaperDownloadProgress.vue';
 import {
@@ -89,6 +90,7 @@ watch(
   { immediate: true },
 );
 async function apply(row: any) {
+  if (!requireAccount()) return;
   if (busy.value) return;
   const request = loadGeneration;
   const kind = props.kind;

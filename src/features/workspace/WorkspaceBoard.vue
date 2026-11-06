@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { requireAccount, vAccountEdit } from '../auth/edit-access';
 import { guestMode } from '../../shared/storage/account';
 import { useMouseSort } from '../../shared/useMouseSort';
 const pressSort = useMouseSort();
@@ -202,7 +203,7 @@ const viewKey = 'duoyu-workspace-view';
 const viewMode = ref<'grid' | 'list'>(
   accountStorage.getItem(viewKey) === 'list' ? 'list' : 'grid',
 );
-watch(viewMode, (mode) => accountStorage.setItem(viewKey, mode));
+watch(viewMode, (mode) => { if (!guestMode) accountStorage.setItem(viewKey, mode); });
 const sortingSpaces = ref(false);
 function switchSpace(id: string) {
   activeSpace.value = id;
@@ -239,7 +240,6 @@ async function reorderSpaces(ids: string[]) {
   }
 }
 function workspaceKey(event: KeyboardEvent) {
-  if (guestMode && (event.key === 'Delete' || event.key === 'Backspace')) return;
   if (event.key.toLowerCase() === 'f' && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();
     focusSearch();
@@ -275,6 +275,7 @@ async function showSpaceMenu(event: MouseEvent, id: string) {
   spaceMenuPanel.value?.focus();
 }
 async function manageSpace(action: 'rename' | 'delete') {
+  if (!requireAccount()) { closeSpaceMenu(); return; }
   if (!spaceMenu.value) return;
   activeSpace.value = spaceMenu.value.id;
   closeSpaceMenu();
@@ -408,6 +409,7 @@ const previewBrowserGroups = computed(() => {
   return rest;
 });
 function startGroupDrag(event: DragEvent, id: number) {
+  if (!requireAccount()) { event.preventDefault(); return; }
   if (landing.committing || busy.value || !event.dataTransfer) {
     event.preventDefault();
     return;
@@ -571,7 +573,7 @@ function openTabGap(event: DragEvent, tabs: BrowserTab[], dropping = false) {
   }
 }
 function startDrag(event: DragEvent, value: Drag) {
-  if (guestMode) {event.preventDefault();return;}
+  if (!requireAccount()) {event.preventDefault();return;}
   if (
     landing.committing ||
     isMarkedSpace.value ||
@@ -1001,7 +1003,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
             </button>
           </div>
           <div
-            v-if="!guestMode && selectedEntries.length"
+            v-if="selectedEntries.length"
             class="workspace-selection glass-surface"
           >
             <span>选择 {{ selectedEntries.length }} 项</span>
@@ -1031,7 +1033,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
             <button
               class="glass-control glass-interactive"
               :disabled="busy"
-              @click="toggleSelectedMarks"
+              v-account-edit @click="toggleSelectedMarks"
             >
               {{ allSelectedMarked ? '取消标记所选' : '标记所选' }}
             </button>
@@ -1039,8 +1041,8 @@ function moveWithSelect(event: Event, group: string, id: string) {
           <button
             class="workspace-button glass-control glass-interactive"
             :disabled="busy || loading"
-            v-if="!guestMode && !isMarkedSpace"
-            @click="showCreate"
+            v-if="!isMarkedSpace"
+            v-account-edit @click="showCreate"
           >
             <PageIcon name="Add" :size="16" /> 新建集合
           </button>
@@ -1084,9 +1086,9 @@ function moveWithSelect(event: Event, group: string, id: string) {
             >
               <header class="workspace-collection-heading">
                 <button
-                  v-if="!guestMode && !isMarkedSpace"
-                  class="workspace-icon collection-handle glass-control glass-interactive"
-                  :draggable="!guestMode && !isMarkedSpace"
+                  v-if="!isMarkedSpace"
+                  v-account-edit class="workspace-icon collection-handle glass-control glass-interactive"
+                  :draggable="!isMarkedSpace"
                   :aria-label="`拖动集合 ${group.name}`"
                   title="拖动集合排序"
                   @dragstart.stop="
@@ -1149,7 +1151,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                   </button>
                   <button
                     class="workspace-icon glass-control glass-interactive"
-                    v-if="!guestMode" aria-label="更多集合操作"
+                    aria-label="更多集合操作"
                     title="更多集合操作"
                     :aria-expanded="menu === 'collection:' + group.id"
                     @click.stop="
@@ -1185,12 +1187,12 @@ function moveWithSelect(event: Event, group: string, id: string) {
                         :aria-pressed="collectionColor(group.color) === color"
                         :style="{ backgroundColor: swatch[1] }"
                         :disabled="busy"
-                        @click="run(() => setCollectionColor(group.id, color))"
+                        v-account-edit @click="run(() => setCollectionColor(group.id, color))"
                       />
                     </div>
                     <button
                       class="glass-control glass-interactive"
-                      @click="
+                      v-account-edit @click="
                         edit(group);
                         menu = '';
                       "
@@ -1200,7 +1202,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                     <button
                       class="glass-control glass-interactive collection-delete"
                       :disabled="busy"
-                      @click="
+                      v-account-edit @click="
                         deleting = group.id;
                         menu = '';
                       "
@@ -1256,7 +1258,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                       'is-selected': selected.has(tab.id),
                     }"
                     :data-saved-id="tab.id"
-                    :draggable="!guestMode && !isMarkedSpace"
+                    :draggable="!isMarkedSpace"
                     @dragstart.stop="
                       startDrag($event, {
                         kind: 'saved',
@@ -1274,7 +1276,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                       @open="run(() => openSaved([tab]))"
                       ><template #checkbox>
                         <input
-                          v-if="!guestMode" class="workspace-card-checkbox"
+                          class="workspace-card-checkbox"
                           type="checkbox"
                           :checked="selected.has(tab.id)"
                           :aria-label="`选择标签页 ${tab.title}`"
@@ -1284,7 +1286,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                         />
                       </template>
                       <button
-                        v-if="!guestMode" class="workspace-bookmark"
+                        v-account-edit class="workspace-bookmark"
                         :aria-label="`标记收藏 ${tab.title}`"
                         :aria-pressed="!!tab.starred"
                         :disabled="busy"
@@ -1328,7 +1330,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                         :aria-label="`更多 ${tab.title}`"
                         :aria-expanded="menu === tab.id"
                         title="更多"
-                        v-if="!guestMode" @click="menu = menu === tab.id ? '' : tab.id"
+                        @click="menu = menu === tab.id ? '' : tab.id"
                       >
                         <img
                           class="workspace-action-icon"
@@ -1345,14 +1347,14 @@ function moveWithSelect(event: Event, group: string, id: string) {
                         <button
                           class="glass-control glass-interactive"
                           :disabled="busy"
-                          @click="editTab(group.id, tab)"
+                          v-account-edit @click="editTab(group.id, tab)"
                         >
                           修改
                         </button>
                         <select
                           v-if="!isMarkedSpace && collections.length > 1"
                           class="glass-control glass-interactive"
-                          :aria-label="`移动收藏 ${tab.title}`"
+                          v-account-edit :aria-label="`移动收藏 ${tab.title}`"
                           @change="
                             moveWithSelect($event, group.id, tab.id);
                             menu = '';
@@ -1372,7 +1374,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                         <button
                           class="glass-control glass-interactive"
                           :disabled="busy"
-                          :aria-label="`移除收藏 ${tab.title}`"
+                          v-account-edit :aria-label="`移除收藏 ${tab.title}`"
                           @click="
                             menu = '';
                             run(() => removeTab(group.id, tab.id));
@@ -1453,7 +1455,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
               <h3 key="heading" class="workspace-window-label">
                 <button
                   v-if="group.id !== -1"
-                  class="workspace-group-handle glass-control glass-interactive"
+                  v-account-edit class="workspace-group-handle glass-control glass-interactive"
                   draggable="true"
                   :disabled="busy"
                   :aria-label="`拖动群组 ${group.label}`"
@@ -1467,8 +1469,8 @@ function moveWithSelect(event: Event, group: string, id: string) {
                   class="workspace-group-toggle"
                   :aria-label="`折叠群组 ${group.label}`"
                   :aria-expanded="!group.collapsed"
-                  :disabled="guestMode || busy"
-                  @click="run(() => toggleBrowserGroup(group.id))"
+                  :disabled="busy"
+                  v-account-edit @click="run(() => toggleBrowserGroup(group.id))"
                 >
                   {{ group.label }}
                   <img
@@ -1482,8 +1484,8 @@ function moveWithSelect(event: Event, group: string, id: string) {
                 <template v-else>{{ group.label }}</template>
                 <span>{{ group.tabs.length }}</span>
                 <button
-                  v-if="!guestMode && group.id !== -1"
-                  class="workspace-group-save glass-control glass-interactive"
+                  v-if="group.id !== -1"
+                  v-account-edit class="workspace-group-save glass-control glass-interactive"
                   :aria-label="`保存群组 ${group.label} 为集合`"
                   title="以群组名称保存为集合"
                   :disabled="busy || loading"
@@ -1517,7 +1519,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                     tab.id !== undefined && selectedBrowserTabs.has(tab.id),
                 }"
                 :data-browser-tab-id="tab.id"
-                :draggable="!guestMode && !isMarkedSpace"
+                :draggable="!isMarkedSpace"
                 @dragstart.stop="
                   tab.id !== undefined &&
                   startDrag($event, { kind: 'tab', id: tab.id })
@@ -1532,7 +1534,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                     :title="tabTitle(tab)"
                   />
                   <input
-                    v-if="!guestMode" class="workspace-card-checkbox"
+                    class="workspace-card-checkbox"
                     type="checkbox"
                     :aria-label="`选择打开的标签页 ${tabTitle(tab)}`"
                     :checked="
@@ -1563,7 +1565,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
           </ReorderTransition>
         </div>
         <div
-          v-if="!guestMode && selectedOpenTabs.length"
+          v-if="selectedOpenTabs.length"
           class="workspace-browser-selection glass-surface"
           aria-label="所选浏览器标签页操作"
         >
@@ -1584,7 +1586,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
           <button
             class="glass-control glass-interactive"
             :disabled="busy"
-            @click="run(() => actOnBrowserSelection('group'))"
+            v-account-edit @click="run(() => actOnBrowserSelection('group'))"
           >
             新建群组
           </button>
@@ -1596,7 +1598,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
             "
             class="glass-control glass-interactive"
             :disabled="busy"
-            @click="run(() => actOnBrowserSelection('ungroup'))"
+            v-account-edit @click="run(() => actOnBrowserSelection('ungroup'))"
           >
             取消群组
           </button>
@@ -1604,7 +1606,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
             class="glass-control glass-interactive"
             :disabled="busy"
             title="关闭所选浏览器标签页"
-            @click="run(() => actOnBrowserSelection('close'))"
+            v-account-edit @click="run(() => actOnBrowserSelection('close'))"
           >
             删除所选
           </button>

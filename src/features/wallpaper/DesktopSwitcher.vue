@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vAccountEdit, vAccountDrag } from '../auth/edit-access';
 import { guestMode } from '../../shared/storage/account';
 import { computed, onUnmounted, ref, watch, nextTick } from 'vue';
 import { createDragLanding } from '../../shared/drag-landing';
@@ -305,12 +306,12 @@ onUnmounted(() => {
         <TransitionGroup tag="div" name="card-order" class="desktop-cards" @wheel="wheel">
           <button
             v-for="card in orderedCards"
-            draggable="false" :data-desktop="card.id" :class="{dragging:dragged===card.id}" @mousedown="press($event,card.id)"
+            v-account-drag draggable="false" :data-desktop="card.id" :class="{dragging:dragged===card.id}" @mousedown="press($event,card.id)"
             :key="card.id"
             :aria-pressed="activeDesktop === card.id"
             @click="select(card.id)"
             @contextmenu.prevent="
-              !guestMode && (editing = {
+              (editing = {
                 id: card.id,
                 name: cardName(card.id),
                 action: 'menu',
@@ -323,7 +324,7 @@ onUnmounted(() => {
                 :src="images[card.id]"
                 alt="" /></span
             ><strong>{{ cardName(card.id) }}</strong></button
-          ><button v-if="!guestMode" key="add" aria-label="添加桌面" :disabled="adding" @click="add">
+          ><button v-account-edit key="add" aria-label="添加桌面" :disabled="adding" @click="add">
             <span class="desktop-thumb desktop-plus">＋</span
             ><strong>添加桌面</strong>
           </button>
@@ -337,7 +338,7 @@ onUnmounted(() => {
             ><strong>{{ editing.name }}</strong
             ><button
               type="button"
-              @click="
+              v-account-edit @click="
                 editing.action = 'rename';
                 nextTick(() => dialog?.querySelector('input')?.select());
               "
@@ -346,7 +347,7 @@ onUnmounted(() => {
             ><button
               v-if="editing.id !== 'default'"
               type="button"
-              @click="editing.action = 'delete'"
+              v-account-edit @click="editing.action = 'delete'"
             >
               删除桌面
             </button></template

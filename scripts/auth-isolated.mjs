@@ -117,7 +117,8 @@ async function freePort() {
   return port;
 }
 async function signIn(context, page, origin, loginEmail = email) {
-  await page.getByRole('button', { name: '登录多鱼账号', exact: true }).click();
+  if (!(await page.getByRole('dialog', { name: '登录后编辑' }).isVisible()))
+    await page.getByRole('button', { name: '登录多鱼账号', exact: true }).click();
   const popupPromise = context.waitForEvent('page');
   await page.getByRole('button', { name: '前往登录', exact: true }).click();
   const popup = await popupPromise;
@@ -687,11 +688,26 @@ try {
   await expect(official).toBeVisible();
   await expect(page.getByText('离线显示上次下载的官方模板')).toBeVisible();
   await context.unroute('**/api/v1/guest-template');
-  await official.click({button:'right'});
-  await expect(page.getByRole('menuitem',{name:'添加网址'})).toHaveCount(0);
-  await expect(page.getByRole('button',{name:'调整大小 官方模板入口'})).toHaveCount(0);
+  const expectLogin = async () => {
+    const prompt = page.getByRole('dialog', {name: '登录后编辑'});
+    await expect(prompt).toBeVisible();
+    await expect(prompt.getByRole('button', {name: '前往登录'})).toBeVisible();
+    await prompt.getByRole('button', {name: '继续浏览'}).click();
+    await expect(prompt).not.toBeVisible();
+  };
+  for (const name of ['编辑', '删除']) {
+    await official.click({ button: 'right' });
+    await page.locator('.grid-item-menu').getByRole('button', { name, exact: true }).click();
+    await expectLogin();
+    await expect(official).toBeVisible();
+  }
+  await expect(page.getByRole('button',{name:'调整大小 官方模板入口'})).toHaveCount(1);
   await page.getByRole('button',{name:'切换桌面',exact:true}).click();
-  await expect(page.getByRole('button',{name:'添加桌面',exact:true})).toHaveCount(0);
+  const cards = page.locator('.desktop-cards [data-desktop]');
+  const before = await cards.count();
+  await page.getByRole('button',{name:'添加桌面',exact:true}).click();
+  await expectLogin();
+  await expect(cards).toHaveCount(before);
   await page.keyboard.press('Escape');
   await context.route(guestLink.url, route => route.fulfill({contentType:'text/plain',body:'guest link opened'}));
   const linkOpened = context.waitForEvent('page');
@@ -699,7 +715,7 @@ try {
   const opened = await linkOpened;
   await opened.waitForURL(guestLink.url,{waitUntil:'commit'}).catch(async()=>assert.equal((await page.evaluate(()=>chrome.tabs.query({}))).some(t=>(t.url || t.pendingUrl)==='https://example.invalid/guest-only'),true));
   await opened.close();
-  console.log('PASS official guest template, open link, absent edit/add/resize actions and restricted template endpoint');
+  console.log('PASS official guest template, open link, visible edit/delete/add actions prompt for login and restricted template endpoint');
   await expect(
     page.locator('.cell-link[aria-label="打开收藏 真实认证同步收藏"]'),
   ).toHaveCount(0);
@@ -708,6 +724,9 @@ try {
     const owner = localStorage.getItem('duoyu-sync-account');
     if (owner) localStorage.setItem('account:'+owner+':duoyu-wallpaper-intent', JSON.stringify({selection:'daily'}));
   });
+  await official.click({ button: 'right' });
+  await page.locator('.grid-item-menu').getByRole('button', {name:'编辑',exact:true}).click();
+  await expect(page.getByRole('dialog',{name:'登录后编辑'})).toBeVisible();
   await signIn(context, page, origin);
   await expect(
     page.locator('.cell-link[aria-label="打开收藏 真实认证同步收藏"]'),

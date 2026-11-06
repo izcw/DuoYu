@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { requireAccount, vAccountEdit, vAccountDrag } from '../auth/edit-access';
 import { guestMode } from '../../shared/storage/account';
 import { computed, onUnmounted, ref, watch, nextTick } from 'vue';
 import { useGridSelection } from '../../shared/useGridSelection';
@@ -161,13 +162,13 @@ function syncGrid(grid: GridStack) {
   }
   grid.batchUpdate(false);
   grid.mode(props.automatic ? 'top' : 'float');
-  grid.enableMove(!props.disabled);
-  grid.enableResize(!props.disabled);
+  grid.enableMove(!guestMode && !props.disabled);
+  grid.enableResize(!guestMode && !props.disabled);
   syncing = false;
   selection.refresh();
 }
 async function saveGrid(grid: GridStack) {
-  if (syncing || props.preview || props.disabled) return;
+  if (guestMode || syncing || props.preview || props.disabled) return;
   const nodes = grid.engine.nodes.map((n) => ({
     id: n.id!,
     x: n.x!,
@@ -195,6 +196,7 @@ function showItemMenu(event: MouseEvent, item: LibraryItem) {
   itemMenu.value = { item, x: event.clientX, y: event.clientY };
 }
 async function chooseSize(width: number, height: number) {
+  if (!requireAccount()) return;
   if (itemMenu.value?.item.parent) {
     await resizeLibraryItem(itemMenu.value.item.id, width, height);
     itemMenu.value = undefined;
@@ -484,7 +486,7 @@ const { getGrid } = useWidgetGrid(gridElement, gridContainer, {
 });
 const selection = useGridSelection(gridContainer, gridElement, {
   getGrid,
-  disabled: () => props.disabled || !!expanded.value || !!itemMenu.value,
+  disabled: () => guestMode || props.disabled || !!expanded.value || !!itemMenu.value,
   save: saveGrid,
   error: (message) => emit('error', message),
 });
@@ -514,7 +516,7 @@ function show(item: LibraryItem) {
   folderPage.value = 0;
 }
 function start(event: DragEvent, item: LibraryItem) {
-  if (props.disabled) {
+  if (guestMode || props.disabled) {
     event.preventDefault();
     return;
   }
@@ -552,6 +554,7 @@ function drop(item?: LibraryItem) {
   target.value = '';
 }
 async function keyboardResize(event: KeyboardEvent, item: LibraryItem) {
+  if (event.key.startsWith("Arrow") && !requireAccount()) { event.preventDefault(); return; }
   if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key))
     return;
   event.preventDefault();
@@ -629,7 +632,7 @@ async function note(event: Event, id: string) {
         :gs-no-resize="false"
         :gs-w="size(item).width"
         :gs-h="size(item).height"
-        :data-library-id="item.id"
+        v-account-drag :data-library-id="item.id"
         :style="
           item.kind === 'link'
             ? {
@@ -726,7 +729,7 @@ async function note(event: Event, id: string) {
               <textarea
                 :value="item.text"
                 :aria-label="item.name"
-                placeholder="记下一点灵感…" :readonly="guestMode"
+                v-account-edit @beforeinput="!requireAccount() && $event.preventDefault()" @keydown="guestMode && $event.key.length === 1 && !requireAccount() && $event.preventDefault()" placeholder="记下一点灵感…" :readonly="guestMode"
                 @pointerdown.stop
                 @dragstart.prevent.stop
                 @input="note($event, item.id)"
@@ -750,7 +753,7 @@ async function note(event: Event, id: string) {
             </button>
           </div>
           <button
-            v-if="!preview && !guestMode"
+            v-if="!preview" v-account-edit
             class="cell-resize"
             :aria-label="'调整大小 ' + item.name"
             title="拖动调整大小，也可用方向键"
@@ -832,7 +835,7 @@ async function note(event: Event, id: string) {
       </form>
       <button
         v-else
-        class="folder-title"
+        v-account-edit class="folder-title"
         @click="
           renamingFolder = true;
           folderName = folder?.name || '';

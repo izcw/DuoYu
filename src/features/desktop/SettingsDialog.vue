@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { requireAccount, vAccountEdit } from '../auth/edit-access';
 import { ref, watch } from 'vue';
 import BaseSelect from '../../shared/components/base/BaseSelect.vue';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
@@ -6,7 +7,7 @@ import DialogLayout from '../../shared/components/base/DialogLayout.vue';
 import AccountPanel from '../auth/AccountPanel.vue';
 import JsonImportDialog from '../sync/JsonImportDialog.vue';
 import { getSyncPreference, setSyncPreference } from '../sync/client';
-import { accountStorage, guestMode } from '../../shared/storage/account';
+import { accountStorage } from '../../shared/storage/account';
 import { backupDesktop } from './desktop-backup';
 import { settingsOpen, settingsSection, settingsPage } from './settings-state';
 const menus = [
@@ -33,7 +34,7 @@ watch(settingsOpen, async (open) => {
   }
 }, { immediate: true });
 async function run(task: () => Promise<unknown>, success = '') {
-  if (busy.value) return;
+  if (busy.value || !requireAccount()) return;
   busy.value = true;
   error.value = '';
   message.value = '';
@@ -69,7 +70,7 @@ function saveLayout(layout: string) {
   >
     <DialogLayout
       v-model="settingsSection"
-      :menus="guestMode ? [menus[0]] : menus"
+      :menus="menus"
       label="设置分类"
       @update:model-value="
         message = '';
@@ -138,7 +139,7 @@ function saveLayout(layout: string) {
             <strong>恢复备份</strong>
             <p>选择 JSON 文件，预览后确认导入</p>
           </div>
-          <button :disabled="busy" @click="importOpen = true">导入备份</button>
+          <button :disabled="busy" v-account-edit @click="importOpen = true">导入备份</button>
         </div>
       </template>
       <p v-if="message" class="status" role="status">{{ message }}</p>

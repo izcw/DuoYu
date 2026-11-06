@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vAccountDrag } from '../auth/edit-access';
 import { guestMode } from '../../shared/storage/account';
 import { accountStorage, scopedKey } from '../../shared/storage/account';
 import { computed, ref, onUnmounted, watch } from 'vue';
@@ -342,7 +343,7 @@ async function drop(event: MouseEvent) {
             :aria-label="item.name"
             :title="item.name"
             :aria-current="isActive(item.id) ? 'page' : undefined"
-            @mousedown.left="press($event, item.id)"
+            v-account-drag="!pinned.includes(item.id)" @mousedown.left="press($event, item.id)"
             @dragstart.prevent
             @click="activate(item)"
           >

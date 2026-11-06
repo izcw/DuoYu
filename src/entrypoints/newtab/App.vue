@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import EditLoginDialog from "../../features/auth/EditLoginDialog.vue";
 import { useIconHighlight } from '../../features/desktop/useIconHighlight';
 useIconHighlight();
 import { guestTemplateStatus } from '../../features/sync/guest-template';
@@ -111,11 +112,12 @@ function stepPage(direction: number) {
   <Teleport to="body">
     <div class="desktop-top-actions">
       <span v-if="guestMode" class="guest-notice">{{ guestTemplateStatus || '官方模板 · 登录后可编辑' }}</span>
-      <GlassModeSwitch v-else />
+      <GlassModeSwitch />
       <span id="desktop-switch-slot"></span>
       <AccountButton />
     </div>
   </Teleport>
+  <EditLoginDialog v-if="guestMode" />
   <DesktopSwitcher
     @selected="
       workspaceOpen = false;

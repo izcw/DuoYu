@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vAccountDrag } from '../../../features/auth/edit-access';
 import { guestMode } from '../../../shared/storage/account';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 export interface RadialItem {
@@ -320,7 +321,7 @@ onUnmounted(() => {
           selected && item.id !== 'add' ? selected === item.id : undefined
         "
         :tabindex="open ? 0 : -1"
-        @pointerdown="start($event, item)"
+        v-account-drag @pointerdown="start($event, item)"
         @click="click($event, item.id)"
         @focus="mark(item.id)"
         @keydown="key($event, index)"

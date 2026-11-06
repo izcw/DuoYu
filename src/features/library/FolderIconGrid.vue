@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { vAccountDrag } from '../auth/edit-access';
+import { guestMode } from '../../shared/storage/account';
 import { beginFolderDrag, folderDragItemId } from './page-drag';
 import type { GridItemHTMLElement } from 'gridstack';
 import { FOLDER_ICON_SIZE } from './grid-config';
@@ -62,7 +64,7 @@ function sync(grid: GridStack) {
       });
   }
   grid.batchUpdate(false);
-  grid.enableMove(!props.disabled);
+  grid.enableMove(!guestMode && !props.disabled);
   syncing = false;
 }
 async function save(grid: GridStack) {
@@ -210,7 +212,7 @@ function open(item: LibraryItem) {
         :key="item.id"
         class="grid-stack-item"
         :class="{ 'folder-transfer-source': folderDragItemId === item.id }"
-        :data-folder-item="item.id"
+        v-account-drag :data-folder-item="item.id"
       >
         <button
           class="grid-stack-item-content widget-card folder-link glass-interaction-owner"

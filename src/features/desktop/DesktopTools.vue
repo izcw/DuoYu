@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vAccountEdit } from '../auth/edit-access';
 import type {WidgetSize} from "../../shared/storage/database";
 import WallpaperDownloadProgress from '../wallpaper/WallpaperDownloadProgress.vue';
 import type { WallpaperProgress } from '../wallpaper/download-wallpaper';
@@ -174,7 +175,7 @@ async function open(item: LibraryItem) {
             :key="widget.kind"
             class="store-card store-widget-card"
             :title="widget.description"
-            @click="emit('add', widget.kind)"
+            v-account-edit @click="emit('add', widget.kind)"
           >
             <span class="tool-symbol">{{ widget.icon }}</span
             ><strong>{{ widget.name }}</strong>
@@ -182,7 +183,7 @@ async function open(item: LibraryItem) {
           <button
             v-if="widgetCategory !== 'daily'"
             class="store-card store-widget-card"
-            @click="emit('folder')"
+            v-account-edit @click="emit('folder')"
           >
             <span class="tool-symbol">▣</span><strong>新建文件夹</strong>
           </button>
@@ -211,7 +212,7 @@ async function open(item: LibraryItem) {
             class="store-card wallpaper-card glass-surface"
             :aria-pressed="selectedWallpaper === 'daily'"
             :disabled="busy"
-            @click="run(daily)"
+            v-account-edit @click="run(daily)"
           >
             <img
               v-if="!todayFailed"

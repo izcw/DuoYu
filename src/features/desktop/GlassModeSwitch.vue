@@ -1,10 +1,10 @@
 <script setup lang="ts">
+import { vAccountEdit } from '../auth/edit-access';
 import { setSyncPreference } from '../sync/client';
 import { liveQuery } from 'dexie';
 import { activeAccountKey, pageAccountKey } from '../../shared/storage/account';
 import { database } from '../../shared/storage/database';
-import { inject, ref, onMounted, onUnmounted, watch } from 'vue';
-import { browser } from 'wxt/browser';
+import { inject, ref, onUnmounted, watch } from 'vue';
 import type { GlassMode } from './glass/renderer';
 import { initialGlassModeKey } from './glass/preferences';
 const notice = ref('');
@@ -25,21 +25,11 @@ function applyMode(value: unknown) {
   if (activeAccountKey() === pageAccountKey)
     glassMode.value = value === 'natural' || value === 'soft' ? value : 'real';
 }
-function guestChanged(changes: Record<string, { newValue?: unknown }>) {
-  if (changes.glassMode) applyMode(changes.glassMode.newValue);
-}
-let subscription: { unsubscribe(): void } | undefined;
-onMounted(() => {
-  if (pageAccountKey) {
-    subscription = liveQuery(() => database.preferences.get('glassMode')).subscribe(
-      (record) => applyMode(record?.value),
-    );
-  } else browser.storage.local.onChanged.addListener(guestChanged);
-});
-onUnmounted(() => {
-  subscription?.unsubscribe();
-  if (!pageAccountKey) browser.storage.local.onChanged.removeListener(guestChanged);
-});
+// The guest template and every account expose the same preference table.
+const subscription = liveQuery(() => database.preferences.get('glassMode')).subscribe(
+  (record) => applyMode(record?.value),
+);
+onUnmounted(() => subscription.unsubscribe());
 let modeQueue = Promise.resolve();
 function setGlassMode(mode: GlassMode) {
   notice.value = '';
@@ -63,7 +53,7 @@ function setGlassMode(mode: GlassMode) {
       type="button"
       class="glass-control glass-interactive"
       :aria-pressed="glassMode === mode.id"
-      @click="setGlassMode(mode.id)"
+      v-account-edit @click="setGlassMode(mode.id)"
     >
       {{ mode.label }}
     </button>

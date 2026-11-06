@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vAccountEdit, vAccountDrag } from '../../../features/auth/edit-access';
 import { guestMode } from '../../../shared/storage/account';
 import { useMouseSort } from '../../useMouseSort';
 const pressSort = useMouseSort();
@@ -148,11 +149,11 @@ function drop(event: DragEvent) {
           :key="item.id"
           class="library-page-row"
           :class="{ 'is-dragging': dragged === item.id }"
-          :data-menu-row="item.id"
+          v-account-drag :data-menu-row="item.id"
           :data-library-page-id="library ? item.id : undefined"
           :draggable="!disabled && !guestMode"
           @dragstart.stop="start($event, item.id)"
-          @contextmenu.prevent.stop="!guestMode && emit('context', $event, item.id)"
+          @contextmenu.prevent.stop="emit('context', $event, item.id)"
         >
           <button
             class="side-menu-choice"
@@ -174,7 +175,7 @@ function drop(event: DragEvent) {
         class="side-menu-add"
         :class="library ? 'library-page-add' : 'workspace-space-add'"
         :aria-label="addLabel"
-        v-if="!guestMode" :disabled="disabled"
+        v-account-edit :disabled="disabled"
         @mouseenter="hot = 'add'"
         @mouseleave="hot = ''"
         @click="emit('add')"

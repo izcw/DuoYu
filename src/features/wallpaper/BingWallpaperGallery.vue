@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vAccountEdit } from '../auth/edit-access';
 import WallpaperDownloadProgress from './WallpaperDownloadProgress.vue';
 import {
   downloadWallpaper,
@@ -142,7 +143,7 @@ onUnmounted(() => {
       :aria-label="`应用壁纸 ${item.title}`"
       :title="item.copyright"
       :aria-pressed="isSelected(item)"
-      @click="apply(item)"
+      v-account-edit @click="apply(item)"
     >
       <img
         :src="item.url.replace('_1920x1080', '_800x480')"

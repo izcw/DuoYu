@@ -134,7 +134,7 @@ onUnmounted(() => {
 .newtab,
 .wallpaper-status,
 body
-  > :not(#app):not(.desktop-dock):not(.desktop-top-actions):not(
+  > :not(#app):not(dialog:modal):not(.desktop-dock):not(.desktop-top-actions):not(
     .account-entry
   ):not(.desktop-switch-entry):not(.desktop-drawer):not(.workspace-overlay):not(
     .base-dialog-backdrop
@@ -147,7 +147,7 @@ body
 .workspace-active .wallpaper-status,
 .workspace-active
   body
-  > :not(#app):not(.desktop-dock):not(.desktop-top-actions):not(
+  > :not(#app):not(dialog:modal):not(.desktop-dock):not(.desktop-top-actions):not(
     .account-entry
   ):not(.desktop-switch-entry):not(.desktop-drawer):not(.workspace-overlay):not(
     .base-dialog-backdrop

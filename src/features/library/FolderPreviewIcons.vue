@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { guestMode } from '../../shared/storage/account';
 import ReorderTransition from '../../shared/components/base/ReorderTransition.vue';
 import { createDragLanding } from '../../shared/drag-landing';
 import { computed, ref, onUnmounted } from 'vue';
@@ -29,7 +30,7 @@ const visible = computed(()=>{
   return movingId.value ? order.value.flatMap(id=>icons.filter(icon=>icon.id===id)) : icons;
 });
 function press(event:MouseEvent,item:LibraryItem){
-  if(props.disabled || event.button!==0 || landing.committing)return;
+  if(guestMode || props.disabled || event.button!==0 || landing.committing)return;
   cleanup?.();
   const icon=event.currentTarget as HTMLElement;
   const boundary=icon.closest('.cell-panel')!.getBoundingClientRect();
