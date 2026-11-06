@@ -102,6 +102,7 @@ export async function verifyPageIcons(page) {
     .toBe(true);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await button(picker, '唱片').click();
+  await expect(dialog.locator('label [data-icon="RecordDisc"]')).toBeVisible();
   await name.fill('测试影集');
   await button(dialog, '添加').click();
   const row = page.locator('[data-menu-row]').filter({ hasText: '测试影集' });
@@ -125,6 +126,7 @@ export async function verifyPageIcons(page) {
   await expect(button(space, '护照')).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(button(space, '护照')).toHaveAttribute('aria-pressed', 'true');
+  await expect(space.locator('label [data-icon="Passport"]')).toBeVisible();
   await button(space, '添加').click();
   const spaceRow = page
     .locator('.workspace-board [data-menu-row]')

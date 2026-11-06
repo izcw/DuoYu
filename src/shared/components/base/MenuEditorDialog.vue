@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import EditorDialog from './EditorDialog.vue';
+import PageIcon from './PageIcon.vue';
 import PageIconPicker from './PageIconPicker.vue';
 defineProps<{
   open: boolean;
@@ -22,8 +23,8 @@ const emit = defineEmits<{ close: []; submit: [] }>();
     @close="emit('close')"
     @submit="emit('submit')"
   >
-    <label class="editor-field"
-      >{{ space ? '空间名称' : '页面名称' }}
+    <label class="editor-field">
+      <PageIcon class="field-icon" :name="icon" :size="18" active />
       <input
         autofocus
         v-model="name"
@@ -33,10 +34,7 @@ const emit = defineEmits<{ close: []; submit: [] }>();
         required
       />
     </label>
-    <div class="editor-field">
-      <span>{{ space ? '空间图标' : '页面图标' }}</span>
-      <PageIconPicker v-model="icon" />
-    </div>
+    <PageIconPicker v-model="icon" />
     <template #feedback
       ><p v-if="error" role="alert">{{ error }}</p></template
     >
@@ -44,12 +42,16 @@ const emit = defineEmits<{ close: []; submit: [] }>();
 </template>
 <style scoped>
 .editor-field {
-  display: grid;
-  gap: 8px;
-  color: #444;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 20px;
+  display: block;
+  position: relative;
+}
+.field-icon {
+  position: absolute;
+  inset-inline-start: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #000;
+  pointer-events: none;
 }
 .editor-field input {
   box-sizing: border-box;
@@ -59,6 +61,7 @@ const emit = defineEmits<{ close: []; submit: [] }>();
   border-radius: 6px;
   background: #f5f5f7;
   padding: 7px 12px;
+  padding-inline-start: 40px;
   font-size: 14px;
 }
 </style>
