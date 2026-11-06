@@ -25,6 +25,7 @@ import { useWorkspace, type BrowserTab } from './useWorkspace';
 import { createDragLanding } from '../../shared/drag-landing';
 import ReorderTransition from '../../shared/components/base/ReorderTransition.vue';
 import WorkspaceCardMain from './WorkspaceCardMain.vue';
+import { useWorkspaceLayoutMotion } from './useWorkspaceLayoutMotion';
 import WorkspaceFavicon from './WorkspaceFavicon.vue';
 import MenuEditorDialog from '../../shared/components/base/MenuEditorDialog.vue';
 import DesktopMenu from '../../shared/components/base/DesktopMenu.vue';
@@ -760,6 +761,12 @@ function dropOnTab(tab: BrowserTab) {
   });
 }
 const collectionList = ref<HTMLElement>();
+const layoutMotion = useWorkspaceLayoutMotion(collectionList);
+watch([activeSpace, query, dragVisualActive], layoutMotion.stop);
+function switchView(mode: 'grid' | 'list') {
+  if (viewMode.value === mode) return;
+  void layoutMotion.changeLayout(() => { viewMode.value = mode; });
+}
 async function revealNewestCollection() {
   await nextTick();
   collectionList.value?.scrollTo({ top: 0 });
@@ -956,34 +963,36 @@ function moveWithSelect(event: Event, group: string, id: string) {
             role="group"
             aria-label="集合视图"
           >
-            <button
-              aria-label="网格"
-              title="网格"
-              class="workspace-button glass-control glass-interactive"
-              :aria-pressed="viewMode === 'grid'"
-              @click="viewMode = 'grid'"
-            >
-              <img
-                class="workspace-action-icon"
-                src="/images/workspace/grid.png"
-                alt=""
-                draggable="false"
-              />
-            </button>
-            <button
-              aria-label="列表"
-              title="列表"
-              class="workspace-button glass-control glass-interactive"
-              :aria-pressed="viewMode === 'list'"
-              @click="viewMode = 'list'"
-            >
-              <img
-                class="workspace-action-icon"
-                src="/images/workspace/list.png"
-                alt=""
-                draggable="false"
-              />
-            </button>
+            <div class="workspace-layout-switch">
+              <button
+                aria-label="网格"
+                title="网格"
+                class="workspace-button glass-control glass-interactive"
+                :aria-pressed="viewMode === 'grid'"
+                @click="switchView('grid')"
+              >
+                <img
+                  class="workspace-action-icon"
+                  src="/images/workspace/grid.png"
+                  alt=""
+                  draggable="false"
+                />
+              </button>
+              <button
+                aria-label="列表"
+                title="列表"
+                class="workspace-button glass-control glass-interactive"
+                :aria-pressed="viewMode === 'list'"
+                @click="switchView('list')"
+              >
+                <img
+                  class="workspace-action-icon"
+                  src="/images/workspace/list.png"
+                  alt=""
+                  draggable="false"
+                />
+              </button>
+            </div>
             <button
               class="workspace-button glass-control glass-interactive"
               :aria-label="collapseAction"

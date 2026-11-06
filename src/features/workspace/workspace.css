@@ -1037,13 +1037,37 @@
   background: #ffffff20;
   border-radius: 8px;
 }
-.workspace-view-controls button[aria-pressed] {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
+.workspace-layout-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(2, 38px);
+  position: relative;
+  isolation: isolate;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 6%);
 }
-.workspace-view-controls button[aria-pressed='true'] {
+.workspace-layout-switch::before {
+  content: '';
+  position: absolute;
+  inset: 2px auto 2px 2px;
+  width: calc(50% - 2px);
+  border-radius: inherit;
   background: var(--glass-interaction-fill);
+  transition: translate 320ms cubic-bezier(.22, .7, .2, 1);
+  z-index: -1;
+}
+.is-list-view .workspace-layout-switch::before {
+  translate: 100% 0;
+}
+.workspace-layout-switch .workspace-button {
+  display: grid;
+  place-items: center;
+  background: transparent;
+  box-shadow: none;
+  border-radius: inherit;
+  padding: 8px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .workspace-layout-switch::before { transition: none; }
 }
 .workspace-board .workspace-saved-tab:is(:hover, :focus-within),
 .workspace-board .workspace-open-tab:is(:hover, :focus-within) {
@@ -1265,6 +1289,24 @@
 .workspace-saved-tab:is(:hover, :focus-within) .workspace-bookmark {
   opacity: 1;
   pointer-events: auto;
+}
+.workspace-board:not(.is-list-view) .workspace-saved-tab .workspace-card-main {
+  flex-direction: column;
+  gap: 8px;
+}
+.workspace-board:not(.is-list-view) .workspace-saved-tab .workspace-icon-slot {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 10%);
+}
+.workspace-board:not(.is-list-view) .workspace-saved-tab .workspace-link {
+  width: 100%;
+}
+.workspace-board:not(.is-list-view) .workspace-saved-tab .workspace-bookmark {
+  position: absolute;
+  inset: 6px 6px auto auto;
+  margin: 0;
 }
 
 .workspace-board .workspace-action-icon {
