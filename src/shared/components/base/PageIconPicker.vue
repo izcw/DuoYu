@@ -1,39 +1,16 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { pageIconGroups } from '../../page-icons';
+import { onMounted, ref } from 'vue';
+import { pageIconGroups, pageIcons } from '../../page-icons';
 import PageIcon from './PageIcon.vue';
 
 const selected = defineModel<string>({ required: true });
-const query = ref('');
-const category = ref('');
 const viewport = ref<HTMLElement>();
-const cursor = ref(selected.value);
-const groups = computed(() => {
-  const term = query.value.trim().toLowerCase();
-  return pageIconGroups
-    .filter((group) => !category.value || group.name === category.value)
-    .map((group) => ({
-      name: group.name,
-      icons: group.icons.filter((icon) =>
-        (group.name + ' ' + icon.label + ' ' + icon.id.toLowerCase()).includes(
-          term,
-        ),
-      ),
-    }))
-    .filter((group) => group.icons.length);
-});
-const ids = computed(() =>
-  groups.value.flatMap((group) => group.icons.map((icon) => icon.id)),
+const cursor = ref(
+  pageIcons.some((icon) => icon.id === selected.value)
+    ? selected.value
+    : pageIcons[0]?.id,
 );
-const tabStop = computed(() =>
-  ids.value.includes(cursor.value) ? cursor.value : ids.value[0],
-);
-
-watch([category, query], () => {
-  if (viewport.value) viewport.value.scrollTop = 0;
-});
-onMounted(async () => {
-  await nextTick();
+onMounted(() => {
   viewport.value
     ?.querySelector('[aria-pressed="true"]')
     ?.scrollIntoView({ block: 'nearest' });
@@ -94,42 +71,12 @@ function navigate(event: KeyboardEvent) {
   event.stopPropagation();
   next?.focus();
 }
-function clearQuery(event: KeyboardEvent) {
-  if (query.value) {
-    event.preventDefault();
-    event.stopPropagation();
-    query.value = '';
-  }
-}
 </script>
 <template>
   <div class="page-icon-picker" role="group" aria-label="选择页面图标">
-    <div class="filters">
-      <div class="search">
-        <PageIcon name="Search" :size="16" />
-        <input
-          v-model="query"
-          type="search"
-          aria-label="搜索图标"
-          placeholder="搜索图标"
-          @keydown.enter.prevent
-          @keydown.esc="clearQuery"
-        />
-      </div>
-      <select v-model="category" aria-label="图标分类">
-        <option value="">全部分类</option>
-        <option
-          v-for="group in pageIconGroups"
-          :key="group.name"
-          :value="group.name"
-        >
-          {{ group.name }}
-        </option>
-      </select>
-    </div>
     <div ref="viewport" class="icon-scroll" @keydown="navigate" @wheel.stop>
       <section
-        v-for="group in groups"
+        v-for="group in pageIconGroups"
         :key="group.name"
         :aria-label="group.name"
       >
@@ -143,7 +90,7 @@ function clearQuery(event: KeyboardEvent) {
             :title="icon.label"
             :aria-label="icon.label"
             :aria-pressed="selected === icon.id"
-            :tabindex="tabStop === icon.id ? 0 : -1"
+            :tabindex="cursor === icon.id ? 0 : -1"
             @focus="cursor = icon.id"
             @click="selected = icon.id"
           >
@@ -156,7 +103,6 @@ function clearQuery(event: KeyboardEvent) {
           </button>
         </div>
       </section>
-      <p v-if="!groups.length" role="status">没有找到匹配的图标</p>
     </div>
   </div>
 </template>
@@ -164,54 +110,6 @@ function clearQuery(event: KeyboardEvent) {
 .page-icon-picker {
   color: inherit;
   min-width: 0;
-}
-.filters {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.search,
-select {
-  background: rgb(255 255 255 / 9%);
-  border: 1px solid rgb(255 255 255 / 20%);
-  border-radius: 10px;
-  color: inherit;
-}
-.search {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px;
-}
-.search:focus-within,
-select:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 1px;
-}
-.search input {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  padding: 8px 0;
-  outline: 0;
-}
-.search input::placeholder {
-  color: inherit;
-  opacity: 0.72;
-}
-select {
-  font: inherit;
-  font-size: 13px;
-  padding: 0 6px;
-}
-option {
-  background: #27303a;
-  color: white;
 }
 .icon-scroll {
   height: clamp(120px, 30svh, 228px);
@@ -282,11 +180,6 @@ button:focus-visible {
       }
     }
   }
-}
-p {
-  margin: 36px 0;
-  text-align: center;
-  font-size: 13px;
 }
 @media (max-width: 420px) {
   .choices {

@@ -67,6 +67,36 @@ import Tent from '@icon-park/vue-next/es/icons/Tent';
 import Mountain from '@icon-park/vue-next/es/icons/Mountain';
 import Leaf from '@icon-park/vue-next/es/icons/Leaf';
 
+import Tag from '@icon-park/vue-next/es/icons/Tag';
+import Lock from '@icon-park/vue-next/es/icons/Lock';
+import Crown from '@icon-park/vue-next/es/icons/Crown';
+import Diamond from '@icon-park/vue-next/es/icons/Diamond';
+import Inbox from '@icon-park/vue-next/es/icons/Inbox';
+import Clipboard from '@icon-park/vue-next/es/icons/Clipboard';
+import Schedule from '@icon-park/vue-next/es/icons/Schedule';
+import Cpu from '@icon-park/vue-next/es/icons/Cpu';
+import Robot from '@icon-park/vue-next/es/icons/Robot';
+import Telescope from '@icon-park/vue-next/es/icons/Telescope';
+import Experiment from '@icon-park/vue-next/es/icons/Experiment';
+import Speaker from '@icon-park/vue-next/es/icons/Speaker';
+import RecordDisc from '@icon-park/vue-next/es/icons/RecordDisc';
+import Movie from '@icon-park/vue-next/es/icons/Movie';
+import GraphicDesign from '@icon-park/vue-next/es/icons/GraphicDesign';
+import Paint from '@icon-park/vue-next/es/icons/Paint';
+import ColorFilter from '@icon-park/vue-next/es/icons/ColorFilter';
+import VolumeUp from '@icon-park/vue-next/es/icons/VolumeUp';
+import IceCream from '@icon-park/vue-next/es/icons/IceCream';
+import Teapot from '@icon-park/vue-next/es/icons/Teapot';
+import Hamburger from '@icon-park/vue-next/es/icons/Hamburger';
+import Soccer from '@icon-park/vue-next/es/icons/Soccer';
+import Bread from '@icon-park/vue-next/es/icons/Bread';
+import Bus from '@icon-park/vue-next/es/icons/Bus';
+import Ship from '@icon-park/vue-next/es/icons/Ship';
+import Luggage from '@icon-park/vue-next/es/icons/Luggage';
+import Tree from '@icon-park/vue-next/es/icons/Tree';
+import BeachUmbrella from '@icon-park/vue-next/es/icons/BeachUmbrella';
+import Passport from '@icon-park/vue-next/es/icons/Passport';
+
 export const pageIconGroups = [
   {
     name: '常用收藏',
@@ -82,6 +112,11 @@ export const pageIconGroups = [
       { id: 'Flag', label: '旗帜', component: Flag },
       { id: 'BellRing', label: '提醒', component: BellRing },
       { id: 'LinkOne', label: '链接', component: LinkOne },
+      { id: 'Tag', label: '标记', component: Tag },
+      { id: 'Lock', label: '锁', component: Lock },
+      { id: 'Crown', label: '皇冠', component: Crown },
+      { id: 'Diamond', label: '钻石', component: Diamond },
+      { id: 'Inbox', label: '收纳盒', component: Inbox },
     ],
   },
   {
@@ -101,6 +136,8 @@ export const pageIconGroups = [
       { id: 'Notebook', label: '手册', component: Notebook },
       { id: 'Calculator', label: '计算器', component: Calculator },
       { id: 'Timer', label: '计时器', component: Timer },
+      { id: 'Clipboard', label: '剪贴板', component: Clipboard },
+      { id: 'Schedule', label: '日程', component: Schedule },
     ],
   },
   {
@@ -118,6 +155,10 @@ export const pageIconGroups = [
       { id: 'DatabaseSetting', label: '数据库', component: DatabaseSetting },
       { id: 'Microscope', label: '显微镜', component: Microscope },
       { id: 'Rocket', label: '火箭', component: Rocket },
+      { id: 'Cpu', label: '处理器', component: Cpu },
+      { id: 'Robot', label: '机器人', component: Robot },
+      { id: 'Telescope', label: '望远镜', component: Telescope },
+      { id: 'Experiment', label: '实验', component: Experiment },
     ],
   },
   {
@@ -132,6 +173,13 @@ export const pageIconGroups = [
       { id: 'Film', label: '胶片', component: Film },
       { id: 'Piano', label: '钢琴', component: Piano },
       { id: 'Microphone', label: '麦克风', component: Microphone },
+      { id: 'Speaker', label: '音箱', component: Speaker },
+      { id: 'RecordDisc', label: '唱片', component: RecordDisc },
+      { id: 'Movie', label: '电影', component: Movie },
+      { id: 'GraphicDesign', label: '平面设计', component: GraphicDesign },
+      { id: 'Paint', label: '涂绘', component: Paint },
+      { id: 'ColorFilter', label: '滤色', component: ColorFilter },
+      { id: 'VolumeUp', label: '音量', component: VolumeUp },
     ],
   },
   {
@@ -148,6 +196,11 @@ export const pageIconGroups = [
       { id: 'Basketball', label: '篮球', component: Basketball },
       { id: 'Umbrella', label: '雨伞', component: Umbrella },
       { id: 'Trophy', label: '奖杯', component: Trophy },
+      { id: 'IceCream', label: '冰淇淋', component: IceCream },
+      { id: 'Teapot', label: '茶壶', component: Teapot },
+      { id: 'Hamburger', label: '汉堡', component: Hamburger },
+      { id: 'Soccer', label: '足球', component: Soccer },
+      { id: 'Bread', label: '面包', component: Bread },
     ],
   },
   {
@@ -163,6 +216,12 @@ export const pageIconGroups = [
       { id: 'Tent', label: '帐篷', component: Tent },
       { id: 'Mountain', label: '山峰', component: Mountain },
       { id: 'Leaf', label: '叶子', component: Leaf },
+      { id: 'Bus', label: '公交', component: Bus },
+      { id: 'Ship', label: '轮船', component: Ship },
+      { id: 'Luggage', label: '行李箱', component: Luggage },
+      { id: 'Tree', label: '树木', component: Tree },
+      { id: 'BeachUmbrella', label: '沙滩', component: BeachUmbrella },
+      { id: 'Passport', label: '护照', component: Passport },
     ],
   },
 ];
