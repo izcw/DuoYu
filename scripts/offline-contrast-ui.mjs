@@ -40,9 +40,13 @@ try {
   );
   await page.screenshot({ path: 'work/offline-light-desktop.png' });
   await page.getByRole('button', { name: '标签工作区', exact: true }).click();
+  await expect(page.locator('.workspace-overlay')).toHaveCSS(
+    'background-color',
+    'rgba(255, 255, 255, 0.14)',
+  );
   await expect(page.locator('.workspace-board')).toHaveCSS(
     'color',
-    'rgb(255, 255, 255)',
+    'rgb(34, 34, 34)',
   );
   await page.keyboard.press('Escape');
   await expect(clock).toHaveCSS('color', 'rgb(34, 34, 34)');

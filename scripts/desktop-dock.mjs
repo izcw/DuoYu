@@ -42,7 +42,7 @@ try {
     dock.getByRole('button', { name: '标签工作区', exact: true }),
   ).toHaveAttribute('draggable', 'false');
   const source = await dock
-    .getByRole('button', { name: '画布', exact: true })
+    .getByRole('button', { name: '翻译', exact: true })
     .boundingBox();
   const target = await dock
     .getByRole('button', { name: '首页', exact: true })

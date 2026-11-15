@@ -3,7 +3,7 @@ import { vAccountEdit, vAccountDrag } from '../../../features/auth/edit-access';
 import { guestMode } from '../../../shared/storage/account';
 import { useMouseSort } from '../../useMouseSort';
 const pressSort = useMouseSort();
-import { computed, ref, onUnmounted } from 'vue';
+import { computed, ref, onUnmounted, watch } from 'vue';
 import { createDragLanding } from '../../drag-landing';
 import PageIcon from './PageIcon.vue';
 import ReorderTransition from './ReorderTransition.vue';
@@ -29,6 +29,12 @@ const hovered = ref(false),
   focused = ref(false),
   hot = ref(''),
   dragged = ref('');
+watch(() => props.active, (id) => {
+  if (props.library && id === 'home') {
+    hovered.value = false;
+    focused.value = false;
+  }
+});
 const shown = computed(
   () => props.visible || hovered.value || focused.value || !!dragged.value,
 );
@@ -108,7 +114,7 @@ function drop(event: DragEvent) {
       hovered = false;
       hot = '';
     "
-    @focusin="focused = true"
+    @focusin="focused = ($event.target as HTMLElement).matches(':focus-visible')"
     @focusout="blur"
   >
     <nav
@@ -190,11 +196,20 @@ function drop(event: DragEvent) {
   position: fixed;
   z-index: 10;
   inset: 0 auto 0 0;
-  width: 107px;
+  width: var(--desktop-menu-width, 107px);
   padding: 0 5px 0 17px;
   display: flex;
   align-items: center;
   border-radius: 24px;
+}
+.desktop-menu:has(.library-page-menu) {
+  --menu-inset: 17px;
+}
+.desktop-menu > .library-page-menu {
+  flex: 0 0 calc(var(--desktop-menu-width) - var(--menu-inset) - 5px);
+}
+.desktop-menu:not(.is-hovered) > .library-page-menu {
+  transition-duration: 2s, 2s;
 }
 .desktop-menu > nav {
   --menu-row-gap: 6px;
@@ -241,19 +256,33 @@ function drop(event: DragEvent) {
   place-items: center;
   color: inherit;
 }
+.desktop-menu:not(.is-hovered) {
+  width: 12px;
+  padding: 0;
+}
+.desktop-menu:not(.is-hovered):has(.library-page-menu) {
+  padding-left: var(--menu-inset);
+  width: var(--menu-inset);
+}
 @media (max-width: 699px) {
+  .desktop-menu:has(.library-page-menu) { --menu-inset: 6px; }
   .desktop-menu {
     width: 54px;
     padding: 0 2px 0 6px;
   }
-  /* The hidden menu must not cover the search controls near the left edge. */
-  .desktop-menu:not(.is-hovered) {
-    width: 12px;
-    padding: 0;
-  }
+
 }
 @media (prefers-reduced-motion: reduce) {
-  .desktop-menu > nav {
+  .desktop-menu:has(.library-page-menu) {
+  --menu-inset: 17px;
+}
+.desktop-menu > .library-page-menu {
+  flex: 0 0 calc(var(--desktop-menu-width) - var(--menu-inset) - 5px);
+}
+.desktop-menu:not(.is-hovered) > .library-page-menu {
+  transition-duration: 2s, 2s;
+}
+.desktop-menu > nav {
     transition: none;
   }
 }

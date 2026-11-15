@@ -3,8 +3,8 @@ import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import WorkspaceBoard from './WorkspaceBoard.vue';
 
 const active = defineModel<boolean>({ default: false });
-withDefaults(defineProps<{ label?: string }>(), { label: '工作区' });
-const emit = defineEmits<{ home: [] }>();
+const props = withDefaults(defineProps<{ label?: string; blank?: boolean }>(), { label: '工作区' });
+const emit = defineEmits<{ home: []; step: [direction: number] }>();
 const workspace = ref<HTMLElement>();
 const board = ref<InstanceType<typeof WorkspaceBoard>>();
 let previous: HTMLElement | null = null;
@@ -37,10 +37,11 @@ function key(event: KeyboardEvent) {
       board.value?.stepSpace(keyName === 'w' || keyName === 'arrowup' ? -1 : 1);
     return;
   }
-  if (
-    event.key === 'Escape' ||
-    (navigation && (keyName === 'a' || keyName === 'arrowleft'))
-  ) {
+  if (navigation && ['a', 'arrowleft', 'd', 'arrowright'].includes(keyName)) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.repeat) emit('step', keyName === 'a' || keyName === 'arrowleft' ? -1 : 1);
+  } else if (event.key === 'Escape') {
     event.preventDefault();
     event.stopPropagation();
     active.value = false;
@@ -69,6 +70,10 @@ function key(event: KeyboardEvent) {
     }
   }
 }
+watch(() => props.label, async () => {
+  await nextTick();
+  if (active.value) workspace.value?.focus({ preventScroll: true });
+});
 watch(active, async (value) => {
   if (value) {
     previous =
@@ -89,14 +94,15 @@ function keyAfterRemoval(event: KeyboardEvent) {
   if (
     active.value &&
     !event.defaultPrevented &&
-    ['escape', 'arrowleft', 'a', 'w', 's', 'arrowup', 'arrowdown'].includes(
+    ['escape', 'arrowleft', 'arrowright', 'a', 'd', 'w', 's', 'arrowup', 'arrowdown'].includes(
       event.key.toLowerCase(),
     ) &&
     !document.querySelector(
       'dialog[open], .base-dialog-backdrop, [role="menu"]:not([inert],[aria-hidden="true"])',
     ) &&
     (event.target === document.body ||
-      event.target === document.documentElement)
+      event.target === document.documentElement ||
+      (event.target instanceof Element && !!event.target.closest('.desktop-dock')))
   )
     key(event);
 }
@@ -118,13 +124,16 @@ onUnmounted(() => {
         aria-modal="true"
         :aria-label="label"
         tabindex="-1"
-        @click.self.stop="active = false"
+        @click.self.stop="!blank && (active = false)"
         @contextmenu.prevent.stop
         @keydown="key"
       >
-        <slot :close="() => (active = false)"
-          ><WorkspaceBoard ref="board" @close="active = false"
-        /></slot>
+        <slot v-if="blank" name="toolbar-actions" />
+        <slot v-else :close="() => (active = false)">
+          <WorkspaceBoard ref="board" @close="active = false">
+            <template #toolbar-actions><slot name="toolbar-actions" /></template>
+          </WorkspaceBoard>
+        </slot>
       </div>
     </Transition>
   </Teleport>
@@ -173,6 +182,9 @@ body
   /* Reuse the shared material; a full-screen sheet needs no inset edge. */
   box-shadow: none;
   cursor: default;
+}
+.workspace-overlay.glass-focus-layer {
+  background: var(--workspace-scrim);
 }
 .workspace-overlay:focus-visible {
   outline: none;

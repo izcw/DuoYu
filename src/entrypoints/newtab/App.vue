@@ -4,17 +4,19 @@ import { useIconHighlight } from '../../features/desktop/useIconHighlight';
 useIconHighlight();
 import { guestTemplateStatus } from '../../features/sync/guest-template';
 import { accountStorage, guestMode } from '../../shared/storage/account';
-import { defineAsyncComponent, nextTick, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue';
 import { useDesktopPages } from '../../features/desktop/useDesktopPages';
 import WorkspaceOverlay from '../../features/workspace/WorkspaceOverlay.vue';
 import DesktopSwitcher from '../../features/wallpaper/DesktopSwitcher.vue';
 import ClockWidget from '../../features/clock/ClockWidget.vue';
 import SearchBox from '../../features/search/SearchBox.vue';
-import GlassModeSwitch from '../../features/desktop/GlassModeSwitch.vue';
+import { useGlassMode } from '../../features/desktop/glass/preferences';
+import { useDockClearance } from '../../features/desktop/useDockClearance';
 import DesktopDock from '../../features/desktop/DesktopDock.vue';
 import HomeNavigationHint from '../../features/desktop/HomeNavigationHint.vue';
 const SettingsDialog = defineAsyncComponent(() => import('../../features/desktop/SettingsDialog.vue'));
 import { settingsPage, settingsOpen } from '../../features/desktop/settings-state';
+import ThemeSwitch from '../../features/desktop/ThemeSwitch.vue';
 import AccountButton from '../../features/auth/AccountButton.vue';
 import BottomWidgets from '../../features/desktop/BottomWidgets.vue';
 import WallpaperWheel from '../../features/shortcuts/WallpaperWheel.vue';
@@ -22,16 +24,25 @@ import LibraryBoard from '../../features/library/LibraryBoard.vue';
 import LibraryPageMenu from '../../features/library/LibraryPageMenu.vue';
 import { pageDragActive } from '../../features/library/page-drag';
 import type { LibraryPage } from '../../shared/storage/database';
-const workspaceOpen = ref(false);
-function openWorkspace() {
-  workspaceOpen.value = true;
+import { dockPages, shortcutActions, type DockPage } from '../../features/shortcuts/actions';
+useGlassMode();
+const activePage = ref<DockPage>('duoyu-home');
+const overlayOpen = computed(() => activePage.value !== 'duoyu-home');
+const blankPage = computed(() => activePage.value === 'duoyu-canvas' || activePage.value === 'duoyu-memo');
+const overlayLabel = computed(() => blankPage.value
+  ? shortcutActions.find((item) => item.id === activePage.value)!.name
+  : '工作区');
+const workspaceActionsHost = ref<HTMLElement | null>(null);
+function navigate(target: DockPage) {
+  activePage.value = target;
+  if (target === 'duoyu-home' && page.value !== 0) void go(0);
 }
-function returnHome() {
-  workspaceOpen.value = false;
-  if (page.value !== 0) void go(0);
+function stepDockPage(direction: number) {
+  const next = dockPages[dockPages.indexOf(activePage.value) + direction];
+  if (next) navigate(next);
 }
 const { page, root, go } = useDesktopPages(
-  () => workspaceOpen.value, stepPage, openWorkspace,
+  () => overlayOpen.value, stepPage, () => navigate('duoyu-workspace'),
 );
 const libraryPage = ref(
   accountStorage.getItem('duoyu-library-page') || 'default',
@@ -49,6 +60,8 @@ watch(libraryPage, (value) =>
 const libraryPageTitle = ref('常用收藏');
 const libraryPages = ref<LibraryPage[]>([]);
 const homeQuiet = ref(false);
+const cornerActions = ref<HTMLElement>();
+const aboveDock = useDockClearance(cornerActions, 'left');
 
 const slideDirection = ref(1);
 async function clickClock() {
@@ -109,18 +122,24 @@ function stepPage(direction: number) {
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport :to="workspaceActionsHost || 'body'">
     <div class="desktop-top-actions">
-      <span v-if="guestMode" class="guest-notice">{{ guestTemplateStatus || '官方模板 · 登录后可编辑' }}</span>
-      <GlassModeSwitch />
-      <span id="desktop-switch-slot"></span>
-      <AccountButton />
+      <span v-if="guestMode && !blankPage" class="guest-notice">{{ guestTemplateStatus || '官方模板 · 登录后可编辑' }}</span>
+      <div
+        ref="cornerActions"
+        class="desktop-corner-actions"
+        :style="aboveDock && !(page === 0 && homeQuiet && !overlayOpen) ? { bottom: aboveDock + 'px' } : undefined"
+      >
+        <AccountButton />
+        <ThemeSwitch />
+        <span id="desktop-switch-slot"></span>
+      </div>
     </div>
   </Teleport>
   <EditLoginDialog v-if="guestMode" />
   <DesktopSwitcher
     @selected="
-      workspaceOpen = false;
+      activePage = 'duoyu-home';
       homeQuiet = false;
       go(0);
     "
@@ -133,14 +152,23 @@ function stepPage(direction: number) {
       aria-hidden="true"
     />
   </Teleport>
-  <WallpaperWheel @workspace="openWorkspace()" />
-  <WorkspaceOverlay v-model="workspaceOpen" @home="returnHome" />
+  <WallpaperWheel @navigate="navigate" />
+  <WorkspaceOverlay
+    :model-value="overlayOpen"
+    :label="overlayLabel"
+    :blank="blankPage"
+    @update:model-value="activePage = 'duoyu-home'"
+    @home="navigate('duoyu-home')"
+    @step="stepDockPage"
+  >
+    <template #toolbar-actions>
+      <div ref="workspaceActionsHost" class="workspace-actions-host"></div>
+    </template>
+  </WorkspaceOverlay>
   <DesktopDock
-    :hidden="page === 0 && homeQuiet && !workspaceOpen"
-    :home-active="page === 0 && !workspaceOpen"
-    :workspace-active="workspaceOpen"
-    @home="returnHome"
-    @workspace="openWorkspace()"
+    :hidden="page === 0 && homeQuiet && !overlayOpen"
+    :active-page="page === 0 || overlayOpen ? activePage : undefined"
+    @navigate="navigate"
   />
   <main
     ref="root"
@@ -152,9 +180,9 @@ function stepPage(direction: number) {
     }"
     :data-desktop-page="page"
     :style="{ '--page-exit-y': slideDirection > 0 ? '-40vh' : '40vh' }"
-    :inert="workspaceOpen"
+    :inert="overlayOpen"
   >
-    <HomeNavigationHint v-if="page === 0 && !homeQuiet && !workspaceOpen" />
+    <HomeNavigationHint v-if="page === 0 && !homeQuiet && !overlayOpen" />
     <LibraryPageMenu
       v-model="libraryPage"
       :visible="page === 1 || pageDragActive"
@@ -223,11 +251,34 @@ function stepPage(direction: number) {
   align-items: center;
   gap: 10px;
 }
+.desktop-corner-actions {
+  position: fixed;
+  left: max(16px, env(safe-area-inset-left));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 2147483001;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.workspace-actions-host {
+  min-width: 0;
+}
+.workspace-actions-host .desktop-top-actions {
+  position: static;
+}
+.workspace-actions-host .guest-notice {
+  color: inherit;
+  text-shadow: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 #desktop-switch-slot {
   display: flex;
 }
 
 .desktop-pages {
+  --desktop-menu-width: 107px;
   width: 100%;
   min-width: 0;
   container-type: size;
@@ -283,6 +334,7 @@ function stepPage(direction: number) {
   grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   min-height: 0;
   width: 100%;
+  padding-inline: max(0px, calc(var(--desktop-menu-width) + 6px - 32px));
 }
 .desktop-content > * {
   grid-area: 1 / 1;
@@ -361,7 +413,11 @@ function stepPage(direction: number) {
 }
 @media (max-width: 699px) {
   .desktop-pages {
+    --desktop-menu-width: 54px;
     padding-inline: 12px;
+  }
+  .desktop-content {
+    padding-inline: calc(var(--desktop-menu-width) + 6px - 12px);
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -63,8 +63,8 @@ function saveLayout(layout: string) {
   <BaseDialog
     v-model:open="settingsOpen"
     title="设置"
-    :width="920"
-    :height="650"
+    :width="720"
+    drawer
     solid
     close-button
   >
@@ -176,7 +176,7 @@ strong {
   font-weight: 500;
 }
 p {
-  color: #888;
+  color: var(--theme-muted);
   font-size: 12px;
   line-height: 1.6;
   margin: 8px 0 0;
@@ -188,7 +188,7 @@ select {
   font-size: 13px;
   cursor: pointer;
   padding: 12px 16px;
-  background: #f5f5f7;
+  background: var(--theme-control);
   flex-shrink: 0;
 }
 .setting-row button.primary {

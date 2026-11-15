@@ -5,6 +5,7 @@ import { computed, onUnmounted, ref, watch, nextTick } from 'vue';
 import { createDragLanding } from '../../shared/drag-landing';
 import { accountStorage } from '../../shared/storage/account';
 import { saveWallpaperPreview } from './wallpaper-preview';
+import DeleteIcon from '@icon-park/vue-next/es/icons/Delete';
 import { liveQuery } from 'dexie';
 import { database } from '../../shared/storage/database';
 import { assetObjectUrl } from '../sync/assets';
@@ -27,8 +28,13 @@ const emit = defineEmits<{ selected: [] }>();
 const editing = ref<{
   id: string;
   name: string;
-  action: 'menu' | 'rename' | 'delete';
+  action: 'rename' | 'delete';
 }>();
+async function editName(id: string) {
+  editing.value = { id, name: cardName(id), action: 'rename' };
+  await nextTick();
+  dialog.value?.querySelector<HTMLInputElement>('.desktop-name-input')?.select();
+}
 function wheel(event: WheelEvent) {
   const el = event.currentTarget as HTMLElement;
   if (
@@ -51,11 +57,11 @@ async function submitAction() {
       const wasActive = activeDesktop.value === item.id;
       await deleteDesktop(item.id);
       if (wasActive) {
-        dialog.value?.close();
+        await closeDrawer();
         emit('selected');
       }
     }
-    editing.value = undefined;
+    if (editing.value === item) editing.value = undefined;
   } catch (e) {
     error.value = e instanceof Error ? e.message : '桌面操作失败';
   }
@@ -122,7 +128,7 @@ let suppressClick = false;
 function press(event:MouseEvent,id:string) {
   if(guestMode || event.button !== 0 || landing.committing) return;
   cancelGesture?.();
-  const button = event.currentTarget as HTMLElement, strip = button.parentElement!;
+  const button = (event.currentTarget as HTMLElement).closest<HTMLElement>('[data-desktop]')!, strip = button.parentElement!;
   function inside(e:MouseEvent){ return strip.contains(document.elementFromPoint(e.clientX,e.clientY)); }
   function move(e:MouseEvent){
     if(!dragged.value){
@@ -244,7 +250,17 @@ async function add() {
     adding.value = false;
   }
 }
+const closing = ref(false);
+async function closeDrawer() {
+  const element = dialog.value;
+  if (!element?.open || closing.value) return;
+  closing.value = true;
+  await nextTick();
+  await Promise.allSettled(element.getAnimations().map(animation => animation.finished));
+  element.close();
+}
 async function open() {
+  closing.value = false;
   opened.value = true;
   error.value = '';
   await nextTick();
@@ -255,7 +271,7 @@ async function select(id: string) {
   try {
     if (guestMode) switchDesktop(id);
     else await chooseDesktop(id);
-    dialog.value?.close();
+    await closeDrawer();
     emit('selected');
   } catch {
     error.value = '桌面选择保存失败，请重试';
@@ -279,7 +295,7 @@ onUnmounted(() => {
   <WallpaperSurface v-else :source="source" :loaded="!!source" />
   <Teleport to="#desktop-switch-slot">
     <button
-      class="desktop-switch-entry"
+      class="desktop-switch-entry glass-control glass-interactive"
       aria-label="切换桌面"
       title="切换桌面"
       @click="open"
@@ -291,79 +307,58 @@ onUnmounted(() => {
     <dialog
       ref="dialog"
       class="desktop-drawer"
+      :class="{ 'is-closing': closing }"
+      @cancel.prevent="closeDrawer"
       aria-labelledby="desktop-drawer-title"
       @close="
         opened = false;
         editing = undefined;
       "
-      @click="$event.target === dialog && dialog?.close()"
+      @click="$event.target === dialog && closeDrawer()"
     >
       <section>
         <header>
           <h2 id="desktop-drawer-title">切换桌面</h2>
-          <button aria-label="关闭切换桌面" @click="dialog?.close()">×</button>
+          <button aria-label="关闭切换桌面" @click="closeDrawer()">×</button>
         </header>
         <TransitionGroup tag="div" name="card-order" class="desktop-cards" @wheel="wheel">
-          <button
-            v-for="card in orderedCards"
-            v-account-drag draggable="false" :data-desktop="card.id" :class="{dragging:dragged===card.id}" @mousedown="press($event,card.id)"
-            :key="card.id"
-            :aria-pressed="activeDesktop === card.id"
-            @click="select(card.id)"
-            @contextmenu.prevent="
-              (editing = {
-                id: card.id,
-                name: cardName(card.id),
-                action: 'menu',
-              })
-            "
-          >
-            <span class="desktop-thumb"
-              ><img
-                draggable="false" v-if="opened && images[card.id]"
-                :src="images[card.id]"
-                alt="" /></span
-            ><strong>{{ cardName(card.id) }}</strong></button
-          ><button v-account-edit key="add" aria-label="添加桌面" :disabled="adding" @click="add">
+          <div v-for="card in orderedCards" :key="card.id" :data-desktop="card.id"
+            :class="{ dragging: dragged === card.id }">
+            <button class="desktop-preview" v-account-drag
+              :aria-label="`切换到${cardName(card.id)}`" :aria-pressed="activeDesktop === card.id"
+              @mousedown="press($event, card.id)" @click="select(card.id)">
+              <span class="desktop-thumb">
+                <img v-if="opened && images[card.id]" draggable="false" :src="images[card.id]" alt="" />
+              </span>
+            </button>
+            <div class="desktop-caption">
+              <input v-if="editing?.action === 'rename' && editing.id === card.id"
+                v-model="editing.name" class="desktop-name-input" aria-label="桌面名称" maxlength="40"
+                @blur="editing?.id === card.id && editing.action === 'rename' && submitAction()"
+                @keydown.enter.prevent="!$event.isComposing && ($event.target as HTMLInputElement).blur()"
+                @keydown.esc.prevent.stop="editing = undefined" />
+              <button v-else v-account-edit class="desktop-name" title="修改桌面名称"
+                @click="editName(card.id)">{{ cardName(card.id) }}</button>
+              <button v-account-edit class="desktop-delete" :disabled="card.id === 'default'"
+                :title="card.id === 'default' ? '默认桌面需要保留' : '删除桌面'"
+                :aria-label="`删除${cardName(card.id)}`"
+                @click="editing = { id: card.id, name: cardName(card.id), action: 'delete' }">
+                <DeleteIcon :size="16" />
+              </button>
+            </div>
+          </div>
+          <button v-account-edit key="add" aria-label="添加桌面" :disabled="adding" @click="add">
             <span class="desktop-thumb desktop-plus">＋</span
             ><strong>添加桌面</strong>
           </button>
         </TransitionGroup>
         <form
-          v-if="editing"
+          v-if="editing?.action === 'delete'"
           class="desktop-actions"
           @submit.prevent="submitAction"
         >
-          <template v-if="editing.action === 'menu'"
-            ><strong>{{ editing.name }}</strong
-            ><button
-              type="button"
-              v-account-edit @click="
-                editing.action = 'rename';
-                nextTick(() => dialog?.querySelector('input')?.select());
-              "
-            >
-              重命名</button
-            ><button
-              v-if="editing.id !== 'default'"
-              type="button"
-              v-account-edit @click="editing.action = 'delete'"
-            >
-              删除桌面
-            </button></template
-          >
-          <template v-else-if="editing.action === 'rename'"
-            ><input
-              v-model="editing.name"
-              maxlength="40"
-              aria-label="桌面名称"
-              required
-            /><button>保存</button></template
-          >
-          <template v-else
-            ><span>删除「{{ editing.name }}」？</span
-            ><button>确认删除</button></template
-          >
+          <span>删除「{{ editing.name }}」？</span>
+          <button>确认删除</button>
           <button type="button" @click="editing = undefined">取消</button>
         </form>
         <p v-if="error" role="alert">{{ error }}</p>
@@ -377,11 +372,10 @@ onUnmounted(() => {
   height: 36px;
   padding: 6px;
   z-index: 2147483001;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
+  border-radius: 50%;
 }
 .desktop-switch-entry img {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -396,14 +390,15 @@ onUnmounted(() => {
   padding: 0;
   border: 0;
   border-radius: 22px 22px 0 0;
-  color: #222;
-  background: #fff;
+  color: var(--theme-text);
+  background: var(--theme-panel);
 }
 .desktop-drawer[open] {
-  animation: drawer-in 0.22s ease-out;
+  transition: transform 440ms cubic-bezier(.22,.8,.22,1);
 }
 .desktop-drawer::backdrop {
   background: #0005;
+  transition: background-color 200ms ease;
 }
 .desktop-drawer section {
   padding: 22px clamp(18px, 4vw, 64px) 28px;
@@ -434,15 +429,26 @@ header button {
 .desktop-cards button {
   background: none;
   border: 0;
-  flex: 0 0 clamp(144px, 19vw, 240px);
+
   padding: 0;
   color: inherit;
   cursor: pointer;
 }
+.desktop-cards > * { flex: 0 0 clamp(144px, 19vw, 240px); min-width: 0; }
+.desktop-preview { display: block; width: 100%; }
+.desktop-caption { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; }
+.desktop-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+.desktop-name-input { min-width: 0; width: 100%; box-sizing: border-box; font-size: 14px; }
+.desktop-delete { display: grid; place-items: center; flex: none; width: 24px; height: 24px; }
+.desktop-delete:disabled { opacity: .3; cursor: default; }
+[data-desktop]:not(:hover) .desktop-delete:not(:focus-visible) {
+  opacity: 0;
+  pointer-events: none;
+}
 .card-order-move { transition: transform .18s ease; }
-.desktop-cards button.dragging { opacity:0; }
-.desktop-cards button[data-desktop] { cursor: grab; }
-.desktop-cards button[data-desktop]:active,
+.desktop-cards .dragging { opacity:0; }
+.desktop-cards .desktop-preview { cursor: grab; }
+.desktop-cards .desktop-preview:active,
 .desktop-cards:has(.dragging),
 .desktop-cards:has(.dragging) button { cursor: grabbing; }
 .desktop-thumb {
@@ -451,7 +457,7 @@ header button {
   aspect-ratio: 16/9;
   border-radius: 12px;
   overflow: hidden;
-  background: #f5f5f7;
+  background: var(--theme-control);
 }
 .desktop-thumb img {
   width: 100%;
@@ -459,7 +465,7 @@ header button {
   object-fit: cover;
 }
 [aria-pressed='true'] .desktop-thumb {
-  outline: 2px solid #222;
+  outline: 2px solid var(--theme-text);
   outline-offset: 2px;
 }
 strong {
@@ -469,17 +475,21 @@ strong {
 }
 .desktop-plus {
   font-size: 32px;
-  color: #666;
+  color: var(--theme-muted);
 }
-@keyframes drawer-in {
-  from {
-    transform: translateY(100%);
-  }
+.desktop-drawer[open].is-closing {
+  transform: translateY(100%);
+  transition: transform 240ms ease-in;
+}
+.desktop-drawer.is-closing::backdrop {
+  background-color: transparent;
+}
+@starting-style {
+  .desktop-drawer[open] { transform: translateY(100%); }
+  .desktop-drawer[open]::backdrop { background-color: transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .desktop-drawer[open] {
-    animation: none;
-  }
+  .desktop-drawer::backdrop { transition: none; }
 }
 .desktop-actions {
   display: flex;
@@ -490,9 +500,9 @@ strong {
 .desktop-actions button,
 .desktop-actions input {
   border: 0;
-  background: #f5f5f7;
+  background: var(--theme-control);
   border-radius: 8px;
   padding: 8px 14px;
-  color: #222;
+  color: var(--theme-text);
 }
 </style>

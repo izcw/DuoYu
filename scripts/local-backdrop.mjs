@@ -1,3 +1,4 @@
+import { selectGlassMode } from './ui-helpers.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir } from 'node:fs/promises';
@@ -47,7 +48,7 @@ try {
   await expect(page.locator('.desktop-library-backdrop')).toHaveClass(/visible/);
   await checkSurfaces();
   for(const label of ['自然','柔和','真实']) {
-    await page.getByRole('button',{name:label,exact:true}).click();
+    await selectGlassMode(page, label);
     await checkSurfaces();
   }
   await page.screenshot({path:'work/local-backdrop.png'});

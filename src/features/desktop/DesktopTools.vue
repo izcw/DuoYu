@@ -361,11 +361,11 @@ async function open(item: LibraryItem) {
   margin-top: 5px;
 }
 .store-widget-card {
-  background: #f5f5f7;
-  color: #222;
+  background: var(--theme-control);
+  color: var(--theme-text);
 }
 .store-widget-card:hover {
-  background: #ededf1;
+  background: var(--theme-hover);
 }
 .tool-symbol {
   font-size: 26px;
@@ -388,7 +388,7 @@ select {
   color: inherit;
 }
 select option {
-  color: #222;
+  color: var(--theme-text);
 }
 .tool-results {
   max-height: 40vh;

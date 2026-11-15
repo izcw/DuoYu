@@ -112,7 +112,7 @@ try {
   await expect(widgets.locator('.store-content')).not.toContainText('天气');
   await page.keyboard.press('Escape');
   await menu();
-  await page.getByRole('menuitem', { name: '换壁纸', exact: true }).click();
+  await page.getByRole('menuitem', { name: '壁纸商店', exact: true }).click();
   const wallpapers = page.getByRole('dialog', {
     name: '壁纸商店',
     exact: true,

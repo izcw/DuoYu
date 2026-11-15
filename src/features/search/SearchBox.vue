@@ -36,7 +36,6 @@ onUnmounted(() =>
   window.removeEventListener('duoyu-sync-preferences', cloudEngine),
 );
 onMounted(async () => {
-  input.value?.focus({ preventScroll: true });
   try {
     const saved = { searchEngine: await getSyncPreference('searchEngine') };
     if (!engineChanged && isSearchEngineId(saved.searchEngine))
@@ -234,7 +233,6 @@ onUnmounted(() => clearTimeout(compositionTimer));
         "
         placeholder="搜索，发现更多"
         autocomplete="off"
-        autofocus
         autocapitalize="off"
         enterkeyhint="search"
         spellcheck="false"

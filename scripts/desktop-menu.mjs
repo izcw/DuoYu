@@ -51,17 +51,17 @@ try {
     await expect(page.getByRole('menu', { name: '收藏页菜单' })).toBeVisible();
   }
   await menu(rect.x + 6 * cellWidth + 20, rect.y + 20);
-  for (const name of ['组件商店', '换壁纸', '图标搜索', '立即备份', '设置']) {
-    await expect(
-      page.getByRole('menuitem', { name, exact: true }),
-    ).toBeVisible();
-  }
+  await expect(page.getByRole('menu', { name: '收藏页菜单' }).getByRole('menuitem')).toHaveText([
+    '添加网址', '新建文件夹', '图标搜索', '组件商店', '壁纸商店', '自动布局', '设置',
+  ]);
   await page.getByRole('menuitem', { name: '新建文件夹', exact: true }).click();
   const addedFolder = page
     .locator('.grid-stack-item')
     .filter({ has: page.locator('.tile-caption', { hasText: '新文件夹' }) });
   await expect(addedFolder).toHaveAttribute('gs-x', '6');
   await expect(addedFolder).toHaveAttribute('gs-y', '0');
+  await expect(addedFolder).toHaveAttribute('gs-w', '3');
+  await expect(addedFolder).toHaveAttribute('gs-h', '2');
   await addedFolder.locator('.folder-border').click();
   await expect(
     page.locator('.folder-dialog-content.desktop-card-glass'),
@@ -119,11 +119,6 @@ try {
   await expect(page.locator('.tool-results .tool-entry')).toHaveCount(1);
   await page.keyboard.press('Escape');
   await menu();
-  await page.getByRole('menuitem', { name: '立即备份', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText(
-    '请先登录账号再创建云端备份',
-  );
-  await menu();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page.getByRole('button', { name: '备份与恢复', exact: true }).click();
   const downloading = page.waitForEvent('download');
@@ -134,7 +129,7 @@ try {
   assert.equal(exported.format, 'duoyu-backup');
   await page.keyboard.press('Escape');
   await menu();
-  await page.getByRole('menuitem', { name: '换壁纸', exact: true }).click();
+  await page.getByRole('menuitem', { name: '壁纸商店', exact: true }).click();
   await expect(
     page.getByRole('dialog', { name: '壁纸商店', exact: true }),
   ).toBeVisible();
@@ -158,7 +153,7 @@ try {
   await page.keyboard.press('Escape');
   await menu();
   await page
-    .getByRole('menuitem', { name: '切换为自动布局', exact: true })
+    .getByRole('menuitem', { name: '自动布局', exact: true })
     .click();
   assert.equal(await grid.evaluate((el) => el.gridstack.engine.mode), 'top');
   await page.waitForTimeout(500);
@@ -182,9 +177,7 @@ try {
   await page.getByRole('option', { name: '自由布局', exact: true }).click();
   await page.getByRole('combobox', { name: '玻璃效果', exact: true }).click();
   await page.getByRole('option', { name: '柔和', exact: true }).click();
-  await expect(
-    page.locator('.glass-mode-switch button[aria-pressed="true"]'),
-  ).toHaveText('柔和');
+  await expect(page.locator('html')).toHaveAttribute('data-glass-mode', 'soft');
   await page.keyboard.press('Escape');
   assert.equal(await grid.evaluate((el) => el.gridstack.engine.mode), 'float');
   assert.deepEqual(errors, []);

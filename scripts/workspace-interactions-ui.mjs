@@ -1,3 +1,4 @@
+import { selectGlassMode } from './ui-helpers.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir, readFile } from 'node:fs/promises';
@@ -30,7 +31,7 @@ try {
   const entry = page
     .getByRole('navigation', { name: '快捷 Dock' })
     .getByRole('button', { name: '标签工作区', exact: true });
-  await page.getByRole('button', { name: '柔和', exact: true }).click();
+  await selectGlassMode(page, '柔和');
   await expect(workspace).toHaveCount(0);
   // Current renderer uses CSS glass; the old WebGL canvas is not mounted.
   async function recordMotion() {
@@ -99,9 +100,7 @@ try {
   await verifyMotion();
   await expect(entry).toBeFocused();
   await expect(input).toHaveValue('保留搜索内容');
-  await expect(
-    page.getByRole('button', { name: '柔和', exact: true }),
-  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('html')).toHaveAttribute('data-glass-mode', 'soft');
   await entry.click();
   await expect(workspace).toBeVisible();
   await page

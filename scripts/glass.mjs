@@ -1,3 +1,4 @@
+import { selectGlassMode } from './ui-helpers.mjs';
 import assert from 'node:assert/strict';
 import { chromium, expect } from '@playwright/test';
 import { mkdtemp } from 'node:fs/promises';
@@ -51,10 +52,8 @@ try {
     ['natural', '自然'],
     ['soft', '柔和'],
   ]) {
-    await page.getByRole('button', { name, exact: true }).click();
-    await expect(
-      page.getByRole('button', { name, exact: true }),
-    ).toHaveAttribute('aria-pressed', 'true');
+    await selectGlassMode(page, name);
+    await expect(page.locator('html')).toHaveAttribute('data-glass-mode', mode);
     await page.waitForTimeout(400);
     screens.push(
       await page.locator('.bottom-widget-grid').screenshot({
@@ -63,30 +62,15 @@ try {
     );
   }
   assert(!screens[0].equals(screens[1]) && !screens[1].equals(screens[2]));
-  await expect
-    .poll(() =>
-      page.evaluate(
-        async () => (await chrome.storage.local.get('glassMode')).glassMode,
-      ),
-    )
-    .toBe('soft');
-  // Record every rendered selection, including the very first DOM insertion.
+  // Capture the material as soon as the page applies it on reload.
   await page.addInitScript(() => {
     window.__glassSelections = [];
     new MutationObserver(() => {
-      const selected = document.querySelector(
-        '.glass-mode-switch [aria-pressed="true"]',
-      );
-      if (selected)
-        window.__glassSelections.push({
-          label: selected.textContent.trim(),
-          material: document.documentElement.dataset.glassMode,
-        });
+      window.__glassSelections.push(document.documentElement.dataset.glassMode);
     }).observe(document, {
       subtree: true,
-      childList: true,
       attributes: true,
-      attributeFilter: ['aria-pressed'],
+      attributeFilter: ['data-glass-mode'],
     });
   });
   // Hold cached Blob decoding across refresh to expose the startup race.
@@ -143,16 +127,12 @@ try {
     'PASS delayed cached wallpaper keeps CSS glass over preview until first real GPU frame',
   );
   await page.locator('.widget-link').first().waitFor();
-  await expect(
-    page.getByRole('button', { name: '柔和', exact: true }),
-  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('html')).toHaveAttribute('data-glass-mode', 'soft');
   await page.waitForTimeout(900);
   const selections = await page.evaluate(() => window.__glassSelections);
   assert(selections.length > 0);
   assert(
-    selections.every(
-      ({ label, material }) => label === '柔和' && material === 'soft',
-    ),
+    selections.every((material) => material === 'soft'),
     'Saved selection and material must match from the first render',
   );
   console.log(

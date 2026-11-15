@@ -1,19 +1,27 @@
-import { getSyncPreference, setSyncPreference } from '../../sync/client';
-import type { InjectionKey } from 'vue';
-import { browser } from 'wxt/browser';
+import { liveQuery } from 'dexie';
+import { onUnmounted } from 'vue';
+import { activeAccountKey, pageAccountKey } from '../../../shared/storage/account';
+import { database } from '../../../shared/storage/database';
+import { getSyncPreference } from '../../sync/client';
 import type { GlassMode } from './renderer';
 
-export const initialGlassModeKey: InjectionKey<GlassMode> =
-  Symbol('initialGlassMode');
+function normalizeGlassMode(value: unknown): GlassMode {
+  return value === 'natural' || value === 'soft' ? value : 'real';
+}
 
-/** Resolve the saved material before Vue renders any glass or selection state. */
+/** Resolve the saved material before Vue renders the desktop. */
 export async function loadGlassMode(): Promise<GlassMode> {
   try {
-    const glassMode = await getSyncPreference('glassMode');
-    if (glassMode === 'real' || glassMode === 'natural' || glassMode === 'soft')
-      return glassMode;
+    return normalizeGlassMode(await getSyncPreference('glassMode'));
   } catch {
-    // A missing or unavailable preference must not prevent opening a new tab.
+    return 'real';
   }
-  return 'real';
+}
+
+export function useGlassMode() {
+  const subscription = liveQuery(() => database.preferences.get('glassMode')).subscribe((record) => {
+    if (activeAccountKey() === pageAccountKey)
+      document.documentElement.dataset.glassMode = normalizeGlassMode(record?.value);
+  });
+  onUnmounted(() => subscription.unsubscribe());
 }

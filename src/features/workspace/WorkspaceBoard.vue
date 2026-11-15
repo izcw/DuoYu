@@ -15,7 +15,6 @@ import { browser } from 'wxt/browser';
 import {
   createCollection,
   updateSavedTab,
-  hostname,
   moveSavedTab,
   renameCollection,
   setCollectionColor,
@@ -54,11 +53,13 @@ const {
   selectedWindow,
   destination,
   notice,
+  showNotice,
+  dismissNotice,
   error,
   busy,
   undo,
   run,
-  save,
+  saveAndCloseTab,
   activate,
   toggleBrowserGroup,
   saveBrowserGroup,
@@ -86,6 +87,9 @@ function toggleBrowserTab(id: number | undefined) {
   if (selectedBrowserTabs.value.has(id)) selectedBrowserTabs.value.delete(id);
   else selectedBrowserTabs.value.add(id);
 }
+function closeOpenTab(id: number | undefined) {
+  if (id !== undefined) return run(() => browser.tabs.remove(id));
+}
 async function actOnBrowserSelection(action: 'group' | 'ungroup' | 'close') {
   const windowId = selectedWindow.value;
   if (windowId === undefined) return;
@@ -102,10 +106,10 @@ async function actOnBrowserSelection(action: 'group' | 'ungroup' | 'close') {
   const tabIds = ids as [number, ...number[]];
   if (action === 'close') {
     await browser.tabs.remove(ids);
-    notice.value = `已关闭 ${ids.length} 个标签页`;
+    showNotice(`已关闭 ${ids.length} 个标签页`);
   } else if (action === 'ungroup') {
     await browser.tabs.ungroup(tabIds);
-    notice.value = '已取消所选标签页的群组';
+    showNotice('已取消所选标签页的群组');
   } else {
     const groups = await browser.tabGroups.query({ windowId });
     const next =
@@ -122,7 +126,7 @@ async function actOnBrowserSelection(action: 'group' | 'ungroup' | 'close') {
       title: `群组${String(next).padStart(2, '0')}`,
       color: 'blue',
     });
-    notice.value = `已将 ${ids.length} 个标签页加入新群组`;
+    showNotice(`已将 ${ids.length} 个标签页加入新群组`);
   }
   selectedBrowserTabs.value.clear();
 }
@@ -167,8 +171,7 @@ function toggleSelected(id: string) {
 }
 async function copyLinks(tabs: SavedTab[]) {
   await navigator.clipboard.writeText(tabs.map((t) => t.url).join('\n'));
-  notice.value =
-    tabs.length > 1 ? `已复制 ${tabs.length} 个链接` : '链接已复制';
+  showNotice(tabs.length > 1 ? `已复制 ${tabs.length} 个链接` : '链接已复制');
 }
 const editTabOpen = ref(false);
 const editTabTarget = ref<{ group: string; id: string }>();
@@ -192,7 +195,7 @@ function submitTab() {
         url: tabUrl.value,
       });
       editTabOpen.value = false;
-      notice.value = '标签页已修改';
+      showNotice('标签页已修改');
     } catch (e) {
       editTabError.value = e instanceof Error ? e.message : '修改失败';
     }
@@ -360,7 +363,7 @@ function commitDrop(action: () => Promise<void>) {
       syncAfterDrop,
     )
     .catch((e) => {
-      error.value = e instanceof Error ? e.message : '拖拽失败';
+      showNotice(e instanceof Error ? e.message : '拖拽失败', 'alert');
     });
 }
 const drag = ref<Drag>();
@@ -373,7 +376,8 @@ function hideDragSource() {
     dragVisualActive.value = true;
   }, 0);
 }
-const draggedGroup = ref<number>();
+type BrowserSection = (typeof tabGroups.value)[number];
+const draggedGroup = ref<BrowserSection>();
 const groupDrop = ref<{
   id?: number;
   tabId?: number;
@@ -386,7 +390,7 @@ let groupScroll = 0;
 const previewBrowserGroups = computed(() => {
   const groups = tabGroups.value,
     target = groupDrop.value;
-  const source = groups.find((g) => g.id === draggedGroup.value);
+  const source = groups.find((g) => g.key === draggedGroup.value?.key);
   if (!source || !target) return groups;
   const rest = groups.filter((g) => g !== source);
   if (target.end) return [...rest, source];
@@ -409,7 +413,7 @@ const previewBrowserGroups = computed(() => {
   }
   return rest;
 });
-function startGroupDrag(event: DragEvent, id: number) {
+function startGroupDrag(event: DragEvent, group: BrowserSection) {
   if (!requireAccount()) { event.preventDefault(); return; }
   if (landing.committing || busy.value || !event.dataTransfer) {
     event.preventDefault();
@@ -418,17 +422,17 @@ function startGroupDrag(event: DragEvent, id: number) {
   const source = (event.currentTarget as HTMLElement).closest<HTMLElement>(
     '.workspace-browser-group',
   );
-  if (source) landing.capture(event, source, `[data-group-id="${id}"]`);
+  if (source) landing.capture(event, source, `[data-section-key="${group.key}"]`);
   const panel = source?.closest<HTMLElement>('.workspace-open-tabs');
   if (!panel) return;
   groupScroll = panel.scrollTop;
-  const win = tabGroups.value.find((g) => g.id === id)?.tabs[0]?.windowId;
+  const win = group.tabs[0]?.windowId;
   groupAnchors = [];
   for (const section of panel.querySelectorAll<HTMLElement>(
     '[data-group-id]',
   )) {
     const gid = Number(section.dataset.groupId);
-    if (gid === id) continue;
+    if (section === source) continue;
     for (const row of gid === -1
       ? section.querySelectorAll<HTMLElement>('[data-browser-tab-id]')
       : [section]) {
@@ -444,10 +448,10 @@ function startGroupDrag(event: DragEvent, id: number) {
       });
     }
   }
-  draggedGroup.value = id;
+  draggedGroup.value = group;
   hideDragSource();
   event.dataTransfer.effectAllowed = 'move';
-  event.dataTransfer.setData('application/x-duoyu-group', String(id));
+  event.dataTransfer.setData('application/x-duoyu-group', group.key);
 }
 function trackGroup(event: DragEvent) {
   if (draggedGroup.value === undefined) return;
@@ -477,15 +481,13 @@ function dropGroup() {
     return;
   }
   commitDrop(async () => {
-    const sourceGroup = await browser.tabGroups.get(source);
-    if (target.id !== undefined) {
-      const targetGroup = await browser.tabGroups.get(target.id);
-      if (sourceGroup.windowId !== targetGroup.windowId) return;
-    }
-    const tabs = (
-      await browser.tabs.query({ windowId: sourceGroup.windowId })
-    ).sort((a, b) => a.index - b.index);
-    const remaining = tabs.filter((tab) => tab.groupId !== source);
+    const windowId = source.tabs[0]?.windowId;
+    if (windowId === undefined) return;
+    const tabs = (await browser.tabs.query({ windowId })).sort((a, b) => a.index - b.index);
+    const sourceIds = new Set(source.tabs.map(tab => tab.id));
+    const members = tabs.filter(tab => tab.groupId === source.id &&
+      (source.id !== -1 || (sourceIds.has(tab.id) && !tab.pinned)));
+    const remaining = tabs.filter(tab => !members.includes(tab));
     const targetTabs = remaining.filter((tab) =>
       target.tabId !== undefined
         ? tab.id === target.tabId
@@ -499,7 +501,19 @@ function dropGroup() {
         ? remaining.length
         : remaining.indexOf(edge!) + (target.after ? 1 : 0),
     );
-    await browser.tabGroups.move(source, { index });
+    if (source.id !== -1) {
+      await browser.tabGroups.move(source.id, { index });
+    } else if (edge?.id !== undefined) {
+      // Insert each tab against the live edge; moving a tab can shift its index.
+      for (const member of target.after ? members.reverse() : members) {
+        if (member.id === undefined) continue;
+        const [tab, anchor] = await Promise.all([browser.tabs.get(member.id), browser.tabs.get(edge.id)]);
+        if (tab.windowId !== windowId || anchor.windowId !== windowId || tab.groupId !== -1 || tab.pinned) continue;
+        await browser.tabs.move(member.id, {
+          index: anchor.index - Number(tab.index < anchor.index) + Number(target.after),
+        });
+      }
+    }
   });
 }
 const dropTarget = ref('');
@@ -564,7 +578,21 @@ function overOpenTab(event: DragEvent, tab: BrowserTab) {
 // FLIP animation can expose the group between rows at the pointer's drop
 // position. Keep accepting the previously selected slot in that same group.
 function openTabGap(event: DragEvent, tabs: BrowserTab[], dropping = false) {
-  if (drag.value?.kind !== 'tab' || openTabSlot.value === undefined) return;
+  if (drag.value?.kind !== 'tab') return;
+  const first = tabs[0];
+  if (first && (first.groupId ?? -1) === -1) {
+    event.preventDefault();
+    const section = (event.currentTarget as HTMLElement).closest('section');
+    const rows = section?.querySelectorAll<HTMLElement>('[data-browser-tab-id]');
+    const next = Array.from(rows ?? []).find(row => event.clientY < row.getBoundingClientRect().top);
+    const target = next ? tabs.find(tab => tab.id === Number(next.dataset.browserTabId)) : tabs.at(-1);
+    if (target) {
+      openTabSlot.value = target.id;
+      if (dropping) dropOnTab(target, !next);
+    }
+    return;
+  }
+  if (openTabSlot.value === undefined) return;
   const target = tabs.find((tab) => tab.id === openTabSlot.value);
   if (!target) return;
   overOpenTab(event, target);
@@ -594,21 +622,6 @@ function startDrag(event: DragEvent, value: Drag) {
   const source = (event.currentTarget as HTMLElement).closest<HTMLElement>(
     selector,
   );
-  if (value.kind === 'tab' && source) {
-    openTabScroll = source.closest('.workspace-open-tabs')?.scrollTop || 0;
-    openTabSlots = Array.from(
-      source.parentElement!.querySelectorAll<HTMLElement>(
-        '[data-browser-tab-id]',
-      ),
-      (el) => {
-        const r = el.getBoundingClientRect();
-        return {
-          id: Number(el.dataset.browserTabId),
-          center: r.top + r.height / 2,
-        };
-      },
-    );
-  }
   if (source) landing.capture(event, source, selector);
   if (value.kind === 'collection' && source) {
     initialScroll = source.closest('.workspace-collections')?.scrollTop || 0;
@@ -623,8 +636,23 @@ function startDrag(event: DragEvent, value: Drag) {
     );
   }
   drag.value = value;
+  if (value.kind === 'tab' && source) {
+    void nextTick(() => {
+      if (drag.value?.kind !== 'tab' || drag.value.id !== value.id || !source.isConnected) return;
+      openTabScroll = source.closest('.workspace-open-tabs')?.scrollTop || 0;
+      openTabSlots = Array.from(
+        source.parentElement!.querySelectorAll<HTMLElement>(
+          '[data-browser-tab-id]',
+        ),
+        (el) => {
+          const r = el.getBoundingClientRect();
+          return { id: Number(el.dataset.browserTabId), center: r.top + r.height / 2 };
+        },
+      );
+    });
+  }
   hideDragSource();
-  event.dataTransfer.effectAllowed = value.kind === 'tab' ? 'copyMove' : 'move';
+  event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('application/x-duoyu-tab', JSON.stringify(value));
 }
 function endDrag(force = false) {
@@ -644,7 +672,7 @@ function over(event: DragEvent, target: string) {
   if (isMarkedSpace.value || !drag.value) return;
   event.preventDefault();
   if (event.dataTransfer)
-    event.dataTransfer.dropEffect = drag.value.kind === 'tab' ? 'copy' : 'move';
+    event.dataTransfer.dropEffect = 'move';
   const el = event.currentTarget as HTMLElement;
   if (drag.value.kind === 'collection') {
     const y =
@@ -680,15 +708,16 @@ function over(event: DragEvent, target: string) {
           ':scope > [data-saved-id]:not(.transfer-out)',
         ),
       );
-      if (cards.length && y < bounds.height) {
-        const nearest = cards.reduce((best, card) => {
-          const distance = (c: HTMLElement) =>
-            Math.hypot(
-              x - c.offsetLeft - c.offsetWidth / 2,
-              y - c.offsetTop - c.offsetHeight / 2,
-            );
-          return distance(card) < distance(best) ? card : best;
-        });
+      const last = cards.at(-1);
+      const pastLastCard = last && y >= last.offsetTop &&
+        (y >= last.offsetTop + last.offsetHeight || x >= last.offsetLeft + last.offsetWidth);
+      if (last && !pastLastCard && y < bounds.height) {
+        // Pick a row first, so empty columns cannot snap to the row above.
+        const rowDistance = (card: HTMLElement) => Math.abs(y - card.offsetTop - card.offsetHeight / 2);
+        const row = cards.reduce((best, card) => rowDistance(card) < rowDistance(best) ? card : best);
+        const columnDistance = (card: HTMLElement) => Math.abs(x - card.offsetLeft - card.offsetWidth / 2);
+        const nearest = cards.filter(card => card.offsetTop === row.offsetTop)
+          .reduce((best, card) => columnDistance(card) < columnDistance(best) ? card : best);
         index = cards.indexOf(nearest);
         if (
           !cards.some((c) => c.dataset.savedId === drag.value?.id) &&
@@ -705,6 +734,16 @@ function over(event: DragEvent, target: string) {
   }
   dropTarget.value = target;
 }
+function handleCollectionListEnd(event: DragEvent) {
+  if (drag.value?.kind !== 'saved' || !(event.target instanceof Element)) return;
+  if (event.target.closest('[data-collection-id]')) return;
+  const last = collectionList.value?.querySelector<HTMLElement>('.workspace-collection:last-child');
+  const group = last?.dataset.collectionId;
+  if (!group || !last || event.clientY < last.getBoundingClientRect().bottom) return;
+  event.preventDefault();
+  insertion.value = { group };
+  if (event.type === 'drop') drop(group);
+}
 function drop(group: string, before?: string, event?: DragEvent) {
   const value = drag.value;
   if (!value) {
@@ -716,7 +755,7 @@ function drop(group: string, before?: string, event?: DragEvent) {
   commitDrop(async () => {
     if (value.kind === 'tab') {
       const tab = await browser.tabs.get(value.id);
-      await save([tab], group, before);
+      await saveAndCloseTab(tab, activeSpace.value, group, before);
       landing.setTarget(
         `[data-collection-id="${group}"] .workspace-saved-tab:has(.workspace-link[title="${CSS.escape(tab.pendingUrl || tab.url || '')}"])`,
       );
@@ -730,7 +769,69 @@ function drop(group: string, before?: string, event?: DragEvent) {
     else if (slot) await reorderCollection(value.id, slot.before, value.spaceId);
   });
 }
-function dropOnTab(tab: BrowserTab) {
+function dropIntoSpace(event: DragEvent) {
+  const source = draggedGroup.value;
+  const single = drag.value;
+  if (!source && single?.kind !== 'tab') return;
+  if (!(event.target instanceof Element)) return;
+  const spaceRow = event.target.closest<HTMLElement>('.desktop-menu [data-menu-row]');
+  const library = event.target.closest('.workspace-library');
+  if (!spaceRow && (!library || isMarkedSpace.value)) return;
+  // A single tab on a collection uses that collection's insertion handler.
+  if (!source && library && event.target.closest('[data-collection-id]')) return;
+  const space = spaceRow?.dataset.menuRow ?? activeSpace.value;
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  if (event.type !== 'drop') return;
+  commitDrop(async () => {
+    if (source) {
+      const collectionId = await saveBrowserGroup(source.id, source.tabs, space);
+      if (collectionId) landing.setTarget(`[data-collection-id="${collectionId}"]`);
+    } else if (single?.kind === 'tab') {
+      const tab = await browser.tabs.get(single.id);
+      const collectionId = await saveAndCloseTab(tab, space);
+      landing.setTarget(`[data-collection-id="${collectionId}"]`);
+      switchSpace(space);
+    }
+  });
+}
+function handleTabListEnd(event: DragEvent) {
+  const source = drag.value;
+  if (source?.kind !== 'tab' || !(event.target instanceof Element)) return;
+  if (!event.target.matches('.workspace-tabs, .workspace-open-tabs, .workspace-browser-group-order')) return;
+  const panel = event.currentTarget as HTMLElement;
+  const last = panel.querySelector('.workspace-browser-group:last-child');
+  if (!last || event.clientY < last.getBoundingClientRect().bottom) return;
+  event.preventDefault();
+  event.stopPropagation();
+  openTabSlot.value = undefined;
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  if (event.type !== 'drop') return;
+  const windowId = selectedWindow.value;
+  commitDrop(async () => {
+    const tab = await browser.tabs.get(source.id);
+    if (tab.windowId !== windowId || tab.pinned) return;
+    if ((tab.groupId ?? -1) !== -1) await browser.tabs.ungroup(source.id);
+    await browser.tabs.move(source.id, { index: -1 });
+  });
+}
+function dropOutsideGroup(groupId: number, after: boolean) {
+  const source = drag.value;
+  if (source?.kind !== 'tab') return;
+  commitDrop(async () => {
+    const group = await browser.tabGroups.get(groupId);
+    const tab = await browser.tabs.get(source.id);
+    if (tab.windowId !== group.windowId || tab.pinned) return;
+    if ((tab.groupId ?? -1) !== -1) await browser.tabs.ungroup(source.id);
+    const tabs = (await browser.tabs.query({ windowId: group.windowId }))
+      .filter(item => item.id !== source.id).sort((a, b) => a.index - b.index);
+    const members = tabs.filter(item => item.groupId === groupId);
+    const edge = after ? members.at(-1) : members[0];
+    if (edge) await browser.tabs.move(source.id, { index: tabs.indexOf(edge) + Number(after) });
+  });
+}
+function dropOnTab(tab: BrowserTab, insertAfter?: boolean) {
   if (draggedGroup.value !== undefined) {
     dropGroup();
     return;
@@ -750,13 +851,20 @@ function dropOnTab(tab: BrowserTab) {
       browser.tabs.get(value.id),
       browser.tabs.get(targetId),
     ]);
-    // Only specify a destination window when moving between windows.
-    // Resolve fresh indices because browser tab events can arrive during a drag.
+    const after = insertAfter ?? (source.windowId === target.windowId && source.index < target.index);
+    if (source.groupId !== target.groupId) {
+      if ((target.groupId ?? -1) === -1) await browser.tabs.ungroup(value.id);
+      else await browser.tabs.group({ groupId: target.groupId, tabIds: [value.id] });
+    }
+    const remaining = (await browser.tabs.query({ windowId: target.windowId }))
+      .filter(item => item.id !== value.id).sort((a, b) => a.index - b.index);
+    const anchor = remaining.findIndex(item => item.id === targetId);
+    if (anchor < 0) return;
     await browser.tabs.move(value.id, {
       ...(source.windowId !== target.windowId
         ? { windowId: target.windowId }
         : {}),
-      index: target.index,
+      index: anchor + Number(after),
     });
   });
 }
@@ -799,7 +907,7 @@ async function rename(id: string) {
   try {
     await renameCollection(id, name);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '集合名称保存失败';
+    showNotice(e instanceof Error ? e.message : '集合名称保存失败', 'alert');
   }
 }
 function collapse(id: string) {
@@ -823,7 +931,8 @@ function moveWithSelect(event: Event, group: string, id: string) {
     @click.stop="menu = ''"
     @pointerdown.stop
     @contextmenu.stop
-    @drop.capture="landing.track($event)"
+    @dragover.capture="dropIntoSpace"
+    @drop.capture="landing.track($event); dropIntoSpace($event)"
     @dragend="endDrag()"
     @keydown="workspaceKey"
     @keydown.esc="endDrag()"
@@ -936,6 +1045,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
           </h1>
         </div>
       </div>
+      <slot name="toolbar-actions" />
       <label class="workspace-search glass-surface"
         ><Search aria-hidden="true" size="18" />
         <input
@@ -963,11 +1073,11 @@ function moveWithSelect(event: Event, group: string, id: string) {
             role="group"
             aria-label="集合视图"
           >
-            <div class="workspace-layout-switch">
+            <div class="workspace-layout-switch glass-mode-switch glass-surface">
               <button
                 aria-label="网格"
                 title="网格"
-                class="workspace-button glass-control glass-interactive"
+                class="glass-control glass-interactive"
                 :aria-pressed="viewMode === 'grid'"
                 @click="switchView('grid')"
               >
@@ -981,7 +1091,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
               <button
                 aria-label="列表"
                 title="列表"
-                class="workspace-button glass-control glass-interactive"
+                class="glass-control glass-interactive"
                 :aria-pressed="viewMode === 'list'"
                 @click="switchView('list')"
               >
@@ -1059,6 +1169,8 @@ function moveWithSelect(event: Event, group: string, id: string) {
         <div
           ref="collectionList"
           class="workspace-collections"
+          @dragover="handleCollectionListEnd"
+          @drop="handleCollectionListEnd"
           :aria-busy="loading"
         >
           <p v-if="loading" class="workspace-empty">正在读取收藏…</p>
@@ -1410,6 +1522,8 @@ function moveWithSelect(event: Event, group: string, id: string) {
       <aside
         class="workspace-tabs glass-surface"
         aria-label="浏览器打开的标签页"
+        @dragover="handleTabListEnd"
+        @drop="handleTabListEnd"
       >
         <header class="workspace-section-heading">
           <div>
@@ -1449,37 +1563,50 @@ function moveWithSelect(event: Event, group: string, id: string) {
           <ReorderTransition class="workspace-browser-group-order">
             <ReorderTransition
               tag="section"
-              v-for="group in previewBrowserGroups"
+              v-for="(group, index) in previewBrowserGroups"
               :key="group.key"
               class="workspace-browser-group"
               :class="{
-                'is-drag-source': dragVisualActive && draggedGroup === group.id,
+                'is-drag-source': dragVisualActive && draggedGroup?.key === group.key,
               }"
+              :data-section-key="group.key"
               :data-group-color="group.color"
               :data-group-id="group.id"
               :aria-label="group.label"
               @dragover.self="openTabGap($event, group.tabs)"
               @drop.self="openTabGap($event, group.tabs, true)"
             >
-              <h3 key="heading" class="workspace-window-label">
+              <template v-if="drag?.kind === 'tab' && group.id !== -1">
+                <div v-if="index === 0" key="before"
+                  class="workspace-group-edge before"
+                  @dragover.prevent.stop="openTabSlot = undefined"
+                  aria-hidden="true"
+                  @drop.prevent.stop="dropOutsideGroup(group.id, false)" />
+                <div v-if="previewBrowserGroups[index + 1]?.id !== -1" key="after"
+                  class="workspace-group-edge after"
+                  @dragover.prevent.stop="openTabSlot = undefined"
+                  aria-hidden="true"
+                  @drop.prevent.stop="dropOutsideGroup(group.id, true)" />
+              </template>
+              <h3 key="heading" class="workspace-window-label"
+                @dragover="group.id === -1 && openTabGap($event, group.tabs)"
+                @drop="group.id === -1 && openTabGap($event, group.tabs, true)">
                 <button
-                  v-if="group.id !== -1"
                   v-account-edit class="workspace-group-handle glass-control glass-interactive"
                   draggable="true"
                   :disabled="busy"
                   :aria-label="`拖动群组 ${group.label}`"
                   title="拖动群组排序"
-                  @dragstart.stop="startGroupDrag($event, group.id)"
+                  @dragstart.stop="startGroupDrag($event, group)"
                 >
                   ⠿
                 </button>
                 <button
-                  v-if="group.id !== -1"
                   class="workspace-group-toggle"
                   :aria-label="`折叠群组 ${group.label}`"
                   :aria-expanded="!group.collapsed"
                   :disabled="busy"
-                  v-account-edit @click="run(() => toggleBrowserGroup(group.id))"
+                  @click="(group.id === -1 || requireAccount()) && run(() => toggleBrowserGroup(group.id, group.key))"
                 >
                   {{ group.label }}
                   <img
@@ -1490,17 +1617,15 @@ function moveWithSelect(event: Event, group: string, id: string) {
                     :class="{ folded: group.collapsed }"
                   />
                 </button>
-                <template v-else>{{ group.label }}</template>
                 <span>{{ group.tabs.length }}</span>
                 <button
-                  v-if="group.id !== -1"
                   v-account-edit class="workspace-group-save glass-control glass-interactive"
                   :aria-label="`保存群组 ${group.label} 为集合`"
-                  title="以群组名称保存为集合"
+                  title="保存为集合并关闭已保存的标签页"
                   :disabled="busy || loading"
                   @click.stop="
                     run(async () => {
-                      await saveBrowserGroup(group.id);
+                      await saveBrowserGroup(group.id, group.tabs);
                       await revealNewestCollection();
                     })
                   "
@@ -1558,16 +1683,26 @@ function moveWithSelect(event: Event, group: string, id: string) {
                 </span>
                 <button
                   class="workspace-link glass-control"
-                  :title="tab.url || tab.pendingUrl"
+                  :title="tabTitle(tab)"
                   @click="run(() => activate(tab))"
                 >
-                  <span
-                    ><strong>{{ tabTitle(tab) }}</strong
-                    ><small
-                      >{{ tab.pinned ? '已固定 · ' : ''
-                      }}{{ hostname(tab.pendingUrl || tab.url || '') }}</small
-                    ></span
-                  >
+                  <span>
+                    <strong>{{ tabTitle(tab) }}</strong>
+                    <small :title="tab.pendingUrl || tab.url">{{ tab.pendingUrl || tab.url }}</small>
+                  </span>
+                </button>
+                <button
+                  v-account-edit
+                  type="button"
+                  class="workspace-open-tab-close"
+                  :aria-label="`关闭标签页 ${tabTitle(tab)}`"
+                  title="关闭标签页"
+                  :disabled="busy || tab.id === undefined"
+                  @pointerdown.stop
+                  @dragstart.prevent.stop
+                  @click.stop="closeOpenTab(tab.id)"
+                >
+                  <span aria-hidden="true">×</span>
                 </button>
               </div>
             </ReorderTransition>
@@ -1680,10 +1815,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
       ><button
         class="workspace-icon glass-control glass-interactive"
         aria-label="关闭提示"
-        @click="
-          notice = '';
-          error = '';
-        "
+        @click="dismissNotice"
       >
         ×
       </button>

@@ -188,15 +188,12 @@ try {
   await page.locator(`[data-browser-tab-id="${tabs[1].id}"]`).dragTo(first);
   await expect(page.locator('.drag-landing-preview')).toHaveCount(0);
   await expect(first.locator('.workspace-saved-tab')).toHaveCount(2);
-  await alphaTab.dragTo(first);
-  await expect(page.locator('.drag-landing-preview')).toHaveCount(0);
+  await expect(alphaTab).toHaveCount(0);
+  const duplicate = await page.evaluate(url => chrome.tabs.create({ url, active: false }), tabs[0].url);
+  const duplicateRow = board.locator(`[data-browser-tab-id="${duplicate.id}"]`);
+  await duplicateRow.dragTo(first);
+  await expect(duplicateRow).toHaveCount(0);
   await expect(first.locator('.workspace-saved-tab')).toHaveCount(2);
-  assert.equal(
-    (await page.evaluate(() => chrome.tabs.query({}))).filter((t) =>
-      t.url?.includes('workspace-fixture'),
-    ).length,
-    3,
-  );
   await create('稍后阅读');
   const second = page.locator('.workspace-collection').filter({
     has: page.getByRole('button', { name: '稍后阅读', exact: true }),
@@ -258,7 +255,7 @@ try {
   ).toBeVisible();
   await board.getByRole('searchbox', { name: '搜索工作区' }).fill('Alpha');
   await expect(board.locator('.workspace-saved-tab')).toHaveCount(1);
-  await expect(board.locator('.workspace-open-tab')).toHaveCount(1);
+  await expect(board.locator('.workspace-open-tab')).toHaveCount(0);
   await board.getByRole('button', { name: '清空工作区搜索' }).click();
   await first
     .locator('.workspace-saved-tab')
@@ -377,7 +374,6 @@ try {
   ).toHaveCount(0);
   await expect(board.locator('.workspace-tabs-footer')).toHaveCount(0);
   await page.screenshot({ path: 'work/workspace-collections-desktop.png' });
-  await page.evaluate((id) => chrome.tabs.remove(id), tabs[1].id);
   await expect(
     page.locator(`[data-browser-tab-id="${tabs[1].id}"]`),
   ).toHaveCount(0);
@@ -392,6 +388,10 @@ try {
   await expect
     .poll(async () => (await page.evaluate(() => chrome.tabs.query({}))).length)
     .toBe(before + 3);
+  for (const index of [0, 2]) {
+    [tabs[index]] = await page.evaluate(async url =>
+      (await chrome.tabs.query({})).filter(tab => (tab.pendingUrl || tab.url) === url), tabs[index].url);
+  }
   await page.reload();
   await page.locator('.clock-time').waitFor();
   await page
@@ -662,27 +662,31 @@ try {
   await expect(
     savedNativeGroup.locator('.workspace-saved-tab strong'),
   ).toHaveText(['Gamma', 'Alpha']);
+  await expect(grouped).toHaveCount(0);
+  const originalIds = [tabs[0].id, tabs[2].id];
+  assert.equal(await page.evaluate(async ids =>
+    (await chrome.tabs.query({})).some(tab => ids.includes(tab.id)), originalIds), false);
+  await savedNativeGroup.getByRole('button', { name: '打开集合 项目调研 的全部标签页' }).click();
+  const restored = board.locator('.workspace-browser-group[aria-label="项目调研"]');
+  await expect(restored.locator('.workspace-open-tab')).toHaveCount(2);
+  const restoredId = Number(await restored.getAttribute('data-group-id'));
+  [tabs[2], tabs[0]] = await page.evaluate(id => chrome.tabs.query({ groupId: id }), restoredId);
   await groupAction('项目调研', '删除集合');
   await board.getByRole('button', { name: '确认删除', exact: true }).click();
   await expect(savedNativeGroup).toHaveCount(0);
-  await grouped
-    .getByRole('button', { name: '折叠群组 项目调研', exact: true })
-    .click();
-  await expect(grouped.locator('.workspace-open-tab')).toHaveCount(2);
-
   await page.evaluate(
     (id) => chrome.tabGroups.update(id, { title: '参考资料', color: 'green' }),
-    nativeGroup,
+    restoredId,
   );
-  await expect(grouped).toHaveAttribute('data-group-color', 'green');
-  await expect(grouped.locator('.workspace-window-label')).toContainText(
+  await expect(restored).toHaveAttribute('data-group-color', 'green');
+  await expect(restored.locator('.workspace-window-label')).toContainText(
     '参考资料',
   );
   await page.evaluate(
     (ids) => chrome.tabs.ungroup(ids),
     [tabs[0].id, tabs[2].id],
   );
-  await expect(grouped).toHaveCount(0);
+  await expect(restored).toHaveCount(0);
   const checkAlpha = board.getByRole('checkbox', {
     name: '选择打开的标签页 Alpha',
     exact: true,
@@ -769,7 +773,7 @@ try {
   await expect(board.locator('h1')).toHaveText('工作项目');
   await expect(board.locator('.workspace-collection')).toHaveCount(0);
   await create('项目会话');
-  await alphaTab.dragTo(board.locator('.workspace-collection').first());
+  await board.locator(`[data-browser-tab-id="${tabs[0].id}"]`).dragTo(board.locator('.workspace-collection').first());
   await expect(page.locator('.drag-landing-preview')).toHaveCount(0);
   await expect(board.locator('.workspace-saved-tab')).toHaveCount(1);
   await board
@@ -877,41 +881,20 @@ try {
     board.getByRole('menuitem', { name: '删除空间', exact: true }),
   ).toBeDisabled();
   await page.keyboard.press('Escape');
-  // The shared Dock now pins Home and Workspace; reorder the movable memo entry.
-  const dockGrid = page.getByRole('navigation', {
-    name: '快捷 Dock',
-    exact: true,
-  });
-  await expect(dockGrid.locator('[data-dock-id]')).toHaveCount(5);
-  await expect(
-    dockGrid.locator('[data-dock-id="duoyu-home"]'),
-  ).not.toHaveAttribute('data-drag-handle');
-  const homeBox = await dockGrid
-    .locator('[data-dock-id="duoyu-memo"]')
-    .boundingBox();
-  const canvasBox = await dockGrid
-    .locator('[data-dock-id="duoyu-canvas"]')
-    .boundingBox();
-  await page.mouse.move(homeBox.x + homeBox.width / 2, homeBox.y + 18);
-  await page.mouse.down();
-  await page.mouse.move(canvasBox.x + canvasBox.width - 3, canvasBox.y + 18, {
-    steps: 12,
-  });
+  const dockGrid = page.getByRole('navigation', { name: '快捷 Dock', exact: true });
+  const docks = dockGrid.locator('[data-dock-id]');
+  await expect(docks).toHaveCount(5);
+  for (const id of ['duoyu-home', 'duoyu-workspace', 'duoyu-canvas', 'duoyu-memo']) {
+    await expect(dockGrid.locator(`[data-dock-id="${id}"]`)).not.toHaveAttribute('data-drag-handle');
+  }
+  await dockGrid.getByRole('button', { name: '画布', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: '画布', exact: true })).toBeVisible();
+  await expect(board).toHaveCount(0);
+  await page.keyboard.press('ArrowRight');
+  await expect(dockGrid.getByRole('button', { name: '便签', exact: true })).toHaveAttribute('aria-current', 'page');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
   await expect(board).toBeVisible();
-  await page.mouse.up();
-  await expect
-    .poll(() =>
-      dockGrid
-        .locator('[data-dock-id]')
-        .evaluateAll((items) => items.map((item) => item.dataset.dockId)),
-    )
-    .toEqual([
-      'duoyu-home',
-      'duoyu-workspace',
-      'duoyu-translate',
-      'duoyu-canvas',
-      'duoyu-memo',
-    ]);
   await page.reload();
   await page.locator('.clock-time').waitFor();
   await page
@@ -927,9 +910,9 @@ try {
     .toEqual([
       'duoyu-home',
       'duoyu-workspace',
-      'duoyu-translate',
       'duoyu-canvas',
       'duoyu-memo',
+      'duoyu-translate',
     ]);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(

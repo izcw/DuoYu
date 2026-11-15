@@ -328,16 +328,16 @@
 }
 .solid-dialog .library-editor input {
   box-sizing: border-box;
-  background: #f5f5f5;
-  color: #222;
-  color-scheme: light;
+  background: var(--theme-control);
+  color: var(--theme-text);
+  color-scheme: inherit;
 }
 .solid-dialog .library-editor input:focus-visible {
   outline: 2px solid #8ab4f8;
 }
 .solid-dialog .library-form-actions button {
-  color: #222;
-  background: #f0f0f0;
+  color: var(--theme-text);
+  background: var(--theme-control);
 }
 .solid-dialog .library-form-actions button:last-child {
   background: #222;

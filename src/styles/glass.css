@@ -265,3 +265,50 @@
 .cell-icon:not(:has(.text-icon, .inline-icon-editor)) {
   padding: var(--icon-padding, 4px) !important;
 }
+
+.glass-mode-switch {
+  z-index: 20;
+  --segments: 3;
+  --selected: 0;
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: repeat(var(--segments), 1fr);
+  width: max-content;
+  margin: 0;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 20px;
+  border: 0;
+}
+.glass-mode-switch button {
+  padding: 6px 15px;
+  border: 0;
+  border-radius: 16px;
+  color: #fff;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  transition:
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.glass-mode-switch:has(> button:last-child:nth-child(2)) { --segments: 2; }
+.glass-mode-switch:has(> button:nth-child(2)[aria-pressed='true']) { --selected: 1; }
+.glass-mode-switch:has(> button:nth-child(3)[aria-pressed='true']) { --selected: 2; }
+.glass-mode-switch::before {
+  content: '';
+  position: absolute;
+  inset: 3px auto 3px 3px;
+  width: calc((100% - 4px) / var(--segments) - 2px);
+  border-radius: 16px;
+  background: var(--glass-interaction-fill);
+  pointer-events: none;
+  transform: translateX(calc(var(--selected) * (100% + 2px)));
+  transition: transform 320ms cubic-bezier(.22,.8,.22,1);
+}
+.glass-mode-switch > button.glass-control.glass-interactive:not(:disabled) {
+  position: relative;
+  background: transparent;
+}

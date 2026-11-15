@@ -6,7 +6,18 @@ export default defineConfig({
   srcDir: 'src',
   modules: ['@wxt-dev/module-vue'],
   manifest: () => {
-    const issuer = new URL(process.env.VITE_AUTH_ISSUER || '');
+    const issuerValue = process.env.VITE_AUTH_ISSUER?.trim();
+    if (!issuerValue) {
+      throw new Error(
+        '缺少认证环境配置：请先将 .env.example 复制为 .env，并配置 VITE_AUTH_ISSUER、VITE_AUTH_CLIENT_ID 和 VITE_AUTH_SCOPE',
+      );
+    }
+    let issuer: URL;
+    try {
+      issuer = new URL(issuerValue);
+    } catch {
+      throw new Error('VITE_AUTH_ISSUER 必须是有效的 http 或 https URL');
+    }
     if (
       !['http:', 'https:'].includes(issuer.protocol) ||
       issuer.username ||

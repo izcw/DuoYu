@@ -14,16 +14,21 @@
     clearTimeout(timer);
     const now = new Date();
     const systemKnown = dark?.matches || light?.matches;
-    const isDark = systemKnown
+    const systemDark = systemKnown
       ? dark.matches
       : now.getHours() < 7 || now.getHours() >= 19;
+    const saved = localStorage.getItem('duoyu-theme');
+    const preference = saved === 'dark' || saved === 'light' ? saved : 'auto';
+    const isDark = preference === 'auto' ? systemDark : preference === 'dark';
     const mode = isDark ? 'dark' : 'light';
+    root.dataset.themePreference = preference;
     const color = isDark ? '#000000' : '#ffffff';
     root.dataset.fallbackTheme = mode;
     root.style.setProperty('--wallpaper-fallback', color);
     root.style.backgroundColor = color;
     root.style.colorScheme = mode;
-    if (!systemKnown) {
+    window.dispatchEvent(new Event('duoyu-theme-applied'));
+    if (preference === 'auto' && !systemKnown) {
       const next = new Date(now);
       next.setHours(
         now.getHours() < 7 ? 7 : now.getHours() < 19 ? 19 : 31,
@@ -35,6 +40,10 @@
     }
   }
   update();
+  window.addEventListener('duoyu-theme-change', update);
+  window.addEventListener('storage', (event) => {
+    if (event.key === 'duoyu-theme' || event.key === null) update();
+  });
   dark?.addEventListener?.('change', update);
   light?.addEventListener?.('change', update);
   document.addEventListener('visibilitychange', () => {

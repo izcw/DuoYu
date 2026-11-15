@@ -5,6 +5,7 @@ const props = defineProps<{
   title: string;
   folder?: boolean;
   solid?: boolean;
+  drawer?: boolean;
   closeButton?: boolean;
   width?: number;
   height?: number;
@@ -14,7 +15,14 @@ const emit = defineEmits<{ 'update:open': [value: boolean] }>();
 const panel = ref<HTMLElement>();
 const titleId = useId();
 let previous: HTMLElement | null = null;
-function close() {
+const closing = ref(false);
+async function close() {
+  if (props.drawer && panel.value) {
+    if (closing.value) return;
+    closing.value = true;
+    await nextTick();
+    await Promise.allSettled(panel.value?.getAnimations().map(a => a.finished) ?? []);
+  }
   emit('update:open', false);
 }
 function key(event: KeyboardEvent) {
@@ -47,6 +55,7 @@ watch(
   () => props.open,
   async (open) => {
     if (open) {
+      closing.value = false;
       previous =
         document.activeElement instanceof HTMLElement
           ? document.activeElement
@@ -59,7 +68,7 @@ watch(
             'input,button,[tabindex="0"]',
           ) ??
           panel.value
-        )?.focus();
+        )?.focus({ preventScroll: !!props.drawer });
     } else if (previous?.isConnected) previous.focus();
   },
   { immediate: true },
@@ -91,7 +100,7 @@ onUnmounted(() => {
     ><div
       v-if="open"
       class="base-dialog-backdrop"
-      :class="{ 'folder-dialog-backdrop': folder }"
+      :class="{ 'folder-dialog-backdrop': folder, 'drawer-backdrop': drawer, 'is-closing': closing }"
       @pointerdown.self="close"
       @keydown="key"
     >
@@ -99,7 +108,9 @@ onUnmounted(() => {
         ref="panel"
         class="base-dialog"
         :style="
-          height
+          drawer
+            ? { width: `min(${width || 720}px, 100vw)` }
+            : height
             ? {
                 width: `min(${width || 1160}px, calc(100vw - 32px))`,
                 height: `min(${height}px, calc(100svh - 32px))`,
@@ -116,7 +127,7 @@ onUnmounted(() => {
         :class="[
           folder ? 'folder-dialog' : solid ? 'solid-dialog' : 'glass-surface',
           {
-            'fixed-ratio-dialog': aspectRatio || height,
+            'fixed-ratio-dialog': aspectRatio || height || drawer,
             'closeable-dialog': closeButton,
           },
         ]"
@@ -208,8 +219,8 @@ h2 {
 
 <style scoped>
 .solid-dialog {
-  background: #fff;
-  color: #222;
+  background: var(--theme-panel);
+  color: var(--theme-text);
   box-shadow: 0 16px 60px #0003;
 }
 </style>
@@ -244,12 +255,38 @@ h2 {
   height: 32px;
   border: 0;
   border-radius: 50%;
-  background: #f5f5f7;
+  background: var(--theme-control);
   display: grid;
   place-items: center;
   padding: 8px;
   cursor: pointer;
   transition: opacity 140ms ease;
+}
+.drawer-backdrop {
+  place-items: stretch end;
+  overflow: clip;
+  background: rgb(0 0 0 / 26%);
+  backdrop-filter: none;
+}
+.drawer-backdrop .base-dialog {
+  height: 100svh;
+  max-height: none;
+  border-radius: 22px 0 0 22px;
+}
+.drawer-backdrop.is-closing {
+  background-color: transparent;
+}
+.drawer-backdrop.is-closing .base-dialog {
+  transform: translateX(100%);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .drawer-backdrop { transition: background-color 200ms ease; }
+  .drawer-backdrop .base-dialog { transition: transform 360ms cubic-bezier(.2,.65,.3,1); }
+  .drawer-backdrop.is-closing .base-dialog { transition: transform 240ms ease-in; }
+}
+@starting-style {
+  .drawer-backdrop { background-color: transparent; }
+  .drawer-backdrop .base-dialog { transform: translateX(100%); }
 }
 .dialog-close img {
   width: 16px;

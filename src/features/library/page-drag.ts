@@ -1,3 +1,4 @@
+import { dockPages } from '../shortcuts/actions';
 import { accountStorage } from '../../shared/storage/account';
 import { ref } from 'vue';
 import {
@@ -225,7 +226,7 @@ function move(event: MouseEvent | DragEvent) {
       ) {
         const entries = [
           ...container.querySelectorAll<HTMLElement>('.dock-entry'),
-        ].slice(2);
+        ].slice(dockPages.length);
         dockInsertBeforeId.value =
           entries.find((el) => x < el.offsetLeft + el.offsetWidth / 2)?.dataset
             .dockId || '';
@@ -298,7 +299,7 @@ async function finish(event: MouseEvent | DragEvent) {
       .filter((id) => id !== transfer.id);
     const index = before ? ordered.indexOf(before) : ordered.length;
     ordered.splice(
-      Math.max(2, index < 0 ? ordered.length : index),
+      Math.max(dockPages.length, index < 0 ? ordered.length : index),
       0,
       transfer.id,
     );

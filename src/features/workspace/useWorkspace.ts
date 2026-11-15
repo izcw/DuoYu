@@ -39,8 +39,30 @@ export function useWorkspace() {
   const loading = ref(true);
   const tabsLoading = ref(true);
   const needsTabPermission = ref(false);
-  const tabTitle = (tab: BrowserTab) =>
-    tab.title?.trim() || tab.pendingUrl || tab.url || '无法读取标签页信息';
+  function pageName(title: string | undefined, url: string) {
+    const name = title?.trim();
+    if (!name || /^(https?|chrome|about|edge|file):/i.test(name)) return '';
+    try {
+      const address = new URL(url);
+      const bare = (value: string) => value.replace(/^www\./i, '').replace(/\/$/, '').toLowerCase();
+      if ([address.hostname, address.host, address.href.slice(address.protocol.length + 2)].some(value => bare(value) === bare(name))) return '';
+    } catch { /* A title can arrive before the URL is available. */ }
+    return name;
+  }
+  const savedNames = computed(() => {
+    const names = new Map<string, string>();
+    for (const collection of allCollections.value) {
+      for (const entry of collection.tabs) {
+        const name = pageName(entry.title, entry.url);
+        if (name && name !== '未命名网页') names.set(webUrl(entry.url) ?? entry.url, name);
+      }
+    }
+    return names;
+  });
+  function tabTitle(tab: BrowserTab) {
+    const url = tab.pendingUrl || tab.url || '';
+    return pageName(tab.title, url) || savedNames.value.get(webUrl(url) ?? url) || '未命名网页';
+  }
   const query = ref('');
   const selectedWindow = ref<number>();
   const windowOptions = ref<{ id: number; label: string }[]>([]);
@@ -55,6 +77,19 @@ export function useWorkspace() {
   });
   const notice = ref('');
   const error = ref('');
+  let noticeTimer: ReturnType<typeof setTimeout>;
+  function dismissNotice() {
+    clearTimeout(noticeTimer);
+    notice.value = '';
+    error.value = '';
+  }
+  function showNotice(message: string, role: 'status' | 'alert' = 'status') {
+    if (disposed) return;
+    dismissNotice();
+    if (role === 'alert') error.value = message;
+    else notice.value = message;
+    noticeTimer = setTimeout(dismissNotice, 3000);
+  }
   const busy = ref(false);
   const undo = ref<(() => Promise<void>) | null>(null);
   let owner: BrowserTab | undefined;
@@ -80,9 +115,10 @@ export function useWorkspace() {
     tabs.value.filter(
       (t) =>
         t.windowId === selectedWindow.value &&
-        matches(t.title || '', t.url || t.pendingUrl || ''),
+        matches(tabTitle(t), t.pendingUrl || t.url || ''),
     ),
   );
+  const collapsedUngrouped = ref(new Set<string>());
   const tabGroups = computed(() => {
     const groups: {
       id: number;
@@ -92,25 +128,32 @@ export function useWorkspace() {
       collapsed: boolean;
       tabs: BrowserTab[];
     }[] = [];
-    for (const tab of visibleTabs.value) {
+    for (const tab of tabs.value) {
+      if (tab.windowId !== selectedWindow.value) continue;
       const id = tab.groupId ?? -1;
       let group = groups.at(-1);
       if (group?.id !== id) group = undefined;
       if (!group) {
         const metadata = browserGroups.value.find((g) => g.id === id);
+        const key = id === -1 ? `ungrouped-${tab.id}` : `group-${id}`;
         group = {
           id,
-          key: id === -1 ? `ungrouped-${tab.id}` : `group-${id}`,
+          key,
           label: id === -1 ? '未分组' : metadata?.title || '未命名群组',
           color: metadata?.color || 'grey',
-          collapsed: metadata?.collapsed || false,
+          collapsed: id === -1 ? collapsedUngrouped.value.has(key) : !!metadata?.collapsed,
           tabs: [],
         };
         groups.push(group);
       }
       group.tabs.push(tab);
     }
-    return groups;
+    if (!query.value.trim()) return groups;
+    const visible = new Set(visibleTabs.value.map(tab => tab.id));
+    return groups.map(group => ({
+      ...group, tabs: group.tabs.filter(tab => visible.has(tab.id)),
+    })).filter(group => group.tabs.length);
+
   });
   const savedCount = computed(() =>
     collections.value.reduce((n, c) => n + c.tabs.length, 0),
@@ -128,7 +171,7 @@ export function useWorkspace() {
     try {
       await action();
     } catch (e) {
-      error.value = e instanceof Error ? e.message : '操作失败，请重试';
+      showNotice(e instanceof Error ? e.message : '操作失败，请重试', 'alert');
     } finally {
       busy.value = false;
     }
@@ -169,7 +212,7 @@ export function useWorkspace() {
         .sort((a, b) => a.windowId - b.windowId || a.index - b.index);
     } catch {
       if (!disposed)
-        error.value = '无法读取标签页，请重新加载扩展并允许读取标签页信息。';
+        showNotice('无法读取标签页，请重新加载扩展并允许读取标签页信息。', 'alert');
     } finally {
       if (!disposed) tabsLoading.value = false;
     }
@@ -193,61 +236,89 @@ export function useWorkspace() {
     return url
       ? {
           id: crypto.randomUUID(),
-          title: tab.title || url,
+          title: tabTitle(tab),
           url,
           icon: tab.favIconUrl || '',
           savedAt: Date.now(),
         }
       : null;
   }
-  async function save(
-    tabsToSave: BrowserTab[],
-    group = destination.value,
-    before?: string,
-  ) {
-    const entries = tabsToSave.map(snapshot).filter((t): t is SavedTab => !!t);
-    if (!entries.length)
-      throw new Error('没有可保存的网页，浏览器内部页面暂不支持收藏。');
-    if (!group) {
-      destination.value = await createCollection(
-        '稍后处理',
-        entries.filter(
-          (t, i, all) => all.findIndex((a) => a.url === t.url) === i,
-        ),
-        activeSpace.value,
-      );
-      notice.value = '已保存到「稍后处理」';
-    } else {
-      const count = await addTabs(group, entries, before);
-      notice.value = count ? `已保存 ${count} 个标签页` : '这些网页已在集合中';
+  async function saveAndCloseTab(tab: BrowserTab, space: string, group?: string, before?: string) {
+    const entry = snapshot(tab);
+    if (!entry) throw new Error('没有可保存的网页，浏览器内部页面暂不支持收藏。');
+    const collectionId = await database.transaction('rw', database.tabCollections, database.workspaceSpaces, async () => {
+      const target = group ?? (await database.tabCollections.filter(c =>
+        (c.spaceId || 'default') === space && c.name === '稍后处理',
+      ).first())?.id;
+      if (!target) return createCollection('稍后处理', [entry], space);
+      await addTabs(target, [entry], before);
+      return target;
+    });
+    destination.value = collectionId;
+    showNotice('标签页已保存到集合');
+    if (tab.id !== undefined && tab.id !== owner?.id) {
+      try {
+        const current = (await browser.tabs.query({ windowId: tab.windowId })).find(t => t.id === tab.id);
+        if (current && typeof current.id === 'number' && webUrl(current.pendingUrl || current.url || '') === entry.url) {
+          await browser.tabs.remove(current.id);
+          showNotice('已保存并关闭标签页');
+        }
+      } catch {
+        throw new Error('标签页已保存，关闭原标签页时遇到错误');
+      }
     }
+    return collectionId;
   }
-  async function toggleBrowserGroup(id: number) {
+  async function toggleBrowserGroup(id: number, key: string) {
+    if (id === -1) {
+      if (collapsedUngrouped.value.has(key)) collapsedUngrouped.value.delete(key);
+      else collapsedUngrouped.value.add(key);
+      return;
+    }
     const group = await browser.tabGroups.get(id);
     await browser.tabGroups.update(id, { collapsed: !group.collapsed });
     await refresh();
   }
-  async function saveBrowserGroup(id: number) {
-    const targetSpace = isMarkedSpace.value ? 'default' : activeSpace.value;
-    const group = browserGroups.value.find((group) => group.id === id);
-    const windowId =
-      group?.windowId ?? tabs.value.find((tab) => tab.groupId === id)?.windowId;
-    if (windowId === undefined) throw Error('群组已关闭，请重新选择');
+  async function saveBrowserGroup(id: number, section: BrowserTab[], targetSpace = isMarkedSpace.value ? 'default' : activeSpace.value) {
+    const windowId = section[0]?.windowId;
+    if (windowId === undefined) return;
+    const sectionIds = new Set(section.map(tab => tab.id));
     const members = (await browser.tabs.query({ windowId })).filter(
-      (tab) => tab.groupId === id,
+      tab => (tab.groupId ?? -1) === id && (id !== -1 || sectionIds.has(tab.id)),
     );
-    const entries = members
-      .sort((a, b) => a.index - b.index)
-      .map(snapshot)
-      .filter((tab): tab is SavedTab => !!tab);
+    const group = browserGroups.value.find(group => group.id === id);
+    const entries: SavedTab[] = [];
+    const savedUrls = new Map<number, string>();
+    for (const tab of members.sort((a, b) => a.index - b.index)) {
+      const entry = snapshot(tab);
+      if (!entry) continue;
+      entries.push(entry);
+      if (tab.id !== undefined && tab.id !== owner?.id) savedUrls.set(tab.id, entry.url);
+    }
     if (!entries.length) throw new Error('此群组没有可保存的网页');
-    const name = group?.title?.trim() || '未命名群组';
+    const name = id === -1 ? '未分组' : group?.title?.trim() || '未命名群组';
     const collectionId = await createCollection(name, entries, targetSpace);
     activeSpace.value = targetSpace;
     query.value = '';
-    await syncAfterDrop();
-    destination.value = collectionId;
-    notice.value = `已保存为集合「${name}」，共 ${entries.length} 个标签页`;
+    let closed = 0;
+    try {
+      const current = await browser.tabs.query({ windowId });
+      const ids: number[] = [];
+      for (const tab of current) {
+        if (tab.id === undefined || (tab.groupId ?? -1) !== id) continue;
+        const savedUrl = savedUrls.get(tab.id);
+        if (savedUrl && savedUrl === webUrl(tab.pendingUrl || tab.url || '')) ids.push(tab.id);
+      }
+      if (ids.length) await browser.tabs.remove(ids);
+      closed = ids.length;
+    } catch {
+      throw new Error(`集合「${name}」已保存，关闭原标签页时遇到错误`);
+    } finally {
+      await syncAfterDrop();
+      destination.value = collectionId;
+    }
+    showNotice(`已保存为集合「${name}」，共 ${entries.length} 个标签页，已关闭 ${closed} 个`);
+    return collectionId;
   }
   async function activate(tab: BrowserTab) {
     if (tab.id === undefined) return;
@@ -280,8 +351,8 @@ export function useWorkspace() {
         createProperties: { windowId: owner?.windowId },
       });
       await browser.tabGroups.update(groupId, { title: groupName, color });
-      notice.value = `已在「${groupName}」标签组中打开 ${ids.length} 个标签页`;
-    } else notice.value = `已在后台打开 ${ids.length} 个标签页`;
+      showNotice(`已在「${groupName}」标签组中打开 ${ids.length} 个标签页`);
+    } else showNotice(`已在后台打开 ${ids.length} 个标签页`);
   }
   async function openCollection(id: string) {
     const collection = await database.tabCollections.get(id);
@@ -295,7 +366,7 @@ export function useWorkspace() {
   async function removeGroup(id: string) {
     const previous = await removeCollection(id);
     undo.value = () => restoreCollection(previous);
-    notice.value = `已删除「${previous.name}」`;
+    showNotice(`已删除「${previous.name}」`);
   }
   async function removeTab(group: string, id: string) {
     let previous: SavedTab | undefined;
@@ -320,18 +391,18 @@ export function useWorkspace() {
         await database.tabCollections.put(c);
       });
     };
-    notice.value = '已移除收藏';
+    showNotice('已移除收藏');
   }
   async function undoDelete() {
     await undo.value?.();
     undo.value = null;
-    notice.value = '已恢复';
+    showNotice('已恢复');
   }
   onMounted(async () => {
     try {
       await ensureDefaultSpace();
     } catch {
-      error.value = '空间初始化失败，请重新打开工作区';
+      showNotice('空间初始化失败，请重新打开工作区', 'alert');
     }
     if (disposed) return;
     subscription = liveQuery(async () => ({
@@ -350,14 +421,14 @@ export function useWorkspace() {
         loading.value = false;
       },
       error() {
-        error.value = '集合读取失败，请检查本地存储后重新打开工作区';
+        showNotice('集合读取失败，请检查本地存储后重新打开工作区', 'alert');
         loading.value = false;
       },
     });
     try {
       owner = await browser.tabs.getCurrent();
     } catch {
-      error.value = '无法确定当前窗口';
+      showNotice('无法确定当前窗口', 'alert');
     }
     if (disposed) return;
     browser.tabs.onCreated.addListener(schedule);
@@ -377,6 +448,7 @@ export function useWorkspace() {
   });
   onUnmounted(() => {
     disposed = true;
+    clearTimeout(noticeTimer);
     clearTimeout(timer);
     subscription?.unsubscribe();
     browser.tabGroups.onMoved.removeListener(schedule);
@@ -414,11 +486,13 @@ export function useWorkspace() {
     selectedWindow,
     destination,
     notice,
+    showNotice,
+    dismissNotice,
     error,
     busy,
     undo,
     run,
-    save,
+    saveAndCloseTab,
     snapshot,
     activate,
     toggleBrowserGroup,

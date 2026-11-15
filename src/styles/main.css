@@ -18,7 +18,7 @@ body {
   background: transparent;
 }
 /* The offline light fallback is pure white. Use a dark foreground until an
-   actual wallpaper/preview or the workspace's dark focus layer is present. */
+   actual wallpaper/preview or the workspace's own foreground is present. */
 html[data-fallback-theme='light']:not([data-wallpaper-preview='ready']):not(
     [data-desktop-wallpaper='ready']
   ):not(.workspace-active) {
@@ -499,4 +499,11 @@ html:has(
   )
   :is(*, #drag-cursor-priority) {
   cursor: grabbing !important;
+}
+
+html[data-fallback-theme='dark'] {
+  .dialog-close img { filter: invert(1); }
+  .desktop-dock { background: rgb(30 30 34 / 52%); }
+  .desktop-library-backdrop { background: rgb(0 0 0 / 24%); }
+  .workspace-board .side-menu-choice[aria-pressed='true'] .side-menu-letter { fill: #222; }
 }

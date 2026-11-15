@@ -13,7 +13,7 @@ import {
   dockInsertBeforeId,
 } from '../library/page-drag';
 import { openWebTab } from '../../shared/open-web-tab';
-import { shortcutActions } from '../shortcuts/actions';
+import { dockPages, isDockPage, shortcutActions, type DockPage } from '../shortcuts/actions';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
 import FolderIconGrid from '../library/FolderIconGrid.vue';
 import {
@@ -24,19 +24,11 @@ import { createDragLanding } from '../../shared/drag-landing';
 import ReorderTransition from '../../shared/components/base/ReorderTransition.vue';
 
 const props = defineProps<{
-  homeActive: boolean;
-  workspaceActive: boolean;
+  activePage?: DockPage;
   hidden?: boolean;
 }>();
-const emit = defineEmits<{ home: []; workspace: [] }>();
-const defaults = [
-  'duoyu-home',
-  'duoyu-workspace',
-  'duoyu-memo',
-  'duoyu-translate',
-  'duoyu-canvas',
-];
-const pinned = ['duoyu-home', 'duoyu-workspace'];
+const emit = defineEmits<{ navigate: [page: DockPage] }>();
+const defaults = [...dockPages, 'duoyu-translate'];
 const dragPreview = createDragLanding();
 const storageKey = 'duoyu-dock-order';
 function readOrder(): string[] {
@@ -80,7 +72,7 @@ onUnmounted(() => {
 const items = computed(() =>
   [
     ...new Set([
-      ...pinned,
+      ...dockPages,
       ...order.value,
       ...links.value.filter((item) => !item.parent).map((item) => item.id),
     ]),
@@ -91,7 +83,7 @@ const items = computed(() =>
           id,
           name: '首页',
           icon:
-            !props.homeActive && !props.workspaceActive
+            !props.activePage
               ? '/images/back.png'
               : '/images/home.svg',
           url: undefined as string | undefined,
@@ -115,12 +107,12 @@ const dockEntries = computed(() => {
       (item) => item.id === dockInsertBeforeId.value,
     );
     entries.splice(
-      index < 0 ? entries.length : Math.max(pinned.length, index),
+      index < 0 ? entries.length : Math.max(dockPages.length, index),
       0,
       { id: '__dock-incoming', name: '', icon: '', url: undefined },
     );
   }
-  entries.splice(pinned.length, 0, {
+  entries.splice(dockPages.length, 0, {
     id: '__dock-divider',
     name: '',
     icon: '',
@@ -169,16 +161,10 @@ const dragged = ref('');
 let original: string[] = [];
 let slots: { id: string; center: number }[] = [];
 let suppressClick = false;
-function isActive(id: string) {
-  return id === 'duoyu-home'
-    ? props.homeActive
-    : id === 'duoyu-workspace' && props.workspaceActive;
-}
 function activate(item: (typeof items.value)[number]) {
   if (suppressClick || dragged.value) return;
   dockError.value = '';
-  if (item.id === 'duoyu-home') emit('home');
-  else if (item.id === 'duoyu-workspace') emit('workspace');
+  if (isDockPage(item.id)) emit('navigate', item.id);
   else if (
     links.value.some((link) => link.id === item.id && link.kind === 'folder')
   ) {
@@ -188,7 +174,7 @@ function activate(item: (typeof items.value)[number]) {
 }
 let stopGesture: (() => void) | undefined;
 function press(event: MouseEvent, id: string) {
-  if (guestMode || event.button !== 0 || savingOrder.value || pinned.includes(id)) return;
+  if (guestMode || event.button !== 0 || savingOrder.value || isDockPage(id)) return;
   const source = event.currentTarget as HTMLElement;
   const dock = source.closest('.desktop-dock')!;
   stopGesture?.();
@@ -228,7 +214,7 @@ function press(event: MouseEvent, id: string) {
   window.addEventListener('keydown', key);
 }
 function start(event: MouseEvent, id: string, source: HTMLElement) {
-  if (savingOrder.value || pinned.includes(id)) {
+  if (savingOrder.value || isDockPage(id)) {
     event.preventDefault();
     return;
   }
@@ -258,7 +244,7 @@ function over(event: MouseEvent) {
     (slot) => slot.id !== dragged.value && event.clientX > slot.center,
   ).length;
   const next = original.filter((id) => id !== dragged.value);
-  next.splice(Math.max(pinned.length, index), 0, dragged.value);
+  next.splice(Math.max(dockPages.length, index), 0, dragged.value);
   if (next.some((id, i) => id !== order.value[i])) order.value = next;
 }
 function finish() {
@@ -338,12 +324,12 @@ async function drop(event: MouseEvent) {
             :data-dock-id="item.id"
             :draggable="false"
             :data-drag-handle="
-              (!pinned.includes(item.id) && !savingOrder) || undefined
+              (!isDockPage(item.id) && !savingOrder) || undefined
             "
             :aria-label="item.name"
             :title="item.name"
-            :aria-current="isActive(item.id) ? 'page' : undefined"
-            v-account-drag="!pinned.includes(item.id)" @mousedown.left="press($event, item.id)"
+            :aria-current="item.id === activePage ? 'page' : undefined"
+            v-account-drag="!isDockPage(item.id)" @mousedown.left="press($event, item.id)"
             @dragstart.prevent
             @click="activate(item)"
           >
@@ -374,7 +360,7 @@ async function drop(event: MouseEvent) {
                 alt=""
                 draggable="false"
             /></span>
-            <span class="dock-dot" :class="{ active: isActive(item.id) }" />
+            <span class="dock-dot" :class="{ active: item.id === activePage }" />
           </button>
         </template>
       </ReorderTransition>

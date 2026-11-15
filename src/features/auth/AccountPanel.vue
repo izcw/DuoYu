@@ -186,7 +186,7 @@ function accountCenter() {
   flex-wrap: wrap;
   gap: 16px;
   padding: 22px;
-  background: #f5f5f7;
+  background: var(--theme-control);
   border-radius: 16px;
 }
 .profile-avatar {
@@ -195,7 +195,7 @@ function accountCenter() {
   border-radius: 50%;
   object-fit: cover;
   flex-shrink: 0;
-  background: #fff;
+  background: var(--theme-panel);
   border: 3px solid #fff;
   box-sizing: border-box;
 }
@@ -212,7 +212,7 @@ function accountCenter() {
 .profile-info p {
   margin: 6px 0 0;
   font-size: 12px;
-  color: #85858c;
+  color: var(--theme-muted);
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
@@ -220,17 +220,17 @@ function accountCenter() {
   padding: 11px 16px;
   border: 0;
   border-radius: 9px;
-  color: #333;
-  background: #f5f5f7;
+  color: var(--theme-text);
+  background: var(--theme-control);
   font-size: 12px;
   cursor: pointer;
   transition: background 0.15s;
 }
 .profile-card button {
-  background: #fff;
+  background: var(--theme-panel);
 }
 .account-panel button:hover {
-  background: #e9e9ed;
+  background: var(--theme-hover);
 }
 .account-panel button.primary {
   background: #111;
@@ -264,8 +264,8 @@ function accountCenter() {
   font-weight: 600;
 }
 .sync-badge {
-  background: #f5f5f7;
-  color: #64646c;
+  background: var(--theme-control);
+  color: var(--theme-muted);
   border-radius: 6px;
   padding: 5px 9px;
   font-size: 11px;
@@ -274,7 +274,7 @@ function accountCenter() {
   margin: 6px 0;
   font-size: 12px;
   line-height: 1.7;
-  color: #85858c;
+  color: var(--theme-muted);
   overflow-wrap: anywhere;
 }
 .account-actions {

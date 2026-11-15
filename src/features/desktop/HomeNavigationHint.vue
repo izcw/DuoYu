@@ -1,30 +1,10 @@
 <script setup lang="ts">
 import NavigationKeys from './NavigationKeys.vue';
-import { onMounted, onUnmounted, ref } from 'vue';
+import { ref } from 'vue';
+import { useDockClearance } from './useDockClearance';
 
 const hint = ref<HTMLElement>();
-const aboveDock = ref(0);
-let observer: ResizeObserver | undefined;
-function fitBesideDock() {
-  const dock = document.querySelector('.desktop-dock')?.getBoundingClientRect();
-  const box = hint.value?.getBoundingClientRect();
-  aboveDock.value =
-    dock && box && box.left < dock.right + 10
-      ? Math.ceil(innerHeight - dock.top + 8)
-      : 0;
-}
-onMounted(() => {
-  observer = new ResizeObserver(fitBesideDock);
-  const dock = document.querySelector('.desktop-dock');
-  if (dock) observer.observe(dock);
-  if (hint.value) observer.observe(hint.value);
-  window.addEventListener('resize', fitBesideDock);
-  fitBesideDock();
-});
-onUnmounted(() => {
-  observer?.disconnect();
-  window.removeEventListener('resize', fitBesideDock);
-});
+const aboveDock = useDockClearance(hint, 'right');
 </script>
 <template>
   <aside
@@ -49,9 +29,9 @@ onUnmounted(() => {
       <NavigationKeys axis="vertical" /><span class="arrows">↑ ↓</span
       ><span>翻页</span>
     </div>
-    <div aria-label="A 或向左、Esc 返回首页；D 或向右进入标签工作区">
+    <div aria-label="A/D 或左右方向键切换页面，Esc 返回首页">
       <NavigationKeys axis="horizontal" /><span class="arrows">← →</span
-      ><span>切换工作区</span>
+      ><span>切换页面</span>
     </div>
   </aside>
 </template>

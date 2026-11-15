@@ -1,3 +1,4 @@
+import { selectGlassMode } from './ui-helpers.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir, readFile } from 'node:fs/promises';
@@ -76,7 +77,7 @@ try {
     .first()
     .click({ position: { x: 280, y: 140 } });
   await expect(workspace).toHaveCount(0);
-  await page.getByRole('button', { name: '柔和', exact: true }).click();
+  await selectGlassMode(page, '柔和');
   await expect(workspace).toHaveCount(0);
   await page.mouse.move(40, 450);
   await page.mouse.down();
@@ -142,9 +143,7 @@ try {
   await verifyMotion();
   await expect(page.locator('.newtab')).toBeVisible();
   await expect(input).toHaveValue('保留搜索内容');
-  await expect(
-    page.getByRole('button', { name: '柔和', exact: true }),
-  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('html')).toHaveAttribute('data-glass-mode', 'soft');
   await page.mouse.click(1000, 450);
   await expect(workspace).toBeVisible();
   await page.mouse.click(8, 450);

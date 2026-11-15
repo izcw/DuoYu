@@ -1,4 +1,11 @@
 :root {
+  --theme-text: #222;
+  --theme-muted: #65656d;
+  --theme-panel: #fff;
+  --theme-control: #f5f5f7;
+  --theme-hover: #ededf1;
+  --theme-icon-filter: brightness(0);
+  --workspace-scrim: rgb(255 255 255 / 14%);
   --glass-tint-start: 250 249 255;
   --glass-tint-end: 184 181 196;
   --glass-alpha-start: 0.3;
@@ -40,4 +47,18 @@
 :root[data-glass-mode='soft'],
 .glass-material-scope[data-glass-mode='soft'] {
   --glass-blur: var(--glass-blur-soft);
+}
+
+:root[data-fallback-theme='dark'] {
+  --theme-text: #f2f2f4;
+  --theme-muted: #b4b4be;
+  --theme-panel: #202023;
+  --theme-control: #323236;
+  --theme-hover: #414147;
+  --theme-icon-filter: brightness(0) invert(1);
+  --workspace-scrim: rgb(0 0 0 / 44%);
+  --glass-tint-start: 55 54 62;
+  --glass-tint-end: 26 25 32;
+  --glass-alpha-start: 0.56;
+  --glass-alpha-end: 0.42;
 }

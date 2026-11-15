@@ -11,10 +11,7 @@ import { loadGuestTemplate } from '../../features/sync/guest-template';
 import App from './App.vue';
 import '../../styles/main.css';
 import { printConsoleBanner } from '../../shared/console-banner';
-import {
-  initialGlassModeKey,
-  loadGlassMode,
-} from '../../features/desktop/glass/preferences';
+import { loadGlassMode } from '../../features/desktop/glass/preferences';
 
 async function bootstrap() {
   if (pageAccountKey) {
@@ -41,7 +38,7 @@ async function bootstrap() {
   }
   const mode = await loadGlassMode();
   document.documentElement.dataset.glassMode = mode;
-  createApp(App).provide(initialGlassModeKey, mode).mount('#app');
+  createApp(App).mount('#app');
   printConsoleBanner();
   // Rendering the account-scoped local database must never wait for network
   // authentication, queued uploads, or remote wallpaper downloads. Account

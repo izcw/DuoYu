@@ -454,7 +454,7 @@ try {
     await page.getByRole('button', { name: '添加桌面', exact: true }).click();
   }
   await openGridMenu(page, page.locator('.library-cell-grid').first(), { waitForItem: false });
-  await page.getByRole('menuitem', { name: '换壁纸', exact: true }).click();
+  await page.getByRole('menuitem', { name: '壁纸商店', exact: true }).click();
   await page.getByRole('button', { name: '必应', exact: true }).click();
   const bingCard = page.getByRole('button', { name: '应用壁纸 重装验收', exact: true });
   await bingCard.click();

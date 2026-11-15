@@ -6,9 +6,9 @@ import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 import AddShortcutDialog from './components/AddShortcutDialog.vue';
 import RadialWheel from '../../shared/components/composite/RadialWheel.vue';
 import { database, type ShortcutItem } from '../../shared/storage/database';
-import { shortcutActions as actions } from './actions';
+import { shortcutActions as actions, isDockPage, type DockPage } from './actions';
 import { isWallpaperBlank as blank } from '../wallpaper/blank-area';
-const emit = defineEmits<{ workspace: [] }>();
+const emit = defineEmits<{ navigate: [page: DockPage] }>();
 
 const defaults: ShortcutItem[] = [
   {
@@ -96,9 +96,9 @@ function select(id: string) {
   const item = items.value.find((entry) => entry.id === id);
   if (!item) return;
   close();
-  if (id === 'duoyu-workspace') {
+  if (isDockPage(id)) {
     setTimeout(() => {
-      emit('workspace');
+      emit('navigate', id);
     }, 220);
   } else if (id === 'add') {
     if (!requireAccount()) return;

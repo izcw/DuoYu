@@ -32,7 +32,7 @@ try {
   const grid = page.locator('.library-cell-grid').first();
   await grid.waitFor();
   await openGridMenu(page, grid);
-  await page.getByRole('menuitem', { name: '换壁纸', exact: true }).click();
+  await page.getByRole('menuitem', { name: '壁纸商店', exact: true }).click();
   await page.getByRole('button', { name: '我的壁纸', exact: true }).click();
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: /上传壁纸/ }).click();

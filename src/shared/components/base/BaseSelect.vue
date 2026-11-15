@@ -144,7 +144,7 @@ onUnmounted(() => {
   min-width: 132px;
   flex-shrink: 0;
   font-size: 13px;
-  color: #333;
+  color: var(--theme-text);
 }
 .select-trigger {
   display: flex;
@@ -155,7 +155,7 @@ onUnmounted(() => {
   padding: 12px 14px;
   border: 0;
   border-radius: 10px;
-  background: #f5f5f7;
+  background: var(--theme-control);
   color: inherit;
   font: inherit;
   cursor: pointer;
@@ -164,7 +164,7 @@ onUnmounted(() => {
 .select-trigger:hover,
 .select-trigger.expanded,
 .select-trigger:focus-visible {
-  background: #eaeaec;
+  background: var(--theme-hover);
 }
 .select-trigger:focus,
 .select-trigger:focus-visible {
@@ -201,7 +201,7 @@ svg {
   box-sizing: border-box;
   border: 1px solid #ededf0;
   border-radius: 12px;
-  background: white;
+  background: var(--theme-panel);
   box-shadow: 0 8px 28px #00000014;
   z-index: 30;
 }
@@ -216,7 +216,7 @@ svg {
   white-space: nowrap;
 }
 .select-options > div.active {
-  background: #f5f5f7;
+  background: var(--theme-control);
 }
 .select-options > div[aria-selected='true'] {
   font-weight: 600;

@@ -93,9 +93,11 @@ try {
   await button('备份与恢复').click();
   await button('导入备份').click();
   await prompt('导入备份');
-  await page.keyboard.press('Escape');
-  await button('柔和').click();
+  await button('常规设置').click();
+  await page.getByRole('combobox', { name: '玻璃效果' }).click();
+  await page.getByRole('option', { name: '柔和', exact: true }).click();
   await prompt('修改玻璃效果');
+  await page.keyboard.press('Escape');
   await page.locator('.dock-entry[data-dock-id="duoyu-workspace"]').click();
   await button('新建集合').click();
   await prompt('新建集合');

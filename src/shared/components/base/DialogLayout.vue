@@ -37,7 +37,7 @@ const active = defineModel<T>({ required: true });
   min-height: 0;
   flex: 1;
   overflow: hidden;
-  color: #222;
+  color: var(--theme-text);
 }
 .dialog-menu {
   min-height: 0;
@@ -46,7 +46,7 @@ const active = defineModel<T>({ required: true });
   flex-direction: column;
   gap: 6px;
   padding: 10px;
-  background: #f8f8fa;
+  background: var(--theme-control);
   border-radius: 16px;
 }
 .dialog-menu button {
@@ -59,7 +59,7 @@ const active = defineModel<T>({ required: true });
   border-radius: 10px;
   text-align: left;
   font-size: 13px;
-  color: #777780;
+  color: var(--theme-muted);
   background: transparent;
   cursor: pointer;
   transition:
@@ -67,11 +67,11 @@ const active = defineModel<T>({ required: true });
     color 0.15s;
 }
 .dialog-menu button:hover {
-  background: #ededf1;
+  background: var(--theme-hover);
 }
 .dialog-menu button[aria-pressed='true'] {
-  color: #222;
-  background: #fff;
+  color: var(--theme-text);
+  background: var(--theme-panel);
   font-weight: 600;
   box-shadow: 0 2px 8px #00000005;
 }

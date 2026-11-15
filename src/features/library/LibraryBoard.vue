@@ -7,7 +7,6 @@ import MenuAllApplication from '@icon-park/vue-next/es/icons/AllApplication';
 import MenuApplicationMenu from '@icon-park/vue-next/es/icons/ApplicationMenu';
 import MenuPicture from '@icon-park/vue-next/es/icons/Picture';
 import MenuSearch from '@icon-park/vue-next/es/icons/Search';
-import MenuDownload from '@icon-park/vue-next/es/icons/Download';
 import MenuSetting from '@icon-park/vue-next/es/icons/Setting';
 import { accountStorage } from '../../shared/storage/account';
 import { truncateLinkTitle } from './link-title';
@@ -27,7 +26,6 @@ import './library.css';
 import { isWallpaperBlank } from '../wallpaper/blank-area';
 import EditorDialog from '../../shared/components/base/EditorDialog.vue';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
-import { backupCloudNow } from '../sync/client';
 import { openSettings } from '../desktop/settings-state';
 const DesktopTools = defineAsyncComponent(() => import('../desktop/DesktopTools.vue'));
 import LibraryGrid from './LibraryGrid.vue';
@@ -136,17 +134,11 @@ function contextAction(
     | 'layout'
     | 'wallpaper'
     | 'search'
-    | 'backup'
     | 'settings',
 ) {
   context.value = undefined;
-  if ((action === 'layout' || action === 'backup') && !requireAccount()) return;
+  if (action === 'layout' && !requireAccount()) return;
   if (action === 'layout') automatic.value = !automatic.value;
-  else if (action === 'backup')
-    void run(async () => {
-      await backupCloudNow();
-      openSettings('account', props.pageId);
-    });
   else if (action === 'settings') openSettings('general', props.pageId);
   else if (action === 'link' || action === 'folder')
     void edit(undefined, action);
@@ -243,7 +235,7 @@ async function edit(item?: LibraryItem, kind: 'link' | 'folder' = 'link') {
   if (!item && kind === 'folder') {
     await run(async () => {
       await saveLibraryItem({
-        ...newPosition(3, 1),
+        ...newPosition(3, 2),
         kind: 'folder',
         name: '新文件夹',
         url: '',
@@ -721,15 +713,10 @@ onUnmounted(() => subscription?.unsubscribe());
         </button>
         <button
           v-for="action in [
-            { id: 'widgets', name: '组件商店', icon: MenuAllApplication },
-            {
-              id: 'layout',
-              icon: MenuApplicationMenu,
-              name: automatic ? '切换为自由布局' : '切换为自动布局',
-            },
-            { id: 'wallpaper', name: '换壁纸', icon: MenuPicture },
             { id: 'search', name: '图标搜索', icon: MenuSearch },
-            { id: 'backup', name: '立即备份', icon: MenuDownload },
+            { id: 'widgets', name: '组件商店', icon: MenuAllApplication },
+            { id: 'wallpaper', name: '壁纸商店', icon: MenuPicture },
+            { id: 'layout', name: automatic ? '自由布局' : '自动布局', icon: MenuApplicationMenu },
             { id: 'settings', name: '设置', icon: MenuSetting },
           ] as const"
           :key="action.id"

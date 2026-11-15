@@ -171,8 +171,8 @@ try {
   assert.match(homeAppearance.filter, /blur/);
 
   const search = await page.locator('.search-form').boundingBox();
-  const toggle = await page.locator('.desktop-top-actions').boundingBox();
-  assert.ok(toggle.y < 25 && 1440 - toggle.x - toggle.width < 30);
+  const actions = await page.locator('.desktop-corner-actions').boundingBox();
+  assert.ok(actions.x < 25 && page.viewportSize().height - actions.y - actions.height < 25);
   await page.screenshot({ path: 'work/desktop-home-layout.png' });
   const resizeCard = page.locator('[data-library-id="home-widget-2"]');
   await resizeCard.hover();

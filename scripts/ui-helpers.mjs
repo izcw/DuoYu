@@ -65,3 +65,13 @@ export async function openGridMenu(page, grid, { waitForItem = true } = {}) {
   await expect(page.getByRole('menu', { name: '收藏页菜单' })).toBeVisible();
   return point;
 }
+
+export async function selectGlassMode(page, label) {
+  await page.locator('.account-entry').click();
+  await page.getByRole('button', { name: '常规设置', exact: true }).click();
+  const picker = page.getByRole('combobox', { name: '玻璃效果', exact: true });
+  await picker.click();
+  await page.getByRole('option', { name: label, exact: true }).click();
+  await expect(picker).toContainText(label);
+  await page.keyboard.press('Escape');
+}
