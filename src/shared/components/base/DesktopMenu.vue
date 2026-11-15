@@ -13,6 +13,7 @@ const props = defineProps<{
   label: string;
   addLabel: string;
   pinned: Entry;
+  bottomItem?: Entry;
   items: Entry[];
   active: string;
   visible?: boolean;
@@ -57,6 +58,9 @@ function blur(event: FocusEvent) {
 }
 const dragPreview = createDragLanding();
 onUnmounted(dragPreview.dispose);
+function scrollTop() {
+  return (panel.value?.scrollTop ?? 0) + (panel.value?.querySelector('[data-sort-scroll]')?.scrollTop ?? 0);
+}
 function start(event: DragEvent, id: string) {
   if (props.disabled || guestMode) {
     event.preventDefault();
@@ -64,7 +68,7 @@ function start(event: DragEvent, id: string) {
   }
   dragPreview.capture(event, event.currentTarget as HTMLElement, '');
   dragged.value = id;
-  startScroll = panel.value?.scrollTop || 0;
+  startScroll = scrollTop();
   slots = Array.from(
     panel.value?.querySelectorAll<HTMLElement>('[data-menu-row]') || [],
     (row) => {
@@ -84,7 +88,7 @@ function over(event: DragEvent) {
   if (!dragged.value) return;
   event.preventDefault();
   const ids = slots.filter((slot) => slot.id !== dragged.value);
-  const y = event.clientY + (panel.value?.scrollTop || 0) - startScroll;
+  const y = event.clientY + scrollTop() - startScroll;
   const next = ids.map((slot) => slot.id);
   next.splice(ids.filter((slot) => y > slot.center).length, 0, dragged.value);
   preview.value = next;
@@ -149,7 +153,7 @@ function drop(event: DragEvent) {
           :active="active === pinned.id || hot === pinned.id"
         /><small>{{ pinned.name }}</small>
       </button>
-      <ReorderTransition class="library-page-list">
+      <ReorderTransition class="library-page-list" :data-sort-scroll="bottomItem ? '' : undefined">
         <div
           v-for="item in entries"
           :key="item.id"
@@ -177,6 +181,24 @@ function drop(event: DragEvent) {
           </button>
         </div>
       </ReorderTransition>
+      <button
+        v-if="bottomItem"
+        class="side-menu-choice"
+        :class="
+          library ? 'library-page-choice library-home' : 'workspace-space'
+        "
+        :data-library-page-id="library ? bottomItem.id : undefined"
+        :aria-pressed="active === bottomItem.id"
+        :aria-current="active === bottomItem.id ? 'page' : undefined"
+        @mouseenter="hot = bottomItem.id"
+        @mouseleave="hot = ''"
+        @click="emit('select', bottomItem.id)"
+      >
+        <PageIcon
+          :name="bottomItem.icon"
+          :active="active === bottomItem.id || hot === bottomItem.id"
+        /><small>{{ bottomItem.name }}</small>
+      </button>
       <button
         class="side-menu-add"
         :class="library ? 'library-page-add' : 'workspace-space-add'"
@@ -237,6 +259,12 @@ function drop(event: DragEvent) {
 }
 .desktop-menu > nav > * {
   flex-shrink: 0;
+}
+.desktop-menu > nav > .library-page-list[data-sort-scroll] {
+  min-height: 0;
+  flex-shrink: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 .library-page-list:empty {
   display: none;

@@ -3,8 +3,8 @@ import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import WorkspaceBoard from './WorkspaceBoard.vue';
 
 const active = defineModel<boolean>({ default: false });
-const props = withDefaults(defineProps<{ label?: string; blank?: boolean }>(), { label: '工作区' });
-const emit = defineEmits<{ home: []; step: [direction: number] }>();
+const props = withDefaults(defineProps<{ label?: string; toolPage?: boolean }>(), { label: '工作区' });
+const emit = defineEmits<{ home: []; stepMenu: [direction: number]; step: [direction: number] }>();
 const workspace = ref<HTMLElement>();
 const board = ref<InstanceType<typeof WorkspaceBoard>>();
 let previous: HTMLElement | null = null;
@@ -33,8 +33,11 @@ function key(event: KeyboardEvent) {
   const keyName = event.key.toLowerCase();
   if (navigation && ['w', 's', 'arrowup', 'arrowdown'].includes(keyName)) {
     event.preventDefault();
-    if (!event.repeat)
-      board.value?.stepSpace(keyName === 'w' || keyName === 'arrowup' ? -1 : 1);
+    if (!event.repeat) {
+      const direction = keyName === 'w' || keyName === 'arrowup' ? -1 : 1;
+      if (props.toolPage) emit('stepMenu', direction);
+      else board.value?.stepSpace(direction);
+    }
     return;
   }
   if (navigation && ['a', 'arrowleft', 'd', 'arrowright'].includes(keyName)) {
@@ -124,11 +127,14 @@ onUnmounted(() => {
         aria-modal="true"
         :aria-label="label"
         tabindex="-1"
-        @click.self.stop="!blank && (active = false)"
+        @click.self.stop="!toolPage && (active = false)"
         @contextmenu.prevent.stop
         @keydown="key"
       >
-        <slot v-if="blank" name="toolbar-actions" />
+        <template v-if="toolPage">
+          <slot name="page" />
+          <slot name="toolbar-actions" />
+        </template>
         <slot v-else :close="() => (active = false)">
           <WorkspaceBoard ref="board" @close="active = false">
             <template #toolbar-actions><slot name="toolbar-actions" /></template>

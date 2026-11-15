@@ -1,0 +1,421 @@
+.memo-board {
+  position: absolute;
+  inset: 16px 22px 96px 16px;
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: clamp(12px, 2vw, 28px);
+  color: var(--theme-text);
+}
+.memo-board .side-menu {
+  color: inherit;
+}
+.memo-main {
+  grid-column: 2;
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+}
+.memo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+}
+.memo-toolbar h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+.memo-add {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 21px;
+}
+.memo-viewport {
+  overflow: auto;
+  overscroll-behavior: contain;
+  position: relative;
+  isolation: isolate;
+  border-radius: 20px;
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--theme-text) 15%, transparent) 1px,
+    transparent 1.2px
+  );
+  background-size: 18px 18px;
+  background-position: 8px 8px;
+  scrollbar-width: thin;
+}
+.memo-surface {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+.memo-board [data-color='sand'] {
+  --paper: #ffedac;
+}
+.memo-board [data-color='rose'] {
+  --paper: #ffd5cc;
+}
+.memo-board [data-color='sage'] {
+  --paper: #d5e8c7;
+}
+.memo-board [data-color='sky'] {
+  --paper: #cfe5f4;
+}
+.memo-board [data-color='lilac'] {
+  --paper: #e4daf7;
+}
+:root[data-fallback-theme='dark'] .memo-board [data-color='sand'] {
+  --paper: #61522e;
+}
+:root[data-fallback-theme='dark'] .memo-board [data-color='rose'] {
+  --paper: #684342;
+}
+:root[data-fallback-theme='dark'] .memo-board [data-color='sage'] {
+  --paper: #3e5543;
+}
+:root[data-fallback-theme='dark'] .memo-board [data-color='sky'] {
+  --paper: #37536a;
+}
+:root[data-fallback-theme='dark'] .memo-board [data-color='lilac'] {
+  --paper: #554761;
+}
+.memo-card {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px 12px;
+  border-radius: 5px 5px 14px 5px;
+  color: var(--memo-ink, #332f2b);
+  background: linear-gradient(155deg, #ffffff18, transparent 55%), var(--paper);
+  box-shadow:
+    inset 0 1px #ffffff48,
+    0 2px 4px #17152119,
+    0 9px 20px -8px #1715214d;
+  text-shadow: none;
+}
+.memo-card {
+  cursor: grab;
+}
+.memo-card:active {
+  cursor: grabbing;
+}
+.memo-options,
+.memo-error button {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+.memo-options {
+  position: absolute;
+  inset: 9px 9px auto auto;
+  z-index: 1;
+  font: bold 18px/1 var(--font-sans);
+  padding: 0;
+  width: 26px;
+  height: 24px;
+  border-radius: 6px;
+  opacity: 0;
+}
+.memo-card:is(:hover, :focus-within) .memo-options {
+  opacity: 0.8;
+}
+.memo-options:hover {
+  background: #0001;
+}
+.memo-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.memo-text {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0 23px 4px 0;
+  overflow: auto;
+  font: 14px/1.55 var(--font-sans);
+  color: inherit;
+  caret-color: currentColor;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  outline: none;
+}
+.memo-text :is(ol, ul) {
+  padding-inline-start: 1.6em;
+  margin: 0;
+}
+.memo-text p {
+  margin: 0;
+}
+.memo-text mark {
+  background: color-mix(in srgb, currentColor 11%, transparent);
+  color: inherit;
+  border-radius: 5px;
+  padding: 0 3px;
+  font-weight: 600;
+}
+.memo-format-bar {
+  flex-wrap: wrap;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding-top: 4px;
+}
+.memo-body:focus-within .memo-format-bar {
+  flex-wrap: wrap;
+  display: flex;
+}
+.memo-format-bar button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  display: grid;
+  place-items: center;
+  padding: 3px;
+  font: 600 11px/16px var(--font-sans);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.memo-format-bar button:hover {
+  background: #8883;
+}
+.memo-format-bar input {
+  min-width: 0;
+  flex: 1;
+  color: inherit;
+  background: #fff2;
+}
+.memo-dates {
+  display: grid;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--theme-muted);
+  padding: 6px 10px;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+}
+.memo-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  height: 16px;
+  width: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+.memo-resize::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 2px,
+    currentColor 2px 3px
+  );
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+  opacity: 0.42;
+}
+.memo-viewport.is-archive {
+  background: none;
+}
+.is-archive .memo-surface {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(205px, 100%), 1fr));
+  gap: 16px;
+  align-content: start;
+  padding: 3px 8px 16px 3px;
+}
+.memo-card.archived {
+  position: relative;
+  height: 208px;
+  user-select: none;
+  cursor: grab;
+}
+.memo-card.archived .memo-text {
+  overflow: hidden;
+}
+.memo-card.sort-source {
+  opacity: 0;
+}
+.memo-menu {
+  position: fixed;
+  z-index: 10;
+  width: 176px;
+  padding: 5px;
+  border-radius: 12px;
+  color: var(--theme-text);
+  background: var(--theme-panel);
+  box-shadow: 0 6px 28px #10101630;
+}
+.memo-menu > button,
+.memo-dialog-actions button {
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  background: transparent;
+}
+.memo-menu > button {
+  width: 100%;
+  text-align: left;
+  font-size: 13px;
+}
+.memo-menu > button:is(:hover, :focus-visible) {
+  background: var(--theme-hover);
+}
+.memo-palette {
+  display: flex;
+  justify-content: space-around;
+  padding: 8px 2px;
+}
+.memo-palette button {
+  width: 21px;
+  height: 21px;
+  border: 1px solid #5552;
+  border-radius: 50%;
+  background: var(--paper);
+  cursor: pointer;
+}
+.memo-palette [aria-checked='true'] {
+  outline: 1.5px solid currentColor;
+  outline-offset: 2px;
+  color: var(--theme-text);
+}
+.memo-menu .memo-danger,
+.memo-dialog-actions .memo-danger {
+  color: var(--memo-danger, #aa3032);
+}
+.memo-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.memo-dialog-actions button,
+.memo-error {
+  background: var(--theme-control);
+}
+.memo-error {
+  position: absolute;
+  right: 12px;
+  bottom: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+@media (max-width: 680px) {
+  .memo-board {
+    inset: 12px 10px 100px 4px;
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 6px;
+  }
+  .memo-toolbar h2 {
+    font-size: 19px;
+  }
+}
+@media (hover: none) {
+  .memo-options {
+    opacity: 0.8;
+  }
+}
+
+:root[data-fallback-theme='dark'] {
+  --memo-ink: #fff7ee;
+  --memo-danger: #ff9c97;
+}
+:root[data-fallback-theme='light']:has(.memo-board) {
+  .desktop-switch-entry img,
+  .dock-entry[data-dock-id^='duoyu-'] .dock-tile > img {
+    filter: brightness(0);
+  }
+  .desktop-corner-actions {
+    color: var(--theme-text);
+  }
+  .dock-dot.active {
+    background: var(--theme-text);
+  }
+}
+
+.memo-viewport:not(.is-archive) {
+  overflow: clip;
+  touch-action: none;
+  outline: none;
+}
+.memo-viewport:not(.is-archive) .memo-surface {
+  transform-origin: 0 0;
+}
+.memo-viewport:not(.is-archive) {
+  cursor: crosshair;
+}
+.memo-viewport .memo-text[contenteditable='true'] {
+  cursor: text;
+}
+.memo-viewport.is-hand,
+.memo-viewport.is-hand .memo-card * {
+  cursor: grab;
+}
+.memo-viewport.is-hand:active,
+.memo-viewport.is-hand:active .memo-card * {
+  cursor: grabbing;
+}
+.memo-card.is-selected {
+  outline: 2px solid var(--memo-selection, #568bba);
+  outline-offset: 1px;
+}
+.memo-marquee {
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid #568bba;
+  background: #568bba26;
+}
+.memo-text :is(h1, h2, h3) {
+  margin: 0.15em 0;
+  line-height: 1.25;
+  font-weight: 700;
+}
+.memo-text h1 {
+  font-size: 1.55em;
+}
+.memo-text h2 {
+  font-size: 1.3em;
+}
+.memo-text h3 {
+  font-size: 1.12em;
+}
+.memo-control {
+  display: inline-grid;
+  place-items: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.memo-control:hover,
+.memo-control[aria-pressed='true'] {
+  background: var(--theme-hover);
+}
+.memo-scale,
+.memo-selection-count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.memo-toolbar {
+  flex-wrap: wrap;
+}
+.memo-main {
+  position: relative;
+}

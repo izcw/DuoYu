@@ -44,7 +44,7 @@ export async function backupDesktop() {
     }),
   );
   const assets = await Promise.all(
-    collectAssets(tables).map(async (reference) => ({
+    collectAssets({ ...tables, memos: [], memoPages: [] }).map(async (reference) => ({
       id: reference.slice(ASSET_PREFIX.length),
       data: await blobData(await getAsset(reference)),
     })),

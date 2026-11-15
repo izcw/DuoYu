@@ -124,7 +124,7 @@ function saveLayout(layout: string) {
         <div class="setting-row">
           <div>
             <strong>备份桌面</strong>
-            <p>导出网址、文件夹、组件、壁纸及设置</p>
+            <p>导出网址、文件夹、组件、便签、壁纸及设置</p>
           </div>
           <button
             class="primary"

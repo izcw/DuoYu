@@ -52,7 +52,7 @@ export function useMouseSort() {
       const hit = document.elementFromPoint(e.clientX, e.clientY);
       if (hit && owner.contains(hit)) {
         const scroll = hit.closest<HTMLElement>(
-          '.workspace-collections,.workspace-open-tabs,.side-menu',
+          '.workspace-collections,.workspace-open-tabs,[data-sort-scroll],.side-menu',
         );
         if (scroll) {
           const r = scroll.getBoundingClientRect();

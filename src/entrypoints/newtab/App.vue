@@ -14,6 +14,8 @@ import { useGlassMode } from '../../features/desktop/glass/preferences';
 import { useDockClearance } from '../../features/desktop/useDockClearance';
 import DesktopDock from '../../features/desktop/DesktopDock.vue';
 import HomeNavigationHint from '../../features/desktop/HomeNavigationHint.vue';
+const memoBoard = ref<InstanceType<typeof MemoBoard>>();
+const MemoBoard = defineAsyncComponent(() => import('../../features/memo/MemoBoard.vue'));
 const SettingsDialog = defineAsyncComponent(() => import('../../features/desktop/SettingsDialog.vue'));
 import { settingsPage, settingsOpen } from '../../features/desktop/settings-state';
 import ThemeSwitch from '../../features/desktop/ThemeSwitch.vue';
@@ -28,8 +30,8 @@ import { dockPages, shortcutActions, type DockPage } from '../../features/shortc
 useGlassMode();
 const activePage = ref<DockPage>('duoyu-home');
 const overlayOpen = computed(() => activePage.value !== 'duoyu-home');
-const blankPage = computed(() => activePage.value === 'duoyu-canvas' || activePage.value === 'duoyu-memo');
-const overlayLabel = computed(() => blankPage.value
+const toolPage = computed(() => activePage.value === 'duoyu-canvas' || activePage.value === 'duoyu-memo');
+const overlayLabel = computed(() => toolPage.value
   ? shortcutActions.find((item) => item.id === activePage.value)!.name
   : '工作区');
 const workspaceActionsHost = ref<HTMLElement | null>(null);
@@ -124,7 +126,7 @@ function stepPage(direction: number) {
 <template>
   <Teleport :to="workspaceActionsHost || 'body'">
     <div class="desktop-top-actions">
-      <span v-if="guestMode && !blankPage" class="guest-notice">{{ guestTemplateStatus || '官方模板 · 登录后可编辑' }}</span>
+      <span v-if="guestMode && !toolPage" class="guest-notice">{{ guestTemplateStatus || '官方模板 · 登录后可编辑' }}</span>
       <div
         ref="cornerActions"
         class="desktop-corner-actions"
@@ -156,11 +158,15 @@ function stepPage(direction: number) {
   <WorkspaceOverlay
     :model-value="overlayOpen"
     :label="overlayLabel"
-    :blank="blankPage"
+    :tool-page="toolPage"
     @update:model-value="activePage = 'duoyu-home'"
     @home="navigate('duoyu-home')"
     @step="stepDockPage"
+    @step-menu="memoBoard?.stepMenu($event)"
   >
+    <template #page>
+      <MemoBoard ref="memoBoard" v-if="activePage === 'duoyu-memo'" />
+    </template>
     <template #toolbar-actions>
       <div ref="workspaceActionsHost" class="workspace-actions-host"></div>
     </template>

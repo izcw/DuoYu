@@ -7,6 +7,7 @@ defineProps<{
   title: string;
   adding: boolean;
   space?: boolean;
+  nameLabel?: string;
   busy: boolean;
   error?: string;
 }>();
@@ -29,7 +30,7 @@ const emit = defineEmits<{ close: []; submit: [] }>();
         autofocus
         v-model="name"
         :maxlength="space ? 40 : 30"
-        :aria-label="space ? '空间名称' : '收藏页名称'"
+        :aria-label="nameLabel || (space ? '空间名称' : '收藏页名称')"
         :placeholder="space ? '输入空间名称' : '输入页面名称'"
         required
       />

@@ -54,6 +54,25 @@ export interface WorkspaceSpace {
   name: string;
   order: number;
 }
+export interface MemoPage { id: string; name: string; icon: string; order: number }
+export interface Memo {
+  html?: string;
+  pageId?: string;
+  id: string;
+  title: string;
+  body: string;
+  color: 'sand' | 'rose' | 'sage' | 'sky' | 'lilac';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  layer: number;
+  createdAt: number;
+  updatedAt: number;
+  archivedAt: number | null;
+  archiveOrder: number;
+}
+
 export interface LibraryPage {
   icon?: string;
   id: string;
@@ -109,6 +128,8 @@ export const database = new Dexie(
     },
     'id'
   >;
+  memoPages: EntityTable<MemoPage, 'id'>;
+  memos: EntityTable<Memo, 'id'>;
   wallpapers: EntityTable<WallpaperRecord, 'id'>;
   shortcuts: EntityTable<ShortcutRecord, 'id'>;
   widgetLayouts: EntityTable<WidgetLayoutRecord, 'id'>;
@@ -188,3 +209,7 @@ database
       .put({ id: 'default', name: '常用收藏', order: 0 });
     await tx.table('libraryItems').toCollection().modify({ pageId: 'default' });
   });
+
+database.version(10).stores({ memos: 'id, layer' });
+
+database.version(11).stores({ memoPages: 'id, order' });

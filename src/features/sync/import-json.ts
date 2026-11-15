@@ -2,6 +2,7 @@ import {
   DESKTOP_GRID_COLUMNS,
   LIBRARY_GRID_ROWS,
 } from '../library/grid-config';
+import { cleanMemoHtml } from '../memo/markup';
 import { collectionColor } from '../../shared/collection-colors';
 import {
   database,
@@ -357,6 +358,32 @@ export async function planJsonImport(
     ),
   );
   if (changes.length > 2000) throw Error('单次导入最多2000条，请拆分备份文件');
+  const importedMemoPages = array(raw.memoPages);
+  const memoPageIds = ids(importedMemoPages);
+  tables.memoPages = importedMemoPages.map((page, index) => ({
+    id: memoPageIds.get(page.id)!, name: text(page.name, 30, '便签'),
+    icon: text(page.icon, 80, 'Notes'), order: finite(page.order, index),
+  }));
+  const importedMemos = array(raw.memos);
+  const memoIds = ids(importedMemos);
+  tables.memos = importedMemos.map(note => {
+    const date = (value: unknown) =>
+      typeof value === 'number' && Number.isFinite(new Date(value).getTime());
+    if (typeof note.title !== 'string' || typeof note.body !== 'string' ||
+        !date(note.createdAt) || !date(note.updatedAt) ||
+        (note.archivedAt !== null && !date(note.archivedAt)))
+      throw Error('备份中的便签格式不正确');
+    return {
+      id: memoIds.get(note.id)!, title: note.title, body: note.body,
+      pageId: memoPageIds.get(note.pageId) || 'wall',
+      ...(typeof note.html === 'string' ? { html: cleanMemoHtml(note.html) } : {}),
+      color: ['sand', 'rose', 'sage', 'sky', 'lilac'].includes(note.color) ? note.color : 'sand',
+      x: finite(note.x), y: finite(note.y),
+      width: Math.max(180, finite(note.width, 264)), height: Math.max(140, finite(note.height, 212)),
+      layer: finite(note.layer), archiveOrder: finite(note.archiveOrder),
+      createdAt: note.createdAt, updatedAt: note.updatedAt, archivedAt: note.archivedAt,
+    };
+  });
   const digest = [
     ...new Uint8Array(
       await crypto.subtle.digest(
@@ -379,6 +406,8 @@ export async function planJsonImport(
       空间: tables.workspaceSpaces!.length,
       集合: tables.tabCollections!.length,
       标签: groups.reduce((n, g) => n + (g.tabs?.length || 0), 0),
+      ...(importedMemoPages.length ? { 便签菜单: importedMemoPages.length } : {}),
+      ...(importedMemos.length ? { 便签: importedMemos.length } : {}),
       图片: assets.length,
     },
   };
@@ -391,8 +420,15 @@ export async function commitJsonImport(plan: ImportPlan) {
       const key = 'import:' + plan.digest;
       if (await database.syncMeta.get(key)) throw Error('这个文件已经导入过了');
       for (const asset of plan.assets) await storePreparedAsset(asset);
-      for (const [table, rows] of Object.entries(plan.tables))
-        if (rows.length) await database.table(table).bulkPut(rows);
+      for (const [table, rows] of Object.entries(plan.tables)) {
+        if (!rows.length) continue;
+        if (table === 'memoPages') {
+          const last = await database.memoPages.orderBy('order').last();
+          const start = (last?.order ?? -1) + 1;
+          const pages = [...rows].sort((a, b) => a.order - b.order);
+          await database.table(table).bulkPut(pages.map((page, i) => ({ ...page, order: start + i })));
+        } else await database.table(table).bulkPut(rows);
+      }
       await database.syncMeta.put({ id: key, value: Date.now() });
       requireImportTarget(plan.account);
     });
