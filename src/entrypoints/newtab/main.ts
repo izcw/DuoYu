@@ -12,6 +12,7 @@ import App from './App.vue';
 import '../../styles/main.css';
 import { printConsoleBanner } from '../../shared/console-banner';
 import { loadGlassMode } from '../../features/desktop/glass/preferences';
+import { recoverMemoDrafts } from '../../features/memo/memo-recovery';
 
 async function bootstrap() {
   if (pageAccountKey) {
@@ -32,6 +33,7 @@ async function bootstrap() {
       location.reload();
       return;
     }
+    await recoverMemoDrafts().catch(() => {});
   } else {
     void loadGuestTemplate();
     window.addEventListener('online', loadGuestTemplate);

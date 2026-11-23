@@ -1,3 +1,4 @@
+import { prepareEditableDesktop } from './fixtures/editable-desktop.mjs';
 import { chromium, expect } from '@playwright/test';
 import { mkdtemp, mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -15,6 +16,7 @@ const c = await chromium.launchPersistentContext(
 );
 c.setDefaultTimeout(12000);
 try {
+  await prepareEditableDesktop(c);
   const p = await c.newPage();
   await p.goto('chrome://newtab');
   const icon = p.locator('[data-library-id="home-widget-1"] .preview-icons button:has(img)').first();

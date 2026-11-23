@@ -47,22 +47,38 @@ let closeTimer: ReturnType<typeof setTimeout> | undefined;
 let gesture: { id: number; x: number; y: number; holding: boolean } | undefined;
 let ignoreContext = false;
 let ready = false;
-let guestCleanup: (() => void) | undefined;
+let stopReading: (() => void) | undefined;
 let writeQueue = Promise.resolve();
-function reorder(ids: string[]) {
-  items.value = ids.map((id) => items.value.find((item) => item.id === id)!);
-  void save();
+function wheelEntries(stored?: ShortcutItem[]): ShortcutItem[] {
+  const addEntry = defaults[defaults.length - 1]!;
+  if (guestMode) {
+    const entries = stored ?? actions;
+    return entries.some(item => item.id === 'add') ? entries : [...entries, addEntry];
+  }
+  const retired = ['duoyu-library', 'bilibili', 'xiaohongshu', 'deepseek', 'mail', 'translate', 'translation', 'baidu-translate'];
+  const entries = (stored ?? defaults).filter(item =>
+    !retired.includes(item.id) && (item.id === 'duoyu-translate' || !item.url?.startsWith('https://fanyi.baidu.com/')));
+  if (!entries.some(item => item.id === 'add')) entries.push(addEntry);
+  for (const action of actions) {
+    const index = entries.findIndex(item => item.id === action.id);
+    if (index >= 0) entries[index] = action;
+    else entries.splice(entries.findIndex(item => item.id === 'add'), 0, action);
+  }
+  return entries;
 }
-function save() {
-  const snapshot = JSON.parse(JSON.stringify(items.value)) as ShortcutItem[];
-  writeQueue = writeQueue
-    .then(async () => {
-      await database.shortcuts.put({ id: 'wallpaper', items: snapshot });
-    })
-    .catch(() => {
-      notice.value = '保存失败，当前排列仅在本页生效';
-    });
+function save(edit: (current: ShortcutItem[]) => ShortcutItem[]) {
+  writeQueue = writeQueue.then(() => database.transaction('rw', database.shortcuts, async () => {
+    const row = await database.shortcuts.get('wallpaper');
+    const entries = edit(wheelEntries(row?.items));
+    await database.shortcuts.put({ id: 'wallpaper', items: entries });
+    items.value = entries;
+  })).catch(() => { notice.value = '保存失败，请重试'; });
   return writeQueue;
+}
+function reorder(ids: string[]) {
+  const order = new Map(ids.map((id, index) => [id, index]));
+  void save(entries => entries.sort((a, b) =>
+    (order.get(a.id) ?? ids.length) - (order.get(b.id) ?? ids.length)));
 }
 function open(x: number, y: number) {
   if (!ready || dialog.value) return;
@@ -208,64 +224,22 @@ function keydown(event: KeyboardEvent) {
 async function add(item: ShortcutItem) {
   if (saving.value) return;
   saving.value = true;
-  items.value.splice(
-    items.value.findIndex((entry) => entry.id === 'add'),
-    0,
-    item,
-  );
-  await save();
+  await save(entries => {
+    entries.splice(entries.findIndex(entry => entry.id === 'add'), 0, { ...item });
+    return entries;
+  });
   saving.value = false;
   dialog.value = false;
 }
 onMounted(async () => {
   try {
-    if (guestMode) {
-      const read = async () => {
-        const row = await database.shortcuts.get('wallpaper');
-        const entries = row?.items ?? actions;
-        items.value = entries.some(item => item.id === 'add') ? entries : [...entries, defaults[defaults.length - 1]!];
-      };
-      await read();
-      window.addEventListener('duoyu-sync-preferences', read);
-      guestCleanup = () => window.removeEventListener('duoyu-sync-preferences', read);
-    } else await database.transaction('rw', database.shortcuts, async () => {
-      const stored = await database.shortcuts.get('wallpaper');
-      if (
-        stored?.items.length &&
-        stored.items.some((item) => item.id === 'add')
-      )
-        items.value = stored.items;
-      items.value = items.value.filter(
-        (item) =>
-          ![
-            'duoyu-library',
-            'bilibili',
-            'xiaohongshu',
-            'deepseek',
-            'mail',
-            'translate',
-            'translation',
-            'baidu-translate',
-          ].includes(item.id) &&
-          (item.id === 'duoyu-translate' ||
-            !item.url?.startsWith('https://fanyi.baidu.com/')),
-      );
-      // Add built-in actions without resetting the user's saved wheel order.
-      for (const action of actions) {
-        const index = items.value.findIndex((item) => item.id === action.id);
-        if (index >= 0) items.value[index] = action;
-        else
-          items.value.splice(
-            items.value.findIndex((item) => item.id === 'add'),
-            0,
-            action,
-          );
-      }
-      await database.shortcuts.put({
-        id: 'wallpaper',
-        items: JSON.parse(JSON.stringify(items.value)) as ShortcutItem[],
-      });
-    });
+    const read = async () => {
+      const row = await database.shortcuts.get('wallpaper');
+      items.value = wheelEntries(row?.items);
+    };
+    window.addEventListener('duoyu-sync-preferences', read);
+    stopReading = () => window.removeEventListener('duoyu-sync-preferences', read);
+    await read();
   } catch {
     notice.value = '本地存储暂不可用';
   }
@@ -281,7 +255,7 @@ onMounted(async () => {
   window.addEventListener('resize', cancel);
 });
 onUnmounted(() => {
-  guestCleanup?.();
+  stopReading?.();
   clearTimeout(holdTimer);
   clearTimeout(closeTimer);
   document.removeEventListener('contextmenu', contextMenu);

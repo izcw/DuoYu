@@ -54,6 +54,16 @@ export function bringToFront(id: string) {
   });
 }
 
+export async function readMemoView(page: string) {
+  if (page === 'archive')
+    return (await table.orderBy('archivedAt').toArray()).sort(archiveSort);
+  return table
+    .where('pageId')
+    .equals(page)
+    .filter((note) => note.archivedAt === null)
+    .toArray();
+}
+
 export function archiveMemos(ids: string[], archive: boolean) {
   return database.transaction('rw', table, async () => {
     const now = Date.now();
@@ -62,10 +72,10 @@ export function archiveMemos(ids: string[], archive: boolean) {
     );
     if (!selected.length) return;
     if (archive) {
-      const first = await table
-        .filter((note) => note.archivedAt !== null)
-        .sortBy('archiveOrder');
-      const start = (first[0]?.archiveOrder ?? 0) - selected.length;
+      const archived = await table.orderBy('archivedAt').toArray();
+      const start =
+        archived.reduce((min, note) => Math.min(min, note.archiveOrder), 0) -
+        selected.length;
       await Promise.all(
         selected.map((note, i) =>
           table.update(note.id, {
@@ -97,9 +107,7 @@ export const archiveSort = (a: Memo, b: Memo) =>
 
 export function reorderArchive(id: string, target: string, after: boolean) {
   return database.transaction('rw', table, async () => {
-    const notes = (
-      await table.filter((note) => note.archivedAt !== null).toArray()
-    ).sort(archiveSort);
+    const notes = await readMemoView('archive');
     const moved = notes.find((note) => note.id === id);
     const rest = notes.filter((note) => note.id !== id);
     const index = rest.findIndex((note) => note.id === target);

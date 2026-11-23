@@ -1,3 +1,4 @@
+import { prepareEditableDesktop } from './fixtures/editable-desktop.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir } from 'node:fs/promises';
@@ -19,6 +20,7 @@ const context = await chromium.launchPersistentContext(
   },
 );
 try {
+  await prepareEditableDesktop(context);
   await context.route('https://api.bimg.cc/**', (r) =>
     r.fulfill({
       contentType: 'image/svg+xml',
@@ -35,7 +37,7 @@ try {
 
   await page.evaluate(async () => {
     const db = await new Promise((resolve, reject) => {
-      const r = indexedDB.open('duoyu');
+      const r = indexedDB.open('duoyu-account-' + localStorage.getItem('duoyu-sync-account'));
       r.onsuccess = () => resolve(r.result);
       r.onerror = () => reject(r.error);
     });

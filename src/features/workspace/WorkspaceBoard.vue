@@ -22,6 +22,8 @@ import {
 } from './collections';
 import { useWorkspace, type BrowserTab } from './useWorkspace';
 import { createDragLanding } from '../../shared/drag-landing';
+import { createSavedCardDrag } from './saved-card-drag';
+import { createOpenTabDrag } from './open-tab-drag';
 import ReorderTransition from '../../shared/components/base/ReorderTransition.vue';
 import WorkspaceCardMain from './WorkspaceCardMain.vue';
 import { useWorkspaceLayoutMotion } from './useWorkspaceLayoutMotion';
@@ -37,11 +39,13 @@ import { saveSpace, deleteSpace, orderSpaces } from './spaces';
 const {
   spaces,
   syncAfterDrop,
+  syncCollections,
   isMarkedSpace,
   activeSpace,
   currentSpace,
   collections,
   visibleCollections,
+  openTabUrls,
   visibleTabs,
   windowOptions,
   tabGroups,
@@ -169,9 +173,25 @@ function toggleSelected(id: string) {
   if (selected.value.has(id)) selected.value.delete(id);
   else selected.value.add(id);
 }
-async function copyLinks(tabs: SavedTab[]) {
-  await navigator.clipboard.writeText(tabs.map((t) => t.url).join('\n'));
-  showNotice(tabs.length > 1 ? `已复制 ${tabs.length} 个链接` : '链接已复制');
+const copiedTimers = ref(new Map<string, number>());
+onUnmounted(() => {
+  copiedTimers.value.forEach((timer) => window.clearTimeout(timer));
+});
+async function copyLinks(tabs: SavedTab[], cardId?: string) {
+  error.value = '';
+  try {
+    await navigator.clipboard.writeText(tabs.map((t) => t.url).join('\n'));
+    if (cardId) {
+      window.clearTimeout(copiedTimers.value.get(cardId));
+      copiedTimers.value.set(cardId, window.setTimeout(() => {
+        copiedTimers.value.delete(cardId);
+      }, 1000));
+    } else {
+      showNotice(tabs.length > 1 ? `已复制 ${tabs.length} 个链接` : '链接已复制');
+    }
+  } catch (e) {
+    showNotice(e instanceof Error ? e.message : '复制链接失败，请重试', 'alert');
+  }
 }
 const editTabOpen = ref(false);
 const editTabTarget = ref<{ group: string; id: string }>();
@@ -347,15 +367,23 @@ function toggleAllCollections() {
 }
 
 type Drag =
-  | { kind: 'tab'; id: number }
+  | { kind: 'tab'; id: number; index: number }
   | { kind: 'saved'; group: string; id: string }
   | { kind: 'collection'; id: string; spaceId: string };
 const landing = createDragLanding();
+const savedCardDrag = createSavedCardDrag();
+const openTabDrag = createOpenTabDrag();
+watch([visibleCollections, viewMode], savedCardDrag.invalidate);
+watch(tabGroups, openTabDrag.reconcile);
 onUnmounted(() => {
   clearTimeout(dragVisualTimer);
+  savedCardDrag.stop();
+  openTabDrag.clear();
   landing.dispose();
 });
 function commitDrop(action: () => Promise<void>) {
+  clearCollectionFold();
+  foldedDragKey.value = undefined;
   void landing
     .commit(
       () => run(action),
@@ -378,6 +406,7 @@ function hideDragSource() {
 }
 type BrowserSection = (typeof tabGroups.value)[number];
 const draggedGroup = ref<BrowserSection>();
+const foldedDragKey = ref<string>();
 const groupDrop = ref<{
   id?: number;
   tabId?: number;
@@ -422,9 +451,16 @@ function startGroupDrag(event: DragEvent, group: BrowserSection) {
   const source = (event.currentTarget as HTMLElement).closest<HTMLElement>(
     '.workspace-browser-group',
   );
-  if (source) landing.capture(event, source, `[data-section-key="${group.key}"]`);
   const panel = source?.closest<HTMLElement>('.workspace-open-tabs');
-  if (!panel) return;
+  const heading = source?.querySelector<HTMLElement>('.workspace-window-label');
+  if (!source || !heading || !panel) {
+    event.preventDefault();
+    return;
+  }
+  foldedDragKey.value = group.key;
+  // Measure drop targets in their folded layout before Vue's next render.
+  source.dataset.dragFolded = '';
+  landing.capture(event, heading, `[data-section-key="${group.key}"] > .workspace-window-label`);
   groupScroll = panel.scrollTop;
   const win = group.tabs[0]?.windowId;
   groupAnchors = [];
@@ -462,6 +498,10 @@ function trackGroup(event: DragEvent) {
   const y = event.clientY + panel.scrollTop - groupScroll;
   const before = groupAnchors.find((a) => y < a.center);
   const last = groupAnchors.at(-1);
+  const anchor = before ?? last;
+  if (anchor && groupDrop.value && !groupDrop.value.end &&
+      groupDrop.value.id === anchor.id && groupDrop.value.tabId === anchor.tabId &&
+      groupDrop.value.after === !before) return;
   groupDrop.value = before
     ? { ...before, after: false }
     : last
@@ -516,10 +556,14 @@ function dropGroup() {
     }
   });
 }
-const dropTarget = ref('');
 const insertion = ref<{ group: string; before?: string }>();
 let collectionSlots: { id: string; center: number }[] = [];
 let initialScroll = 0;
+let foldedCollection: HTMLElement | undefined;
+function clearCollectionFold() {
+  foldedCollection?.removeAttribute('data-drag-folded');
+  foldedCollection = undefined;
+}
 const previewGroups = computed(() => {
   const groups = [...visibleCollections.value];
   const d = drag.value;
@@ -532,73 +576,35 @@ const previewGroups = computed(() => {
   }
   return rest;
 });
+const pendingMove = ref<{ source: string; target: string; tab: SavedTab; before?: string }>();
 function previewTabs(group: TabCollection): SavedTab[] {
-  const d = drag.value,
-    slot = insertion.value;
-  if (d?.kind !== 'saved' || slot?.group !== group.id) return group.tabs;
-  const item = collections.value
-    .find((g) => g.id === d.group)
-    ?.tabs.find((t) => t.id === d.id);
-  if (!item) return group.tabs;
-  const rest = group.tabs.filter((t) => t.id !== d.id);
-  const i = rest.findIndex((t) => t.id === slot.before);
-  rest.splice(i < 0 ? rest.length : i, 0, item);
-  return rest;
-}
-const openTabSlot = ref<number>();
-let openTabSlots: { id: number; center: number }[] = [];
-let openTabScroll = 0;
-function previewOpenTabs(tabs: BrowserTab[]) {
-  const d = drag.value;
-  if (d?.kind !== 'tab' || openTabSlot.value === undefined) return tabs;
-  const source = tabs.findIndex((tab) => tab.id === d.id);
-  const target = tabs.findIndex((tab) => tab.id === openTabSlot.value);
-  if (source < 0 || target < 0 || source === target) return tabs;
-  const next = [...tabs];
-  next.splice(target, 0, next.splice(source, 1)[0]!);
-  return next;
-}
-function overOpenTab(event: DragEvent, tab: BrowserTab) {
-  if (drag.value?.kind !== 'tab') return;
-  event.preventDefault();
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-  const el = event.currentTarget as HTMLElement;
-  if (!openTabSlots.some((slot) => slot.id === tab.id)) {
-    openTabSlot.value = tab.id;
-    return;
-  }
-  const y =
-    event.clientY +
-    (el.closest('.workspace-open-tabs')?.scrollTop || 0) -
-    openTabScroll;
-  openTabSlot.value = openTabSlots.reduce((best, slot) =>
-    Math.abs(slot.center - y) < Math.abs(best.center - y) ? slot : best,
-  ).id;
-}
-// FLIP animation can expose the group between rows at the pointer's drop
-// position. Keep accepting the previously selected slot in that same group.
-function openTabGap(event: DragEvent, tabs: BrowserTab[], dropping = false) {
-  if (drag.value?.kind !== 'tab') return;
-  const first = tabs[0];
-  if (first && (first.groupId ?? -1) === -1) {
-    event.preventDefault();
-    const section = (event.currentTarget as HTMLElement).closest('section');
-    const rows = section?.querySelectorAll<HTMLElement>('[data-browser-tab-id]');
-    const next = Array.from(rows ?? []).find(row => event.clientY < row.getBoundingClientRect().top);
-    const target = next ? tabs.find(tab => tab.id === Number(next.dataset.browserTabId)) : tabs.at(-1);
-    if (target) {
-      openTabSlot.value = target.id;
-      if (dropping) dropOnTab(target, !next);
+  const move = pendingMove.value;
+  if (move && (group.id === move.source || group.id === move.target)) {
+    const tabs = group.tabs.filter((tab) => tab.id !== move.tab.id);
+    if (group.id === move.target) {
+      const index = tabs.findIndex((tab) => tab.id === move.before);
+      tabs.splice(index < 0 ? tabs.length : index, 0, move.tab);
     }
-    return;
+    return tabs;
   }
-  if (openTabSlot.value === undefined) return;
-  const target = tabs.find((tab) => tab.id === openTabSlot.value);
-  if (!target) return;
-  overOpenTab(event, target);
-  if (dropping) {
-    event.stopPropagation();
-    dropOnTab(target);
+  return group.tabs;
+}
+function sortOpenTab(event: DragEvent, group: BrowserSection) {
+  const source = drag.value;
+  if (source?.kind !== 'tab' || !(event.target instanceof Element)) return;
+  if (group.collapsed || (group.id !== -1 && event.target.closest('.workspace-window-label'))) {
+    openTabDrag.clear();
+    if (group.id !== -1) return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  const target = group.collapsed
+    ? { id: group.tabs.at(-1)?.id, after: true }
+    : openTabDrag.hover(event.currentTarget as HTMLElement, event.clientY, source.id, source.index < group.tabs[0]!.index);
+  if (event.type === 'drop') {
+    if (target?.id !== undefined && target.id !== source.id) dropOnTab(source.id, target.id, target.after);
+    else endDrag();
   }
 }
 function startDrag(event: DragEvent, value: Drag) {
@@ -622,8 +628,11 @@ function startDrag(event: DragEvent, value: Drag) {
   const source = (event.currentTarget as HTMLElement).closest<HTMLElement>(
     selector,
   );
-  if (source) landing.capture(event, source, selector);
   if (value.kind === 'collection' && source) {
+    foldedCollection = source;
+    source.dataset.dragFolded = '';
+    const heading = source.querySelector<HTMLElement>('.workspace-collection-heading')!;
+    landing.capture(event, heading, selector + ' > .workspace-collection-heading');
     initialScroll = source.closest('.workspace-collections')?.scrollTop || 0;
     collectionSlots = Array.from(
       source.parentElement!.querySelectorAll<HTMLElement>(
@@ -634,28 +643,18 @@ function startDrag(event: DragEvent, value: Drag) {
         return { id: el.dataset.collectionId!, center: r.top + r.height / 2 };
       },
     );
+  } else if (source) {
+    landing.capture(event, source, selector);
+    if (value.kind === 'saved') savedCardDrag.start(source);
   }
   drag.value = value;
-  if (value.kind === 'tab' && source) {
-    void nextTick(() => {
-      if (drag.value?.kind !== 'tab' || drag.value.id !== value.id || !source.isConnected) return;
-      openTabScroll = source.closest('.workspace-open-tabs')?.scrollTop || 0;
-      openTabSlots = Array.from(
-        source.parentElement!.querySelectorAll<HTMLElement>(
-          '[data-browser-tab-id]',
-        ),
-        (el) => {
-          const r = el.getBoundingClientRect();
-          return { id: Number(el.dataset.browserTabId), center: r.top + r.height / 2 };
-        },
-      );
-    });
-  }
-  hideDragSource();
+  if (value.kind === 'collection') hideDragSource();
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('application/x-duoyu-tab', JSON.stringify(value));
 }
 function endDrag(force = false) {
+  clearCollectionFold();
+  foldedDragKey.value = undefined;
   if (landing.committing && force !== true) return;
   if (!landing.committing) landing.dispose();
   clearTimeout(dragVisualTimer);
@@ -664,11 +663,10 @@ function endDrag(force = false) {
   groupDrop.value = undefined;
   drag.value = undefined;
   insertion.value = undefined;
-  openTabSlot.value = undefined;
-  openTabSlots = [];
-  dropTarget.value = '';
+  openTabDrag.clear();
+  savedCardDrag.stop();
 }
-function over(event: DragEvent, target: string) {
+function over(event: DragEvent) {
   if (isMarkedSpace.value || !drag.value) return;
   event.preventDefault();
   if (event.dataTransfer)
@@ -679,60 +677,17 @@ function over(event: DragEvent, target: string) {
       event.clientY +
       (el.closest('.workspace-collections')?.scrollTop || 0) -
       initialScroll;
-    insertion.value = {
-      group: '',
-      before: collectionSlots.find(
+    const before = collectionSlots.find(
         (s) => s.id !== drag.value?.id && y < s.center,
-      )?.id,
-    };
+      )?.id;
+    if (!insertion.value || insertion.value.before !== before)
+      insertion.value = { group: '', before };
     return;
   }
   if (drag.value.kind === 'saved') {
-    const groupEl = el.closest<HTMLElement>('[data-collection-id]');
-    const group = groupEl?.dataset.collectionId;
-    if (!group || !groupEl) return;
-    const tabs =
-      visibleCollections.value
-        .find((g) => g.id === group)
-        ?.tabs.filter((t) => t.id !== drag.value?.id) || [];
-    const grid = groupEl.querySelector<HTMLElement>('.workspace-saved-tabs');
-    let index = tabs.length;
-    if (grid) {
-      const bounds = grid.getBoundingClientRect();
-      // Use layout coordinates. FLIP transforms move the painted card but do not
-      // change its slot, so a stationary pointer cannot alternate between targets.
-      const x = event.clientX - bounds.left,
-        y = event.clientY - bounds.top;
-      const cards = Array.from(
-        grid.querySelectorAll<HTMLElement>(
-          ':scope > [data-saved-id]:not(.transfer-out)',
-        ),
-      );
-      const last = cards.at(-1);
-      const pastLastCard = last && y >= last.offsetTop &&
-        (y >= last.offsetTop + last.offsetHeight || x >= last.offsetLeft + last.offsetWidth);
-      if (last && !pastLastCard && y < bounds.height) {
-        // Pick a row first, so empty columns cannot snap to the row above.
-        const rowDistance = (card: HTMLElement) => Math.abs(y - card.offsetTop - card.offsetHeight / 2);
-        const row = cards.reduce((best, card) => rowDistance(card) < rowDistance(best) ? card : best);
-        const columnDistance = (card: HTMLElement) => Math.abs(x - card.offsetLeft - card.offsetWidth / 2);
-        const nearest = cards.filter(card => card.offsetTop === row.offsetTop)
-          .reduce((best, card) => columnDistance(card) < columnDistance(best) ? card : best);
-        index = cards.indexOf(nearest);
-        if (
-          !cards.some((c) => c.dataset.savedId === drag.value?.id) &&
-          (viewMode.value === 'list'
-            ? y > nearest.offsetTop + nearest.offsetHeight / 2
-            : x > nearest.offsetLeft + nearest.offsetWidth / 2)
-        )
-          index++;
-      }
-    }
-    const before = tabs[index]?.id;
-    if (insertion.value?.group !== group || insertion.value.before !== before)
-      insertion.value = { group, before };
+    const group = el.closest<HTMLElement>('[data-collection-id]');
+    if (group) savedCardDrag.hover(group, event, viewMode.value === 'list');
   }
-  dropTarget.value = target;
 }
 function handleCollectionListEnd(event: DragEvent) {
   if (drag.value?.kind !== 'saved' || !(event.target instanceof Element)) return;
@@ -741,7 +696,7 @@ function handleCollectionListEnd(event: DragEvent) {
   const group = last?.dataset.collectionId;
   if (!group || !last || event.clientY < last.getBoundingClientRect().bottom) return;
   event.preventDefault();
-  insertion.value = { group };
+  savedCardDrag.hover(last, event, viewMode.value === 'list', true);
   if (event.type === 'drop') drop(group);
 }
 function drop(group: string, before?: string, event?: DragEvent) {
@@ -750,8 +705,26 @@ function drop(group: string, before?: string, event?: DragEvent) {
     endDrag();
     return;
   }
-  if (event && value.kind === 'saved') over(event, before ?? group);
-  const slot = insertion.value;
+  if (event && value.kind === 'saved') over(event);
+  const slot = value.kind === 'saved' ? savedCardDrag.position : insertion.value;
+  const target = slot?.group ?? group;
+  if (value.kind === 'saved') {
+    const tab = collections.value.find((entry) => entry.id === value.group)?.tabs.find((entry) => entry.id === value.id);
+    if (tab && !busy.value) {
+      const position = slot ? slot.before : before;
+      pendingMove.value = { source: value.group, target, tab, before: position };
+      endDrag();
+      void run(async () => {
+        try {
+          await moveSavedTab(value.group, tab.id, target, position);
+          await syncCollections();
+        } finally {
+          pendingMove.value = undefined;
+        }
+      });
+    } else endDrag();
+    return;
+  }
   commitDrop(async () => {
     if (value.kind === 'tab') {
       const tab = await browser.tabs.get(value.id);
@@ -759,14 +732,7 @@ function drop(group: string, before?: string, event?: DragEvent) {
       landing.setTarget(
         `[data-collection-id="${group}"] .workspace-saved-tab:has(.workspace-link[title="${CSS.escape(tab.pendingUrl || tab.url || '')}"])`,
       );
-    } else if (value.kind === 'saved')
-      await moveSavedTab(
-        value.group,
-        value.id,
-        slot?.group ?? group,
-        slot ? slot.before : before,
-      );
-    else if (slot) await reorderCollection(value.id, slot.before, value.spaceId);
+    } else if (slot) await reorderCollection(value.id, slot.before, value.spaceId);
   });
 }
 function dropIntoSpace(event: DragEvent) {
@@ -774,6 +740,7 @@ function dropIntoSpace(event: DragEvent) {
   const single = drag.value;
   if (!source && single?.kind !== 'tab') return;
   if (!(event.target instanceof Element)) return;
+  if (single?.kind === 'tab' && !event.target.closest('.workspace-browser-group')) openTabDrag.clear();
   const spaceRow = event.target.closest<HTMLElement>('.desktop-menu [data-menu-row]');
   const library = event.target.closest('.workspace-library');
   if (!spaceRow && (!library || isMarkedSpace.value)) return;
@@ -805,7 +772,6 @@ function handleTabListEnd(event: DragEvent) {
   if (!last || event.clientY < last.getBoundingClientRect().bottom) return;
   event.preventDefault();
   event.stopPropagation();
-  openTabSlot.value = undefined;
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
   if (event.type !== 'drop') return;
   const windowId = selectedWindow.value;
@@ -831,36 +797,21 @@ function dropOutsideGroup(groupId: number, after: boolean) {
     if (edge) await browser.tabs.move(source.id, { index: tabs.indexOf(edge) + Number(after) });
   });
 }
-function dropOnTab(tab: BrowserTab, insertAfter?: boolean) {
-  if (draggedGroup.value !== undefined) {
-    dropGroup();
-    return;
-  }
-  const value = drag.value;
-  const targetId = openTabSlot.value ?? tab.id;
-  if (
-    value?.kind !== 'tab' ||
-    targetId === undefined ||
-    value.id === targetId
-  ) {
-    endDrag();
-    return;
-  }
+function dropOnTab(sourceId: number, targetId: number, after: boolean) {
   commitDrop(async () => {
     const [source, target] = await Promise.all([
-      browser.tabs.get(value.id),
+      browser.tabs.get(sourceId),
       browser.tabs.get(targetId),
     ]);
-    const after = insertAfter ?? (source.windowId === target.windowId && source.index < target.index);
     if (source.groupId !== target.groupId) {
-      if ((target.groupId ?? -1) === -1) await browser.tabs.ungroup(value.id);
-      else await browser.tabs.group({ groupId: target.groupId, tabIds: [value.id] });
+      if ((target.groupId ?? -1) === -1) await browser.tabs.ungroup(sourceId);
+      else await browser.tabs.group({ groupId: target.groupId, tabIds: [sourceId] });
     }
     const remaining = (await browser.tabs.query({ windowId: target.windowId }))
-      .filter(item => item.id !== value.id).sort((a, b) => a.index - b.index);
+      .filter(item => item.id !== sourceId).sort((a, b) => a.index - b.index);
     const anchor = remaining.findIndex(item => item.id === targetId);
     if (anchor < 0) return;
-    await browser.tabs.move(value.id, {
+    await browser.tabs.move(sourceId, {
       ...(source.windowId !== target.windowId
         ? { windowId: target.windowId }
         : {}),
@@ -879,13 +830,22 @@ async function revealNewestCollection() {
   await nextTick();
   collectionList.value?.scrollTo({ top: 0 });
 }
+const createdCollection = ref('');
+const creationSpace = computed(() => activeSpace.value || 'default');
+watch(creationSpace, () => { createdCollection.value = ''; });
+watch([createdCollection, collections], ([id, groups]) => {
+  if (!id || !groups.some(group => group.id === id)) return;
+  createdCollection.value = '';
+  destination.value = id;
+  query.value = '';
+  void revealNewestCollection();
+});
 function showCreate() {
   if (isMarkedSpace.value) return;
   void run(async () => {
-    destination.value = await createCollection('', [], activeSpace.value);
-    query.value = '';
-    await syncAfterDrop();
-    await revealNewestCollection();
+    const space = creationSpace.value;
+    const id = await createCollection('', [], space);
+    if (creationSpace.value === space) createdCollection.value = id;
   });
 }
 async function edit(group: TabCollection) {
@@ -914,19 +874,13 @@ function collapse(id: string) {
   if (collapsed.value.has(id)) collapsed.value.delete(id);
   else collapsed.value.add(id);
 }
-function moveWithSelect(event: Event, group: string, id: string) {
-  const select = event.target as HTMLSelectElement;
-  const target = select.value;
-  select.value = '';
-  if (target) void run(() => moveSavedTab(group, id, target));
-}
 </script>
 
 <template>
   <section
     class="workspace-board"
     @mousedown="!guestMode && pressSort($event)"
-    :class="{ 'is-list-view': viewMode === 'list' }"
+    :class="{ 'is-list-view': viewMode === 'list', 'is-sorting-collections': drag?.kind === 'saved' || drag?.kind === 'collection' }"
     aria-label="标签页管理"
     @click.stop="menu = ''"
     @pointerdown.stop
@@ -1145,7 +1099,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
             <button
               class="glass-control glass-interactive"
               :disabled="busy"
-              @click="run(() => copyLinks(selectedEntries.map((e) => e.tab)))"
+              @click="copyLinks(selectedEntries.map((e) => e.tab))"
             >
               复制所选链接
             </button>
@@ -1201,14 +1155,14 @@ function moveWithSelect(event: Event, group: string, id: string) {
                   drag.id === group.id,
               }"
               :data-collection-id="group.id"
-              @dragover="over($event, group.id)"
-              @dragleave.self="dropTarget = ''"
+              @dragover="over"
               @drop.prevent.stop="drop(group.id, undefined, $event)"
             >
               <header class="workspace-collection-heading">
                 <button
                   v-if="!isMarkedSpace"
                   v-account-edit class="workspace-icon collection-handle glass-control glass-interactive"
+                  :style="{ backgroundColor: collectionColors[collectionColor(group.color)][1], color: 'white' }"
                   :draggable="!isMarkedSpace"
                   :aria-label="`拖动集合 ${group.name}`"
                   title="拖动集合排序"
@@ -1216,7 +1170,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                     startDrag($event, { kind: 'collection', id: group.id, spaceId: activeSpace })
                   "
                 >
-                  ⠿
+                  <img src="/images/workspace/drag-handle.svg" width="12" height="12" alt="" draggable="false" />
                 </button>
                 <form
                   v-if="editing === group.id"
@@ -1235,9 +1189,6 @@ function moveWithSelect(event: Event, group: string, id: string) {
                 <button
                   v-else
                   class="workspace-collection-name"
-                  :style="{
-                    color: collectionColors[collectionColor(group.color)][1],
-                  }"
                   :aria-expanded="!collapsed.has(group.id)"
                   @click="collapse(group.id)"
                 >
@@ -1358,7 +1309,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                   取消
                 </button>
               </div>
-              <ReorderTransition
+              <div
                 v-if="!collapsed.has(group.id)"
                 class="workspace-saved-tabs"
               >
@@ -1366,19 +1317,10 @@ function moveWithSelect(event: Event, group: string, id: string) {
                   <div
                     class="workspace-saved-tab glass-surface"
                     :class="{
-                      'is-drag-source':
-                        dragVisualActive &&
-                        drag?.kind === 'saved' &&
-                        drag.id === tab.id,
-                      'transfer-out':
-                        drag?.kind === 'saved' &&
-                        drag.id === tab.id &&
-                        drag.group === group.id &&
-                        insertion &&
-                        insertion.group !== group.id,
                       'is-selected': selected.has(tab.id),
                     }"
                     :data-saved-id="tab.id"
+                    @contextmenu.prevent.stop="menu = tab.id"
                     :draggable="!isMarkedSpace"
                     @dragstart.stop="
                       startDrag($event, {
@@ -1387,13 +1329,14 @@ function moveWithSelect(event: Event, group: string, id: string) {
                         id: tab.id,
                       })
                     "
-                    @dragover.stop="over($event, tab.id)"
+                    @dragover.stop="over"
                     @drop.prevent.stop="drop(group.id, tab.id, $event)"
                   >
                     <WorkspaceCardMain
                       :title="tab.title"
                       :url="tab.url"
                       :icon="tab.icon"
+                      :open-urls="openTabUrls"
                       @open="run(() => openSaved([tab]))"
                       ><template #checkbox>
                         <input
@@ -1436,12 +1379,18 @@ function moveWithSelect(event: Event, group: string, id: string) {
                     >
                       <button
                         class="glass-control glass-interactive"
-                        :aria-label="`复制链接 ${tab.title}`"
-                        title="复制链接"
-                        :disabled="busy"
-                        @click="run(() => copyLinks([tab]))"
+                        :aria-label="`${copiedTimers.has(tab.id) ? '已复制' : '复制链接'} ${tab.title}`"
+                        :title="copiedTimers.has(tab.id) ? '已复制' : '复制链接'"
+                        @click="copyLinks([tab], tab.id)"
                       >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <img
+                          v-if="copiedTimers.has(tab.id)"
+                          class="workspace-action-icon"
+                          src="/images/workspace/copy-check.png"
+                          alt=""
+                          draggable="false"
+                        />
+                        <svg v-else viewBox="0 0 24 24" aria-hidden="true">
                           <rect x="8" y="8" width="12" height="13" rx="2" />
                           <path d="M15 8V3H3v13h5" />
                         </svg>
@@ -1472,26 +1421,6 @@ function moveWithSelect(event: Event, group: string, id: string) {
                         >
                           修改
                         </button>
-                        <select
-                          v-if="!isMarkedSpace && collections.length > 1"
-                          class="glass-control glass-interactive"
-                          v-account-edit :aria-label="`移动收藏 ${tab.title}`"
-                          @change="
-                            moveWithSelect($event, group.id, tab.id);
-                            menu = '';
-                          "
-                        >
-                          <option value="">移动到集合</option>
-                          <option
-                            v-for="other in collections.filter(
-                              (c) => c.id !== group.id,
-                            )"
-                            :key="other.id"
-                            :value="other.id"
-                          >
-                            {{ other.name }}
-                          </option>
-                        </select>
                         <button
                           class="glass-control glass-interactive"
                           :disabled="busy"
@@ -1514,7 +1443,7 @@ function moveWithSelect(event: Event, group: string, id: string) {
                 >
                   拖入右侧标签页即可保存
                 </p>
-              </ReorderTransition>
+              </div>
             </article>
           </ReorderTransition>
         </div>
@@ -1567,44 +1496,45 @@ function moveWithSelect(event: Event, group: string, id: string) {
               :key="group.key"
               class="workspace-browser-group"
               :class="{
+                'is-collapsed': group.collapsed,
                 'is-drag-source': dragVisualActive && draggedGroup?.key === group.key,
               }"
               :data-section-key="group.key"
+              :data-drag-folded="foldedDragKey === group.key ? '' : undefined"
               :data-group-color="group.color"
               :data-group-id="group.id"
               :aria-label="group.label"
-              @dragover.self="openTabGap($event, group.tabs)"
-              @drop.self="openTabGap($event, group.tabs, true)"
+              @dragover="sortOpenTab($event, group)"
+              @drop="sortOpenTab($event, group)"
             >
               <template v-if="drag?.kind === 'tab' && group.id !== -1">
                 <div v-if="index === 0" key="before"
                   class="workspace-group-edge before"
-                  @dragover.prevent.stop="openTabSlot = undefined"
+                  @dragover.prevent.stop="openTabDrag.clear()"
                   aria-hidden="true"
                   @drop.prevent.stop="dropOutsideGroup(group.id, false)" />
                 <div v-if="previewBrowserGroups[index + 1]?.id !== -1" key="after"
                   class="workspace-group-edge after"
-                  @dragover.prevent.stop="openTabSlot = undefined"
+                  @dragover.prevent.stop="openTabDrag.clear()"
                   aria-hidden="true"
                   @drop.prevent.stop="dropOutsideGroup(group.id, true)" />
               </template>
-              <h3 key="heading" class="workspace-window-label"
-                @dragover="group.id === -1 && openTabGap($event, group.tabs)"
-                @drop="group.id === -1 && openTabGap($event, group.tabs, true)">
+              <h3 key="heading" class="workspace-window-label">
                 <button
-                  v-account-edit class="workspace-group-handle glass-control glass-interactive"
+                  v-account-edit class="workspace-icon workspace-group-handle glass-control glass-interactive"
+                  style="background-color: var(--group-color); color: white"
                   draggable="true"
                   :disabled="busy"
                   :aria-label="`拖动群组 ${group.label}`"
                   title="拖动群组排序"
                   @dragstart.stop="startGroupDrag($event, group)"
                 >
-                  ⠿
+                  <img src="/images/workspace/drag-handle.svg" width="12" height="12" alt="" draggable="false" />
                 </button>
                 <button
                   class="workspace-group-toggle"
                   :aria-label="`折叠群组 ${group.label}`"
-                  :aria-expanded="!group.collapsed"
+                  :aria-expanded="!group.collapsed && foldedDragKey !== group.key"
                   :disabled="busy"
                   @click="(group.id === -1 || requireAccount()) && run(() => toggleBrowserGroup(group.id, group.key))"
                 >
@@ -1639,14 +1569,11 @@ function moveWithSelect(event: Event, group: string, id: string) {
                 </button>
               </h3>
               <div
-                v-for="tab in group.collapsed
-                  ? []
-                  : previewOpenTabs(group.tabs)"
+                v-for="tab in group.collapsed ? [] : group.tabs"
                 :key="tab.id"
                 class="workspace-open-tab glass-surface"
                 :class="{
                   'is-drag-source':
-                    dragVisualActive &&
                     drag?.kind === 'tab' &&
                     drag.id === tab.id,
                   'is-selected':
@@ -1656,10 +1583,8 @@ function moveWithSelect(event: Event, group: string, id: string) {
                 :draggable="!isMarkedSpace"
                 @dragstart.stop="
                   tab.id !== undefined &&
-                  startDrag($event, { kind: 'tab', id: tab.id })
+                  startDrag($event, { kind: 'tab', id: tab.id, index: tab.index })
                 "
-                @dragover="overOpenTab($event, tab)"
-                @drop.prevent.stop="dropOnTab(tab)"
               >
                 <span class="workspace-icon-slot">
                   <WorkspaceFavicon

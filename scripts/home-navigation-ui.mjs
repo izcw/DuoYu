@@ -1,3 +1,4 @@
+import { prepareEditableDesktop } from './fixtures/editable-desktop.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -26,6 +27,7 @@ const context = await chromium.launchPersistentContext(
 );
 const page = await context.newPage();
 try {
+  await prepareEditableDesktop(context);
   if (channel === 'chrome') {
     const session = await context.browser().newBrowserCDPSession();
     const { id } = await session.send('Extensions.loadUnpacked', {
@@ -134,7 +136,7 @@ try {
   await page.evaluate(async () => {
     localStorage.setItem('duoyu:active-space', 'marked');
     const db = await new Promise((resolve, reject) => {
-      const req = indexedDB.open('duoyu');
+      const req = indexedDB.open('duoyu-account-' + localStorage.getItem('duoyu-sync-account'));
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });

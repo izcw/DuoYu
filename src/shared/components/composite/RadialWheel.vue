@@ -211,7 +211,7 @@ async function key(event: KeyboardEvent, index: number) {
       : event.key === 'End'
         ? order.value.length - 1
         : (index + delta + order.value.length) % order.value.length;
-  if (event.altKey) {
+  if (event.altKey && !guestMode) {
     const [item] = order.value.splice(index, 1);
     order.value.splice(to, 0, item!);
     emit(

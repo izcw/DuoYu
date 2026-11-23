@@ -10,6 +10,8 @@ export function createDragLanding() {
     x = 0,
     y = 0;
   let committing = false;
+  let workspacePreview = false;
+  let originX = 0, originY = 0;
   let animation: Animation | undefined;
   let target: HTMLElement | undefined;
   function dispose() {
@@ -32,11 +34,15 @@ export function createDragLanding() {
     options: { transparentSurface?: boolean } = {},
   ) {
     dispose();
-    root = source.closest<HTMLDialogElement>('dialog[open]') ?? (source.closest<HTMLElement>('.desktop-dock')
+    const board = source.closest<HTMLElement>('.workspace-board');
+    workspacePreview = !!board;
+    root = board ?? source.closest<HTMLDialogElement>('dialog[open]') ?? (source.closest<HTMLElement>('.desktop-dock')
       ? document.body
       : source.closest<HTMLElement>('.workspace-board') || document.body);
     selector = targetSelector;
     const bounds = source.getBoundingClientRect();
+    originX = event.clientX;
+    originY = event.clientY;
     offsetX = event.clientX - bounds.left;
     offsetY = event.clientY - bounds.top;
     x = event.clientX;
@@ -46,19 +52,28 @@ export function createDragLanding() {
     const originals = [source, ...source.querySelectorAll<HTMLElement>('*')];
     const copies = [clone, ...clone.querySelectorAll<HTMLElement>('*')];
     originals.forEach((el, index) => {
-      const css = getComputedStyle(el);
-      for (const property of css)
-        copies[index]!.style.setProperty(
-          property,
-          css.getPropertyValue(property),
-        );
+      if (!workspacePreview) {
+        const css = getComputedStyle(el);
+        for (const property of css)
+          copies[index]!.style.setProperty(property, css.getPropertyValue(property));
+      } else if (!source.matches('.workspace-saved-tab, .workspace-open-tab')) {
+        // Headings and sidebar entries leave their layout parent in the preview.
+        // Keep its visible effects without copying every computed CSS property.
+        const css = getComputedStyle(el);
+        for (const property of ['display', 'align-items', 'justify-content', 'gap',
+          'font', 'color', 'opacity', 'transform', 'filter', 'background-color',
+          'margin', 'padding', 'width', 'height']) {
+          copies[index]!.style.setProperty(property, css.getPropertyValue(property));
+        }
+      }
       copies[index]!.removeAttribute('id');
       for (const attribute of [...copies[index]!.attributes]) {
-        if (attribute.name.startsWith('data-'))
+        if (attribute.name.startsWith('data-') && !attribute.name.startsWith('data-v-'))
           copies[index]!.removeAttribute(attribute.name);
       }
     });
-    clone.className = 'drag-landing-preview';
+    if (workspacePreview) clone.classList.add('drag-landing-preview');
+    else clone.className = 'drag-landing-preview';
     clone.setAttribute('aria-hidden', 'true');
     clone.inert = true;
     Object.assign(clone.style, {
@@ -114,7 +129,9 @@ export function createDragLanding() {
     if (committing) return;
     x = event.clientX;
     y = event.clientY;
-    if (clone) {
+    if (clone && workspacePreview) {
+      clone.style.transform = `translate3d(${x - originX}px, ${y - originY}px, 0)`;
+    } else if (clone) {
       clone.style.left = `${x - offsetX}px`;
       clone.style.top = `${y - offsetY}px`;
     }
@@ -128,6 +145,7 @@ export function createDragLanding() {
     root?.classList.add('drag-landing');
     if (clone && root) {
       Object.assign(clone.style, {
+        transform: 'none',
         left: `${x - offsetX}px`,
         top: `${y - offsetY}px`,
         opacity: '1',

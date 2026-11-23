@@ -1,4 +1,5 @@
 import 'fake-indexeddb/auto';
+import Dexie from 'dexie';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
 import { fork } from 'node:child_process';
@@ -67,6 +68,7 @@ if (!navigator.locks)
   });
 await mkdir('work/sync-integration', { recursive: true });
 const replacements = {
+  "'../memo/markup'": "'./markup.mjs'",
   "'../library/grid-config'": "'./grid-config.mjs'",
   "'../wallpaper/desktops'": "'./desktops.mjs'",
   "'../../shared/collection-colors'": "'./collection-colors.mjs'",
@@ -94,6 +96,7 @@ for (const [name, path] of Object.entries({
   response: 'src/features/sync/response.ts',
   assets: 'src/features/sync/assets.ts',
   conflicts: 'src/features/sync/conflicts.ts',
+  markup: 'src/features/memo/markup.ts',
   importer: 'src/features/sync/import-json.ts',
   'grid-config': 'src/features/library/grid-config.ts',
   database: 'src/shared/storage/database.ts',
@@ -120,11 +123,92 @@ await writeFile(
   'work/sync-integration/browser.mjs',
   `export const browser={storage:{session:{onChanged:{addListener(){}}},local:{get:async()=>({})}},runtime:{sendMessage:async m=>{const t=globalThis.__syncTest;if(m.action==='status')return{view:{account:t.account}};if(t.noResponse)return undefined;if(t.failAssets&&m.binary&&m.method==='GET')throw Error('image offline');if(t.offline)throw Error('offline');const response=await fetch(t.origin+m.path,{method:m.method,headers:m.method==='POST'?{'Content-Type':m.binary?m.mediaType:'application/json'}:{},body:m.method==='POST'?m.binary?Buffer.from(m.body,'base64'):JSON.stringify(m.body):undefined});if(m.method==='POST'&&t.drop){t.drop=false;throw Error('response lost');}return{status:response.status,data:m.binary&&m.method==='GET'&&response.ok?{base64:Buffer.from(await response.arrayBuffer()).toString('base64'),mediaType:response.headers.get('content-type')}:await response.json()};}}};`,
 );
+const legacy = new Dexie('duoyu-account-' + data.get('duoyu-sync-account'));
+legacy.version(11).stores({
+  memos: 'id,layer', memoPages: 'id,order', syncOutbox: 'id,createdAt', syncMeta: 'id',
+  syncShadow: 'id', syncAssets: 'id', syncConflicts: 'id,createdAt', preferences: 'id',
+  wallpapers: 'id', shortcuts: 'id', widgetLayouts: 'id', tabCollections: 'id,spaceId,order,updatedAt',
+  workspaceSpaces: 'id,order', libraryPages: 'id,order', libraryItems: 'id,pageId,parent,order,updatedAt',
+});
+const memoPage = { id: 'ideas', name: '灵感', icon: 'Notes', order: 0 };
+const legacyMemo = {
+  id: 'legacy-note', title: '旧标题', body: 'data:image/png;这是便签正文', color: 'sage',
+  x: -21, y: 220, width: 260, height: 212, layer: 2, archiveOrder: 0,
+  createdAt: 1, updatedAt: 2, archivedAt: null,
+};
+await legacy.memoPages.add(memoPage);
+await legacy.memos.bulkAdd([legacyMemo, { ...legacyMemo, id: 'group-note', pageId: memoPage.id, archivedAt: 3 }]);
+legacy.close();
 const { database } = await import('../work/sync-integration/database.mjs');
 const client = await import('../work/sync-integration/client.mjs');
 try {
   await client.initializeCloud();
   assert.equal(client.syncState.value.status, '已同步');
+  const memoPeer = await startPeer(__syncTest);
+  try {
+    const first = await memoPeer.call('readMemos');
+    assert.deepEqual(first.pages, [memoPage]);
+    assert.deepEqual(first.memos.find(n => n.id === legacyMemo.id), { ...legacyMemo, pageId: 'wall' });
+    assert.equal(first.memos.find(n => n.id === 'group-note').archivedAt, 3);
+    __syncTest.offline = true;
+    const literal = 'duoyu-asset:' + 'f'.repeat(64);
+    for (let i = 1; i <= 12; i++)
+      await database.memos.update(legacyMemo.id, { body: literal + i, html: '<b>' + literal + i + '</b>', updatedAt: 2 + i });
+    assert.equal(await database.syncOutbox.count(), 12);
+    await client.syncNow();
+    assert.equal(await database.syncOutbox.count(), 1);
+    const before = (await database.syncMeta.get('cursor')).value;
+    __syncTest.offline = false;
+    await client.syncNow();
+    assert.equal(BigInt((await database.syncMeta.get('cursor')).value), BigInt(before) + 1n);
+    await memoPeer.call('sync');
+    const changed = (await memoPeer.call('readMemos')).memos.find(n => n.id === legacyMemo.id);
+    assert.equal(changed.body, literal + 12);
+    assert.equal(changed.html, '<b>' + literal + '12</b>');
+    const markdown = '# 设计评审\n\n- **本周**\n- `原样保存`';
+    await database.memos.update(legacyMemo.id, { title: '', body: markdown, html: undefined });
+    await client.syncNow();
+    await memoPeer.call('sync');
+    const converted = (await memoPeer.call('readMemos')).memos.find(n => n.id === legacyMemo.id);
+    assert.equal(converted.body, markdown);
+    assert.equal(converted.html, undefined);
+    const reply = markdown + '\n\n> 第二台设备补充';
+    await memoPeer.call('editMemo', { memoId: legacyMemo.id, changes: { body: reply } });
+    await memoPeer.call('sync');
+    await client.syncNow();
+    assert.equal((await database.memos.get(legacyMemo.id)).body, reply);
+    await memoPeer.call('editMemo', { memoId: 'group-note', changes: { archivedAt: null, color: 'lilac', x: 91, width: 312 } });
+    await memoPeer.call('sync');
+    await client.syncNow();
+    const restored = await database.memos.get('group-note');
+    assert.deepEqual([restored.archivedAt, restored.color, restored.pageId, restored.x, restored.width], [null, 'lilac', 'ideas', 91, 312]);
+    await database.memos.update('group-note', { html: '<b>格式版本</b>', body: '格式版本' });
+    await client.syncNow();
+    await memoPeer.call('sync');
+    await database.memos.update('group-note', { html: '<u>格式版本</u>' });
+    await memoPeer.call('editMemo', { memoId: 'group-note', changes: { html: '<b>另一版本</b>', body: '另一版本' } });
+    await memoPeer.call('sync');
+    await client.syncNow();
+    const conflict = (await database.syncConflicts.toArray()).find(c => !c.resolvedAt);
+    assert.equal(conflict?.reason, 'field_conflict');
+    assert.equal((await database.memos.get('group-note')).body, '另一版本');
+    const { retryConflict } = await import('../work/sync-integration/conflicts.mjs');
+    await retryConflict(conflict.id);
+    await memoPeer.call('sync');
+    const resolved = (await memoPeer.call('readMemos')).memos.find(n => n.id === 'group-note');
+    assert.deepEqual([resolved.body, resolved.html], ['格式版本', '<u>格式版本</u>']);
+    data.set('duoyu-sync-account', 'different-account');
+    await assert.rejects(database.memos.update(legacyMemo.id, { body: 'wrong owner' }), /账号|abort/i);
+    data.set('duoyu-sync-account', await client.accountKey(account));
+    await database.memos.delete(legacyMemo.id);
+    await client.syncNow();
+    await memoPeer.call('sync');
+    assert.deepEqual((await memoPeer.call('readMemos')).memos.map(n => n.id), ['group-note']);
+    assert.equal((await database.syncConflicts.toArray()).filter(c => !c.resolvedAt).length, 0);
+    console.log('PASS memo v11 upgrade, pages, two-way Markdown sync, account guard, offline typing (12 edits → one revision), legacy rich text, archive restore and deletion');
+  } finally {
+    await memoPeer.close();
+  }
   const page = { id: 'p', name: 'page', order: 0 },
     item = {
       id: 'i',
@@ -195,9 +279,9 @@ try {
   });
   await database.libraryItems.update('i', { name: 'local-conflict' });
   await client.syncNow();
-  assert.equal((await database.libraryItems.get('i')).name, 'local-conflict');
+  assert.equal((await database.libraryItems.get('i')).name, 'cloud-wins');
   assert.equal((await database.syncShadow.get('libraryItems:i')).payload.name, 'cloud-wins');
-  assert.equal(await database.syncConflicts.count(), 1);
+  assert.equal((await database.syncConflicts.toArray()).filter(c => !c.resolvedAt).length, 1);
   await database.libraryItems.update('i', { name: 'uncertain' });
   __syncTest.drop = true;
   await client.syncNow();
@@ -259,7 +343,9 @@ try {
   });
   await client.syncNow();
   assert.equal(await database.syncOutbox.count(), 0);
-  assert(await database.libraryItems.get(rejectedId));
+  assert.equal(await database.libraryItems.get(rejectedId), undefined);
+  assert((await database.syncConflicts.toArray()).some(c =>
+    c.operation.rows?.['libraryItems:' + rejectedId]?.value?.url === 'javascript:bad'));
   assert(await database.libraryItems.get('after-rejected'));
   assert(
     (await database.syncConflicts.toArray()).some((c) => c.state === 'blocked'),
@@ -286,6 +372,20 @@ try {
   await database.syncMeta.put({id:'conflictEpoch',value:'old-generation'});
   await resolution.fetchRemoteConflicts(async()=>({conflicts:[{operation_id:blocked.id,created_at:new Date().toISOString(),resolved_at:null,detail:{code:'field_conflict',changes:[]}}]}));
   assert.equal((await database.syncConflicts.get(blocked.id)).resolvedAt,resolvedRecord.resolvedAt,'stale server list must not resurrect an acknowledged conflict after epoch metadata changes');
+  let idleWrites = 0;
+  const countWrite = () => { idleWrites++; };
+  database.syncConflicts.hook('updating', countWrite);
+  database.syncMeta.hook('updating', countWrite);
+  try {
+    await resolution.fetchRemoteConflicts(async () => ({ conflicts: [{
+      operation_id: blocked.id, created_at: new Date(resolvedRecord.createdAt).toISOString(),
+      resolved_at: null, detail: { code: 'field_conflict', changes: [] },
+    }] }));
+    assert.equal(idleWrites, 0, 'unchanged conflict polling must leave IndexedDB observers idle');
+  } finally {
+    database.syncConflicts.hook('updating').unsubscribe(countWrite);
+    database.syncMeta.hook('updating').unsubscribe(countWrite);
+  }
   const accountStorageKey = data.get('duoyu-sync-account');
   data.set('duoyu-sync-account','different-account');
   let calledWrongAccount = false;
@@ -350,6 +450,8 @@ try {
     version: 1,
     tables: {
       libraryPages: [{ id: 'p', name: 'Imported', order: 0 }],
+      memoPages: [memoPage],
+      memos: [{ ...legacyMemo, pageId: memoPage.id }],
       libraryItems: [{ ...item, gridX: 0, gridY: 0 }],
       workspaceSpaces: [],
       tabCollections: [],
@@ -360,11 +462,18 @@ try {
     },
   });
   const plan = await importer.planJsonImport(file);
+  assert.equal(plan.tables.memos[0].pageId, plan.tables.memoPages[0].id);
+  assert.notEqual(plan.tables.memoPages[0].id, memoPage.id);
+  await assert.rejects(importer.planJsonImport(JSON.stringify({
+    format: 'duoyu-backup', version: 1,
+    tables: { memos: Array.from({ length: 2001 }, (_, i) => ({...legacyMemo, id: String(i)})) },
+  })), /2000/);
   assert.notEqual(plan.tables.libraryItems[0].id, item.id);
   assert.equal(plan.tables.preferences.length, 0);
   assert(!JSON.stringify(plan).includes('must-not-import'));
   await importer.commitJsonImport(plan);
   await client.syncNow();
+  assert.equal((await database.syncShadow.get('memos:' + plan.tables.memos[0].id)).payload.body, legacyMemo.body);
   assert.equal(await database.libraryItems.count(), countBefore + 1);
   await assert.rejects(importer.commitJsonImport(plan), /已经导入/);
   await assert.rejects(importer.planJsonImport('{bad json'), /有效JSON/);
@@ -532,9 +641,102 @@ try {
     for (const peer of peers) await peer.close();
   }
 
-  console.log(
-    'PASS full client ↔ PostgreSQL: cloud bootstrap, durable queue, offline recovery, field merge, local conflict retention, lost-response idempotent retry',
-  );
+  const latestBackup = async () => (await client.rpc('/api/v1/sync/backups')).backups[0];
+  const probe = { ...item, id: randomUUID(), gridX: undefined, gridY: undefined, updatedAt: 1 };
+  await database.libraryItems.put(probe);
+  await client.syncNow();
+  async function peerEdit(fields) {
+    const row = await database.syncShadow.get('libraryItems:' + probe.id);
+    return applyOperation(pool, backend, {
+      id: randomUUID(), deviceId: randomUUID(),
+      changes: [{ table: 'libraryItems', id: probe.id, base: row.payload,
+        value: { ...row.payload, ...fields }, revision: row.revision }],
+    });
+  }
+  const beforeConflicts = () => database.syncConflicts.filter(c => !c.resolvedAt).count();
+  const baseline = await beforeConflicts();
+  await database.libraryItems.update(probe.id, { name: '共同结果', updatedAt: 2 });
+  await peerEdit({ name: '共同结果', updatedAt: 3 });
+  await client.syncNow();
+  assert.equal((await database.libraryItems.get(probe.id)).updatedAt, 3);
+  assert.equal(await beforeConflicts(), baseline);
+  await database.libraryItems.update(probe.id, { name: '本地候选' });
+  await peerEdit({ name: '云端版本' });
+  await client.syncNow();
+  assert.equal((await database.libraryItems.get(probe.id)).name, '云端版本');
+  assert.equal(await beforeConflicts(), baseline + 1);
+  await peerEdit({ name: '本地候选' });
+  await client.syncNow();
+  assert.equal(await beforeConflicts(), baseline, 'a converged historical conflict must close on both devices');
+  await database.libraryItems.delete(probe.id);
+  await peerEdit({ updatedAt: 4 });
+  await client.syncNow();
+  assert.equal(await database.libraryItems.get(probe.id), undefined);
+  assert.equal(await beforeConflicts(), baseline, 'timestamp-only drift must not block deletion');
+  await client.syncNow();
+  const previous = await latestBackup();
+  await client.backupCloudNow();
+  const firstManual = await latestBackup();
+  await client.backupCloudNow();
+  const secondManual = await latestBackup();
+  assert.notEqual(firstManual.id, previous?.id);
+  assert.notEqual(secondManual.id, firstManual.id);
+  assert.equal(BigInt(secondManual.revision), BigInt(firstManual.revision) + 1n);
+  assert.equal(secondManual.entity_count, firstManual.entity_count);
+  const spaceId = randomUUID(), collectionId = randomUUID(), linkId = randomUUID();
+  const legacyIcon = 'data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22/%3E';
+  const legacyLink = { id: linkId, collectionId, title: 'original', url: 'https://example.test/legacy',
+    icon: legacyIcon, savedAt: 1, position: 0 };
+  const seedWorkspace = await applyOperation(pool, backend, { id: randomUUID(), deviceId: randomUUID(),
+    changes: [
+      ['workspaceSpaces', spaceId, { id: spaceId, name: 'legacy space', order: 0 }],
+      ['tabCollections', collectionId, { id: collectionId, spaceId, name: 'legacy collection', order: 0, updatedAt: 1 }],
+      ['savedTabs', linkId, legacyLink],
+    ].map(([table, id, value]) => ({ table, id, base: null, value, revision: '0' })),
+  });
+  assert.equal(seedWorkspace.status, 'applied');
+  await client.syncNow();
+  const legacyBaseline = await beforeConflicts();
+  __syncTest.offline = true;
+  async function editLegacyTab(edit) {
+    const group = await database.tabCollections.get(collectionId);
+    Object.assign(group.tabs[0], edit);
+    await database.tabCollections.put(group);
+  }
+  await editLegacyTab({ title: 'draft' });
+  await editLegacyTab({ title: 'final' });
+  await client.syncNow();
+  const remoteEdit = await applyOperation(pool, backend, { id: randomUUID(), deviceId: randomUUID(),
+    changes: [{ table: 'savedTabs', id: linkId, base: legacyLink, value: { ...legacyLink, starred: true }, revision: seedWorkspace.revision }],
+  });
+  assert.equal(remoteEdit.status, 'applied');
+  __syncTest.offline = false;
+  await client.syncNow();
+  const mergedLink = (await database.tabCollections.get(collectionId)).tabs[0];
+  assert.equal(mergedLink.title, 'final');
+  assert.equal(mergedLink.starred, true);
+  assert.equal(mergedLink.icon, legacyIcon);
+  assert.equal(await beforeConflicts(), legacyBaseline);
+  const cloudLink = await database.syncShadow.get('savedTabs:' + linkId);
+  await editLegacyTab({ title: 'local choice' });
+  await applyOperation(pool, backend, { id: randomUUID(), deviceId: randomUUID(),
+    changes: [{ table: 'savedTabs', id: linkId, base: cloudLink.payload,
+      value: { ...cloudLink.payload, title: 'remote choice' }, revision: cloudLink.revision }],
+  });
+  await client.syncNow();
+  assert.equal((await database.tabCollections.get(collectionId)).tabs[0].title, 'remote choice');
+  const legacyConflict = (await database.syncConflicts.toArray()).find(c =>
+    !c.resolvedAt && resolution.conflictChanges(c).some(change => change.id === linkId));
+  assert.ok(legacyConflict);
+  await resolution.retryConflict(legacyConflict.id);
+  assert.equal((await database.tabCollections.get(collectionId)).tabs[0].title, 'local choice');
+  assert.equal(await beforeConflicts(), legacyBaseline);
+  await database.tabCollections.delete(collectionId);
+  await client.syncNow();
+  assert.equal(await database.tabCollections.get(collectionId), undefined);
+  assert.equal(await beforeConflicts(), legacyBaseline);
+  console.log('PASS legacy favicon: offline edits merge with a remote mark, explicit local choice and deletion synchronize');
+  console.log('PASS full client ↔ PostgreSQL: cloud-first projection, durable offline writes, retry and distinct manual backups without edits');
 } finally {
   client.stopCloud();
   await database.delete();

@@ -1,5 +1,6 @@
 import { chromium, expect } from '@playwright/test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -26,10 +27,24 @@ try {
     context.serviceWorkers()[0] ||
     (await context.waitForEvent('serviceworker'));
   const id = new URL(worker.url()).host;
+  const account = {
+    issuer: 'https://fixture.invalid',
+    sub: 'startup',
+    name: '启动隔离测试',
+    email: '',
+    picture: '',
+  };
+  const owner = createHash('sha256')
+    .update(account.issuer + '\0' + account.sub)
+    .digest('hex');
+  await worker.evaluate(
+    (account) => chrome.storage.session.set({ duoyuAuthSession: { account } }),
+    account,
+  );
   const page = await context.newPage();
-  await page.addInitScript(() => {
+  await page.addInitScript((owner) => {
     if (!sessionStorage.getItem('isolation-fixture')) {
-      localStorage.setItem('duoyu-sync-account', 'startup-fixture-account');
+      localStorage.setItem('duoyu-sync-account', owner);
       sessionStorage.setItem('isolation-fixture', '1');
     }
     sessionStorage.setItem(
@@ -41,9 +56,13 @@ try {
       message.type === 'duoyu-auth' && message.action === 'status'
         ? new Promise(() => {})
         : original(message);
-  });
+  }, owner);
   await page.goto(`chrome-extension://${id}/newtab.html`);
   await expect(page.locator('.library-cell-grid').first()).toBeVisible();
+  assert.equal(
+    await page.evaluate(() => localStorage.getItem('duoyu-sync-account')),
+    owner,
+  );
   await page.evaluate(async () => {
     const changed = new Promise((resolve) => {
       const listener = (changes) => {
@@ -74,9 +93,9 @@ try {
   );
   // Reproduce the old deletion path in this isolated account only.
   await page.evaluate(
-    () =>
+    (owner) =>
       new Promise((resolve, reject) => {
-        const request = indexedDB.open('duoyu-account-startup-fixture-account');
+        const request = indexedDB.open('duoyu-account-' + owner);
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const db = request.result;
@@ -92,6 +111,7 @@ try {
           };
         };
       }),
+    owner,
   );
   await page
     .getByRole('navigation', { name: '快捷 Dock' })
@@ -129,8 +149,9 @@ try {
   await peer.goto(`chrome-extension://${id}/popup.html`);
   await Promise.all([
     page.waitForEvent('domcontentloaded'),
-    peer.evaluate(() =>
-      localStorage.setItem('duoyu-sync-account', 'another-fixture-account'),
+    peer.evaluate(
+      (owner) => localStorage.setItem('duoyu-sync-account', owner),
+      owner,
     ),
   ]);
   await expect
@@ -138,8 +159,9 @@ try {
       page.evaluate(() => Number(sessionStorage.getItem('fixture-loads'))),
     )
     .toBe(3);
+  await expect(page.locator('.newtab')).toHaveCount(0);
   console.log(
-    'PASS cross-tab account changes reload while initial authentication is stalled',
+    'PASS cross-tab owner changes reload without opening private data before authentication',
   );
   await page.close();
   // A later logout can arrive before an earlier account-key lookup or the
@@ -150,12 +172,16 @@ try {
     const race = await context.newPage();
     await race.addInitScript((delay) => {
       const send = chrome.runtime.sendMessage.bind(chrome.runtime);
-      chrome.runtime.sendMessage = (message) =>
-        message.type === 'duoyu-auth' && message.action === 'status'
-          ? new Promise((resolve) => {
-              window.finishStatus = resolve;
-            })
-          : send(message);
+      const pendingStatus = new Promise((resolve) => {
+        window.finishStatus = resolve;
+      });
+      window.statusRequests = 0;
+      chrome.runtime.sendMessage = (message) => {
+        if (message.type !== 'duoyu-auth' || message.action !== 'status')
+          return send(message);
+        window.statusRequests++;
+        return pendingStatus;
+      };
       const digest = crypto.subtle.digest.bind(crypto.subtle);
       window.fixtureHash = digest(
         'SHA-256',
@@ -179,7 +205,9 @@ try {
       });
     }, delay);
     await race.goto(`chrome-extension://${id}/newtab.html`);
-    await race.waitForFunction(() => !!window.finishStatus);
+    // Both the account button and sync initialization must be waiting on the
+    // old status, otherwise the test could only be exercising the badge.
+    await race.waitForFunction(() => window.statusRequests >= 2);
     const old = { issuer: 'https://fixture.invalid', sub: 'old' };
     if (delay === 'digest') {
       await worker.evaluate(

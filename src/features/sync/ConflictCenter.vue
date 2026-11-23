@@ -6,7 +6,7 @@ import BaseDialog from '../../shared/components/base/BaseDialog.vue';
 import { database } from '../../shared/storage/database';
 import type { SyncConflict } from './capture';
 import type { Entity } from './model';
-import { conflictChanges, discardConflicts, retryConflict } from './conflicts';
+import { conflictChanges, conflictReasons, discardConflicts, retryConflict } from './conflicts';
 import { formatSyncTime, syncNow, refreshConflictPreview } from './client';
 import ConflictDesktopPreview from './ConflictDesktopPreview.vue';
 import {
@@ -60,6 +60,8 @@ const current = computed(() =>
   groups.value.find((group) => group.id === selected.value),
 );
 const changes = computed(() => current.value?.changes ?? []);
+const reasons = computed(() => [...new Set(current.value?.records.map(record =>
+  conflictReasons[record.reason] || record.reason) ?? [])]);
 const resolving = computed(() =>
   current.value?.records.some((record) => record.state === 'resolving'),
 );
@@ -95,6 +97,7 @@ watch(selected, () => {
   message.value = '';
 });
 function menuIcon(menu: string) {
+  if (menu.startsWith('memo:')) return 'Notes';
   if (menu === 'page:home') return 'Home';
   if (menu === 'page:__dock') return 'Computer';
   const id = menu.slice(menu.indexOf(':') + 1);
@@ -107,6 +110,12 @@ function menuIcon(menu: string) {
       .icon ||
     'Bookmark'
   );
+}
+function memoPreview(entities: Entity[]) {
+  return entities.filter(e => !e.deleted && (
+    (e.table === 'memoPages' && view.value === 'memo:' + e.id) ||
+    (e.table === 'memos' && view.value === 'memo:' + (e.payload.pageId || 'wall'))
+  ) && highlightedIds.value.includes(e.id));
 }
 function versionLabel(entities: Entity[], view: string) {
   return (
@@ -268,7 +277,7 @@ async function apply(side: 'local' | 'cloud') {
         </button>
       </div>
       <p v-if="error" class="error" role="alert">
-        {{ error }}。请点击「刷新预览」重试。
+        {{ error }}<template v-if="!latestReady">。请点击「刷新预览」重试。</template>
       </p>
       <p v-else-if="busy && !latestReady" role="status">
         正在读取最新云端版本，完成后即可选择。
@@ -293,15 +302,16 @@ async function apply(side: 'local' | 'cloud') {
               />
               <strong>{{ group.name }}</strong>
             </div>
-            <span>{{ group.changes.length }} 个冲突项</span>
+            <span>{{ group.changes.length }} 项相关更改</span>
             <small>{{ formatSyncTime(group.records.at(-1)!.createdAt) }}</small>
           </button>
         </aside>
         <section v-if="current" class="comparison">
           <div class="comparison-info">
             <strong>{{ current.name }}</strong>
-            <span class="frame-legend"><i />{{ changes.length }} 个冲突项</span>
+            <span class="frame-legend"><i />{{ changes.length }} 项相关更改</span>
           </div>
+          <p v-for="reason in reasons" :key="reason">{{ reason }}</p>
           <nav
             v-if="views.length > 1"
             class="preview-views"
@@ -326,7 +336,14 @@ async function apply(side: 'local' | 'cloud') {
               class="version-panel"
               :data-version="side"
             >
-              <template v-if="view">
+              <div v-if="view.startsWith('memo:')" class="memo-conflict-preview">
+                <p v-for="entry in memoPreview(side === 'local' ? local : cloud)" :key="entry.id">
+                  <strong>{{ entry.payload.name || entry.payload.title }}</strong>
+                  {{ entry.table === 'memos' ? entry.payload.body || '空白便签' : '' }}
+                </p>
+                <p v-if="!memoPreview(side === 'local' ? local : cloud).length">此版本没有对应便签或分组</p>
+              </div>
+              <template v-else-if="view">
                 <ConflictDesktopPreview
                   :entities="side === 'local' ? local : cloud"
                   :view="view"
@@ -394,6 +411,7 @@ async function apply(side: 'local' | 'cloud') {
   >
 </template>
 <style scoped>
+.memo-conflict-preview { padding: 12px 16px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 45vh; overflow: auto; }
 .conflict-content {
   color: #222;
   padding-bottom: 10px;

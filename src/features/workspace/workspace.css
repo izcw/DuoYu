@@ -1,4 +1,5 @@
 .workspace-board {
+  --collection-heading-gap: 8px;
   width: 100%;
   height: 100%;
   margin: auto;
@@ -177,22 +178,23 @@
 .workspace-collection-heading {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--collection-heading-gap);
   min-height: 36px;
 }
-.collection-handle {
+.workspace-board :is(.collection-handle, .workspace-group-handle) {
+  width: 22px;
+  height: 22px;
   cursor: pointer;
-  opacity: 0.6;
 }
 .workspace-collection-name {
   min-width: 0;
   flex: 0 1 auto;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--collection-heading-gap);
   text-align: left;
   font-size: 14px;
-  padding: 6px;
+  padding: 6px 0;
   border-radius: 8px;
 }
 .workspace-collection-name > span:first-child {
@@ -208,7 +210,7 @@
   align-items: center;
   margin-left: auto;
   display: flex;
-  gap: 2px;
+  gap: var(--collection-heading-gap);
 }
 .workspace-collection-actions .workspace-icon {
   font-size: 15px !important;
@@ -371,7 +373,16 @@
   font-size: 12px;
   opacity: 0.6;
 }
+.workspace-collection:has(> .workspace-confirm) {
+  position: relative;
+  z-index: 5;
+}
 .workspace-confirm {
+  position: absolute;
+  inset-inline: 0;
+  z-index: 1;
+  background: var(--theme-panel);
+  color: var(--theme-text);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -434,6 +445,16 @@
   padding: 8px 8px 30px;
   border-radius: 16px;
   align-items: flex-start;
+}
+.workspace-open-dot {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  pointer-events: none;
 }
 .workspace-saved-tab .workspace-link {
   align-items: flex-start;
@@ -638,7 +659,8 @@
   align-items: center;
   opacity: 1;
   font-size: 12px;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: var(--collection-heading-gap);
 }
 .workspace-group-edge {
   position: absolute;
@@ -650,7 +672,7 @@
 .workspace-group-edge.before { top: -3px; }
 .workspace-group-edge.after { bottom: -9px; }
 .workspace-browser-group:not(:hover):not(:has(:focus-visible)) > .workspace-window-label
-  > :is(.workspace-group-handle, .workspace-group-save, span) {
+  > :is(.workspace-group-save, span) {
   opacity: 0;
   pointer-events: none;
 }
@@ -664,6 +686,36 @@
   content: '';
   position: absolute;
   inset: 5px auto 0 0;
+  width: 2px;
+  background: var(--group-color);
+  pointer-events: none;
+}
+.workspace-browser-group.is-collapsed::before {
+  content: none;
+}
+.workspace-browser-group[data-drag-folded] > .workspace-open-tab {
+  display: none;
+}
+.workspace-collection[data-drag-folded] > .workspace-saved-tabs {
+  display: none;
+}
+.workspace-collection[data-drag-folded] .workspace-collection-name .workspace-action-icon {
+  transform: rotate(-90deg);
+}
+.workspace-collections:has(.workspace-collection[data-drag-folded]),
+.workspace-open-tabs:has(.workspace-browser-group[data-drag-folded]) {
+  overflow-anchor: none;
+}
+.workspace-browser-group[data-drag-folded] .workspace-group-toggle .workspace-action-icon {
+  transform: rotate(-90deg);
+}
+.workspace-browser-group.is-collapsed > .workspace-window-label {
+  position: relative;
+}
+.workspace-browser-group.is-collapsed > .workspace-window-label::before {
+  content: '';
+  position: absolute;
+  inset: 2px auto 2px -9px;
   width: 2px;
   background: var(--group-color);
   pointer-events: none;
@@ -697,16 +749,11 @@
   accent-color: #a9bfc0;
   cursor: pointer;
 }
-.workspace-saved-tab:hover > .workspace-card-checkbox,
-.workspace-card-checkbox:focus-visible,
-.workspace-card-checkbox:checked {
-  opacity: 1;
-  pointer-events: auto;
-}
 .is-list-view .workspace-card-checkbox {
   top: 12px;
 }
-.workspace-card-actions > button {
+/* Card visibility must take precedence over transient disabled-button opacity. */
+.workspace-board .workspace-card-actions > button {
   opacity: 0;
   pointer-events: none;
 }
@@ -833,8 +880,8 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px;
+  gap: var(--collection-heading-gap);
+  padding: 4px 0;
   border-radius: 6px;
   text-align: left;
   overflow-wrap: anywhere;
@@ -862,6 +909,16 @@
 }
 .workspace-board :is(.side-menu, .workspace-space-menu) {
   color: inherit;
+}
+.workspace-board .side-menu .page-iconpark,
+.workspace-board .side-menu .side-menu-choice small,
+.workspace-board :is(.workspace-toolbar, .workspace-library > .workspace-section-heading, .workspace-collection-heading),
+.workspace-board .workspace-search input::placeholder {
+  color: white;
+}
+.workspace-board :is(.workspace-toolbar, .workspace-section-heading, .workspace-collection-heading)
+  :is(.workspace-action-icon, .workspace-back img) {
+  filter: brightness(0) invert(1);
 }
 .workspace-board .side-menu-choice[aria-pressed='true'] .side-menu-letter {
   fill: white;
@@ -961,13 +1018,6 @@
 .workspace-browser-group-order {
   position: relative;
 }
-.workspace-group-handle {
-  cursor: pointer;
-  padding: 3px;
-  border-radius: 6px;
-  font-size: 16px;
-  opacity: 0.65;
-}
 .workspace-group-handle:active {
   cursor: grabbing;
 }
@@ -977,6 +1027,32 @@
 }
 .drag-landing-preview {
   pointer-events: none !important;
+}
+/* The overlay already blurs the wallpaper. Moving glass controls do not
+   need to resample that backdrop on every animation frame. */
+.mouse-sorting .workspace-board {
+  --glass-control-filter: none;
+}
+.workspace-board > .drag-landing-preview {
+  will-change: transform;
+  backdrop-filter: none;
+}
+/* Collection drop positions are calculated from grid slots. Keeping the
+   collection as the hit target avoids hovering every moving link and button. */
+.workspace-board.is-sorting-collections .workspace-saved-tabs::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+}
+.workspace-saved-tabs[data-card-preview] > .workspace-drop-hint {
+  display: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .workspace-browser-group[data-tab-preview] > [data-browser-tab-id],
+  .workspace-saved-tabs[data-card-preview] > [data-saved-id] {
+    transition: translate 160ms cubic-bezier(.2,.8,.2,1);
+  }
 }
 
 .workspace-board .workspace-spaces,
@@ -1172,12 +1248,6 @@
   outline: none;
 }
 
-.workspace-board .workspace-saved-tab.transfer-out {
-  /* Retain the source slot until commit so collections below it cannot jump
-     beneath a stationary pointer during a cross-collection preview. */
-  opacity: 0;
-  pointer-events: none;
-}
 
 .workspace-library > .workspace-section-heading {
   flex-wrap: wrap;
@@ -1279,19 +1349,17 @@
   transform: translate(-50%, -50%);
   z-index: 2;
 }
-:is(.workspace-saved-tab, .workspace-open-tab):is(:hover, :focus-within)
-  .workspace-card-checkbox,
-.workspace-card-checkbox:checked {
+:is(.workspace-saved-tab, .workspace-open-tab):is(:hover, :has(:focus-visible))
+  .workspace-card-checkbox {
   opacity: 1;
   pointer-events: auto;
 }
-:is(.workspace-saved-tab, .workspace-open-tab):is(:hover, :focus-within)
+:is(.workspace-saved-tab, .workspace-open-tab):is(:hover, :has(:focus-visible))
   .workspace-icon-slot
-  .workspace-favicon,
-.workspace-icon-slot:has(:checked) .workspace-favicon {
+  .workspace-favicon {
   opacity: 0;
 }
-.workspace-card-main .workspace-bookmark {
+.workspace-board .workspace-card-main .workspace-bookmark {
   position: relative;
   inset: auto;
   flex: none;

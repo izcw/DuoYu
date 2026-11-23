@@ -18,18 +18,15 @@ import {
   collectAssets,
   uploadAsset,
   connectAssetTransport,
-  encodeAssets,
+  encodeChanges,
   getAsset,
   ASSET_PREFIX,
 } from './assets';
-import { fetchRemoteConflicts, conflictChanges } from './conflicts';
-import { pendingWallpaperChanges } from './pending-wallpaper';
+import { fetchRemoteConflicts } from './conflicts';
 import {
-  normalized,
-  preserveLocalConflict,
+  cloudHasChange,
   denormalized,
-  pendingCollectionCreates,
-  pendingDesktopChanges,
+  sameSyncContent,
   overlay,
   rowChanges,
   same,
@@ -55,7 +52,7 @@ export function stopCloud() {
 let account: Account | null = null;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let retry = 0;
-let firstWrite = 0;
+let writeDuringSync = false;
 let retryAfter = 0;
 let generation = 0;
 let accountSelection = 0;
@@ -115,7 +112,7 @@ export async function remoteTransaction(fn: () => Promise<void>) {
 async function waitForInteraction() {
   while (
     document.querySelector?.(
-      '.ui-draggable-dragging,.ui-resizable-resizing,.grid-selection-dragging,.desktop-transfer-preview',
+      '.ui-draggable-dragging,.ui-resizable-resizing,.grid-selection-dragging,.desktop-transfer-preview,html.mouse-sorting',
     )
   )
     await new Promise((r) => setTimeout(r, 50));
@@ -146,12 +143,9 @@ export async function applyRemote(
     ]),
   );
   for (const e of updates) next.set(e.table + ':' + e.id, e);
-  const cached = new Map(
-    (await database.syncAssets.toArray()).map((a) => [
-      ASSET_PREFIX + a.id,
-      a.blob,
-    ]),
-  );
+  const refreshesSettings = (table: string) =>
+    table === 'preferences' || table === 'shortcuts' || table === 'shortcutItems';
+  let preferencesAffected = full || updates.some(e => refreshesSettings(e.table));
   await remoteTransaction(async () => {
     const previousEpoch = (await database.syncMeta.get('epoch'))?.value;
     if (previousEpoch && epoch && previousEpoch !== epoch) {
@@ -182,6 +176,8 @@ export async function applyRemote(
       });
     if (ack) {
       const op = await database.syncOutbox.get(ack);
+      if (Object.values(op?.rows ?? {}).some(row => refreshesSettings(row.table)))
+        preferencesAffected = true;
       if (conflict && op)
         await database.syncConflicts.put({
           id: ack,
@@ -198,60 +194,29 @@ export async function applyRemote(
       await database.syncOutbox.delete(ack);
     }
     const view = new Map([...next].filter(([, e]) => !e.deleted));
-    const wallpaper = await database.wallpapers.get('daily');
-    const conflicts = (
-      await database.syncConflicts.orderBy('createdAt').toArray()
-    ).flatMap((record) => {
-      const op = record.operation as Partial<CapturedOperation> | null;
-      return !record.resolvedAt &&
-        record.reason !== 'epoch_changed' &&
-        record.reason !== 'epoch_required' &&
-        op?.rows
-        ? [{ ...record, rows: op.rows }]
-        : [];
-    });
-    const unresolved = conflicts.map((record) => ({
-      changes: conflictChanges(record),
-    }));
-    // Recover creations hidden by older clients; newer operations take precedence.
-    overlay(view, pendingCollectionCreates(next, unresolved));
-    overlay(
-      view,
-      pendingDesktopChanges(unresolved).filter(
-        (c) => !next.has(c.table + ':' + c.id),
-      ),
-    );
-    const local = new Map<string, Row>();
-    const visited = new Set<string>();
-    for (const record of conflicts) {
-      for (const row of Object.values(record.rows)) {
-        const key = row.table + ':' + row.id;
-        if (visited.has(key) || row.table === 'wallpapers') continue;
-        visited.add(key);
-        const current = await database.table(row.table).get(row.id);
-        for (const entity of normalized(row.table, current ?? null))
-          local.set(entity.table + ':' + entity.id, entity.payload);
-      }
-    }
-    for (const record of conflicts)
-      preserveLocalConflict(view, rowChanges(record.rows), local);
-    overlay(view, pendingWallpaperChanges(wallpaper?.contentHash, unresolved));
     for (const op of await database.syncOutbox.orderBy('createdAt').toArray())
       overlay(view, rowChanges(op.rows));
     const tables = denormalized([...view.values()]);
     for (const table of SYNC_TABLES) {
-      let rows = tables[table] ?? [];
+      const rows = tables[table] ?? [];
       if (table === 'wallpapers') {
         const expected = new Set(rows.map((row) => row.id));
-        for (const local of await database.wallpapers.toArray())
+        const current = new Map((await database.wallpapers.toArray()).map(row => [row.id, row]));
+        for (const local of current.values())
           if (local.sourceUrl.startsWith('local:') && !expected.has(local.id))
             await database.wallpapers.delete(local.id);
-        rows = rows.flatMap((row) => {
-          const blob =
-            row.blob instanceof Blob ? row.blob : cached.get(row.blob);
-          return blob ? [{ ...row, blob }] : [];
-        });
-        if (rows.length) await database.wallpapers.bulkPut(rows as any);
+        for (const row of rows) {
+          const local = current.get(row.id);
+          const ref = row.blob;
+          if (local?.contentHash && ref === ASSET_PREFIX + local.contentHash &&
+              row.contentHash === local.contentHash && row.sourceUrl === local.sourceUrl &&
+              row.selection === local.selection && local.blob instanceof Blob) continue;
+          const blob = ref instanceof Blob ? ref :
+            typeof ref === 'string' && ref.startsWith(ASSET_PREFIX)
+              ? (await database.syncAssets.get(ref.slice(ASSET_PREFIX.length)))?.blob
+              : undefined;
+          if (blob) await database.wallpapers.put({ ...row, blob } as any);
+        }
         continue;
       }
       const local = await database.table(table).toArray(),
@@ -260,13 +225,15 @@ export async function applyRemote(
       if (removed.length) await database.table(table).bulkDelete(removed);
       const old = new Map(local.map((r) => [r.id, r]));
       const changed = rows.filter((r) => !same(old.get(r.id), r));
+      if (refreshesSettings(table) && (removed.length || changed.length)) preferencesAffected = true;
       if (changed.length) await database.table(table).bulkPut(changed);
     }
     await database.syncMeta.put({ id: 'cursor', value: revision });
     await database.syncMeta.put({ id: 'initialized', value: true });
+    await database.syncMeta.put({ id: 'cloudProjectionVersion', value: 1 });
     if (epoch) await database.syncMeta.put({ id: 'epoch', value: epoch });
   });
-  await projectPreferences(true);
+  if (preferencesAffected) await projectPreferences(true);
   void hydrateWallpaper();
   window.dispatchEvent(new Event('duoyu-assets-retry'));
 }
@@ -318,14 +285,6 @@ async function hydrateWallpaper() {
       )
         return;
       const existing = await database.wallpapers.get('daily');
-      const unresolved = (
-        await database.syncConflicts.orderBy('createdAt').toArray()
-      ).map((record) => ({
-        resolvedAt: record.resolvedAt,
-        changes: conflictChanges(record),
-      }));
-      if (pendingWallpaperChanges(existing?.contentHash, unresolved).length)
-        return;
       if (existing?.contentHash !== p.contentHash)
         await database.wallpapers.put({
           id: 'daily',
@@ -355,7 +314,7 @@ async function prepare(op: CapturedOperation) {
     if (!Array.isArray(prepared?.changes)) return op.prepared;
     const epoch = String((await database.syncMeta.get('epoch'))?.value ?? '');
     const changed = prepared.changes
-      .filter((c) => c && typeof c === 'object')
+      .filter((c) => c && typeof c === 'object' && c.table !== 'memos' && c.table !== 'memoPages')
       .flatMap((c) =>
         c.value
           ? Object.entries(c.value)
@@ -367,10 +326,39 @@ async function prepare(op: CapturedOperation) {
     return op.prepared;
   }
   const epoch = String((await database.syncMeta.get('epoch'))?.value ?? '');
-  const changes = (await encodeAssets(rowChanges(op.rows), epoch)) as Change[];
-  for (const c of changes) {
-    const shadow = await database.syncShadow.get(c.table + ':' + c.id);
-    c.revision = shadow && same(shadow.payload, c.base) ? shadow.revision : '0';
+  const captured = rowChanges(op.rows);
+  const stored = await database.syncShadow.bulkGet(captured.map(c => c.table + ':' + c.id));
+  const shadows = new Map(stored.filter(row => row !== undefined).map(row => [row.id, row]));
+  const encoded = await encodeChanges(captured, epoch, shadows);
+  const changes: Change[] = [];
+  for (const c of encoded) {
+    const shadow = shadows.get(c.table + ':' + c.id);
+    const current = shadow && !shadow.deleted ? shadow.payload as Row : null;
+    if (cloudHasChange(c, current)) continue;
+    // Undo may reinsert a tab at a clamped position or a collection in the default space.
+    // Compare the original location with the tombstone before requesting a restore.
+    const undo = op.workspaceUndo;
+    if (undo && shadow?.deleted && c.base === null && c.value) {
+      let original: Row | undefined;
+      if ('collection' in undo) {
+        if (c.table === 'tabCollections' && c.id === undo.collection)
+          original = { ...c.value, spaceId: undo.spaceId };
+        if (c.table === 'savedTabs' && c.value.collectionId === undo.collection)
+          original = c.value;
+      } else if (c.table === 'savedTabs' && c.id === undo.tab) {
+        original = { ...c.value, position: undo.position };
+      }
+      if (original && sameSyncContent(shadow.payload as Row, original)) {
+        c.restore = true;
+        c.base = shadow.payload as Row;
+        c.revision = shadow.revision;
+      }
+    }
+    if (current && shadow && sameSyncContent(current, c.base)) {
+      c.base = current;
+      c.revision = shadow.revision;
+    }
+    changes.push(c);
   }
   let device = String((await database.syncMeta.get('device'))?.value ?? '');
   if (!device) {
@@ -391,8 +379,8 @@ async function pull() {
   let cursor = String((await database.syncMeta.get('cursor'))?.value ?? '0');
   while (true) {
     let r;
+    const epoch = String((await database.syncMeta.get('epoch'))?.value ?? '');
     try {
-      const epoch = String((await database.syncMeta.get('epoch'))?.value ?? '');
       r = await rpc(
         '/api/v1/sync/changes?after=' +
           cursor +
@@ -404,14 +392,11 @@ async function pull() {
       return;
     }
     const changes = r.operations.flatMap((o: any) => o.changes);
-    await applyRemote(
-      changes,
-      r.revision,
-      false,
-      undefined,
-      undefined,
-      r.epoch,
-    );
+    if (changes.length || r.revision !== cursor || r.epoch !== epoch ||
+        !(await database.syncMeta.get('cloudProjectionVersion'))?.value)
+      await applyRemote(
+        changes, r.revision, false, undefined, undefined, r.epoch,
+      );
     cursor = r.revision;
     if (cursor === r.head) break;
   }
@@ -459,10 +444,39 @@ export async function refreshConflictPreview() {
     },
   );
 }
+// Keep each keystroke durable locally. Under the account sync lock, fold only
+// consecutive, unsent edits of one note before issuing HTTP requests.
+async function pendingUploads() {
+  const queue = database.syncOutbox;
+  return database.transaction('rw', queue, async () => {
+    const pending: CapturedOperation[] = [];
+    const merged = new Set<CapturedOperation>();
+    const removed: string[] = [];
+    let previous: CapturedOperation['rows'][string] | undefined;
+    for (const op of await queue.orderBy('createdAt').toArray()) {
+      const rows = Object.values(op.rows);
+      const row = !op.prepared && !op.resolutionOf && rows.length === 1 ? rows[0] : undefined;
+      const edit = row?.table === 'memos' && row.base && row.value ? row : undefined;
+      if (edit && previous?.id === edit.id && same(previous.value, edit.base)) {
+        previous.value = edit.value;
+        merged.add(pending[pending.length - 1]!);
+        removed.push(op.id);
+      } else {
+        pending.push(op);
+        previous = edit;
+      }
+    }
+    if (removed.length) {
+      await queue.bulkPut([...merged]);
+      await queue.bulkDelete(removed);
+    }
+    return pending;
+  });
+}
 export async function syncNow() {
   if (!account || switched()) return;
   if (running) return running;
-  firstWrite = 0;
+  writeDuringSync = false;
   running = navigator.locks.request(
     'duoyu:sync:' + activeAccountKey(),
     async () => {
@@ -471,20 +485,19 @@ export async function syncNow() {
       syncState.value.error = '';
       syncState.value.needsReload = false;
       try {
+        const uploads = await pendingUploads();
         if (!(await database.syncMeta.get('initialized'))?.value)
           await refreshSnapshot();
         // Check the dataset generation before replaying any offline operations.
         await pull();
         await fetchRemoteConflicts(rpc);
-        for (const original of await database.syncOutbox
-          .orderBy('createdAt')
-          .toArray()) {
+        for (const original of uploads) {
           const op = await database.syncOutbox.get(original.id);
           if (!op) continue;
           try {
             const prepared = (await prepare(op)) as { changes: Change[] };
             if (!prepared.changes.length) {
-              await database.syncOutbox.delete(op.id);
+              await applyRemote([], String((await database.syncMeta.get('cursor'))?.value ?? '0'), false, op.id);
               continue;
             }
             const result = await rpc(
@@ -492,10 +505,18 @@ export async function syncNow() {
               'POST',
               prepared,
             );
-            await refreshSnapshot(
-              op.id,
-              result.status === 'conflict' ? result.code : undefined,
-            );
+            const cursor = String((await database.syncMeta.get('cursor'))?.value ?? '0');
+            const epoch = (await database.syncMeta.get('epoch'))?.value;
+            if (result.status === 'applied' && result.epoch === epoch && Array.isArray(result.changes) &&
+                BigInt(result.revision) <= BigInt(cursor)) {
+              // A previous request succeeded but its response was lost. pull() already saw it.
+              await applyRemote([], cursor, false, op.id);
+            } else if (result.status === 'applied' && result.epoch === epoch && result.changes?.length &&
+                BigInt(result.revision) === BigInt(cursor) + 1n) {
+              await applyRemote(result.changes, result.revision, false, op.id);
+            } else {
+              await refreshSnapshot(op.id, result.status === 'conflict' ? result.code : undefined);
+            }
           } catch (error) {
             const status = (error as { status?: number }).status,
               code = error instanceof Error ? error.message : '';
@@ -561,18 +582,14 @@ export async function syncNow() {
       retry
         ? Math.max(retryAfter, Math.min(120000, 1000 * 2 ** retry)) +
             Math.random() * 1000
-        : syncState.value.pending || firstWrite
-          ? 800
+        : syncState.value.pending || writeDuringSync
+          ? 0
           : 30000,
     );
   }
 }
-function schedule(delay = 800) {
+function schedule(delay: number) {
   if (!account || syncState.value.needsReload) return;
-  if (delay === 800) {
-    firstWrite ||= Date.now();
-    delay = Math.min(delay, Math.max(0, firstWrite + 5000 - Date.now()));
-  }
   clearTimeout(timer);
   timer = setTimeout(() => void syncNow(), delay);
 }
@@ -616,7 +633,10 @@ export async function initializeCloud() {
       location.reload();
     }
   });
-  window.addEventListener('duoyu-local-write', () => schedule());
+  window.addEventListener('duoyu-local-write', () => {
+    if (running) writeDuringSync = true;
+    else if (!retry) schedule(0);
+  });
   window.addEventListener('online', () => schedule(0));
   window.addEventListener('focus', () => schedule(0));
   window.addEventListener('duoyu-preference-change', (e) => {
@@ -748,15 +768,17 @@ export async function restoreCloudBackup(
 
 export async function backupCloudNow() {
   if (!account || switched()) throw Error('请先登录账号再创建云端备份');
-  await syncNow();
-  if (syncState.value.error) throw Error(syncState.value.error);
+  const owner = activeAccountKey();
+  const boundary = (await database.syncOutbox.orderBy('createdAt').last())?.createdAt ?? 0;
+  // An automatic upload already in flight may predate the button click.
+  do {
+    if (!account || switched()) throw Error('账号已切换');
+    await syncNow();
+    if (syncState.value.error) throw Error(syncState.value.error);
+  } while (await database.syncOutbox.where('createdAt').belowOrEqual(boundary).count());
   await navigator.locks.request(
-    'duoyu:sync:' + activeAccountKey(),
+    'duoyu:sync:' + owner,
     async () => {
-      if (await database.syncOutbox.count())
-        throw Error('还有未同步的修改，请先完成同步');
-      if (await database.syncConflicts.filter((row) => !row.resolvedAt).count())
-        throw Error('请先处理同步更改，再创建云端备份');
       await rpc('/api/v1/sync/backups', 'POST', {});
     },
   );

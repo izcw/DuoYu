@@ -3,7 +3,10 @@ import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import WorkspaceBoard from './WorkspaceBoard.vue';
 
 const active = defineModel<boolean>({ default: false });
-const props = withDefaults(defineProps<{ label?: string; toolPage?: boolean }>(), { label: '工作区' });
+const props = withDefaults(
+  defineProps<{ label?: string; toolPage?: boolean; showWallpaper?: boolean }>(),
+  { label: '工作区' },
+);
 const emit = defineEmits<{ home: []; stepMenu: [direction: number]; step: [direction: number] }>();
 const workspace = ref<HTMLElement>();
 const board = ref<InstanceType<typeof WorkspaceBoard>>();
@@ -52,7 +55,7 @@ function key(event: KeyboardEvent) {
   } else if (event.key === 'Tab') {
     const controls = Array.from(
       workspace.value?.querySelectorAll<HTMLElement>(
-        'button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]',
+        'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]',
       ) ?? [],
     ).filter((el) => el.getClientRects().length);
     const first = controls[0],
@@ -122,7 +125,8 @@ onUnmounted(() => {
       <div
         v-if="active"
         ref="workspace"
-        class="workspace-overlay glass-focus-layer"
+        class="workspace-overlay"
+        :class="{ 'glass-focus-layer': !showWallpaper }"
         role="dialog"
         aria-modal="true"
         :aria-label="label"

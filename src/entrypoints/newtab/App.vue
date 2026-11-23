@@ -16,6 +16,8 @@ import DesktopDock from '../../features/desktop/DesktopDock.vue';
 import HomeNavigationHint from '../../features/desktop/HomeNavigationHint.vue';
 const memoBoard = ref<InstanceType<typeof MemoBoard>>();
 const MemoBoard = defineAsyncComponent(() => import('../../features/memo/MemoBoard.vue'));
+const CanvasBoard = defineAsyncComponent(() => import('../../features/canvas/CanvasBoard.vue'));
+const canvasBoard = ref<InstanceType<typeof CanvasBoard>>();
 const SettingsDialog = defineAsyncComponent(() => import('../../features/desktop/SettingsDialog.vue'));
 import { settingsPage, settingsOpen } from '../../features/desktop/settings-state';
 import ThemeSwitch from '../../features/desktop/ThemeSwitch.vue';
@@ -159,12 +161,14 @@ function stepPage(direction: number) {
     :model-value="overlayOpen"
     :label="overlayLabel"
     :tool-page="toolPage"
+    :show-wallpaper="activePage === 'duoyu-memo'"
     @update:model-value="activePage = 'duoyu-home'"
     @home="navigate('duoyu-home')"
     @step="stepDockPage"
-    @step-menu="memoBoard?.stepMenu($event)"
+    @step-menu="activePage === 'duoyu-canvas' ? canvasBoard?.stepMenu($event) : memoBoard?.stepMenu($event)"
   >
     <template #page>
+      <CanvasBoard ref="canvasBoard" v-if="activePage === 'duoyu-canvas'" />
       <MemoBoard ref="memoBoard" v-if="activePage === 'duoyu-memo'" />
     </template>
     <template #toolbar-actions>

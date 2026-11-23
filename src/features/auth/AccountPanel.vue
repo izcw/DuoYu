@@ -5,12 +5,17 @@ import { browser } from 'wxt/browser';
 import { authConfig, AUTH_SESSION_KEY, type AuthView } from './config';
 import {
   syncState,
-  syncNow,
+  backupCloudNow,
   formatSyncTime,
   reloadSyncExtension,
 } from '../sync/client';
 import ConflictCenter from '../sync/ConflictCenter.vue';
 const conflictsOpen = ref(false);
+const backups = ref<InstanceType<typeof AccountBackups>>();
+async function syncAndBackup() {
+  await backupCloudNow();
+  await backups.value?.load();
+}
 async function cloudAction(task: () => Promise<unknown>) {
   if (busy.value) return;
   busy.value = true;
@@ -132,7 +137,7 @@ function accountCenter() {
             class="primary"
             type="button"
             :disabled="busy"
-            @click="cloudAction(syncNow)"
+            @click="cloudAction(syncAndBackup)"
           >
             {{ busy ? '正在处理…' : '立即同步' }}
           </button>
@@ -152,7 +157,7 @@ function accountCenter() {
           </button>
         </div>
       </section>
-      <AccountBackups />
+      <AccountBackups ref="backups" />
       <div class="account-footer">
         <button
           class="logout"

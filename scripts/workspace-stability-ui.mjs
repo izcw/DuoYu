@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { chromium, expect } from '@playwright/test';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { prepareEditableDesktop } from './fixtures/editable-desktop.mjs';
 
 await mkdir('work', { recursive: true });
 const evidence = await mkdtemp(path.resolve('work/workspace-stability-'));
@@ -25,6 +26,21 @@ const samples = [],
   errors = [];
 let completed = false;
 try {
+  if (process.argv.includes('--guest')) {
+    const space = { id: 'default', name: '个人空间', order: 0 };
+    const group = { id: 'sample', name: '参考资料', spaceId: space.id, order: 0 };
+    await context.route('**/api/v1/guest-template', r => r.fulfill({ json: {
+      configured: true, revision: '1', entities: [
+        { table: 'workspaceSpaces', id: space.id, payload: space },
+        { table: 'tabCollections', id: group.id, payload: group },
+        ...Array.from({ length: 12 }, (_, i) => ({ table: 'savedTabs', id: 't'+i,
+          payload: { id: 't'+i, title: '参考 '+i, url: 'https://example.invalid/'+i,
+            collectionId: group.id, position: i, savedAt: 1 } })),
+      ],
+    } }));
+  } else {
+    await prepareEditableDesktop(context);
+  }
   await context.route('https://api.bimg.cc/**', (r) => r.abort());
   await context.route('https://api.bing.com/**', (r) => r.abort());
   const page = await context.newPage();

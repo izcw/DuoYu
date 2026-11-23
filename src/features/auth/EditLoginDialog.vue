@@ -19,7 +19,7 @@ watch(
       class="edit-login"
       aria-labelledby="edit-login-title"
       @close="loginPromptOpen = false"
-      @keydown.esc.stop
+      @keydown.esc.prevent.stop="loginPromptOpen = false"
       @click.self="loginPromptOpen = false"
     >
       <section v-if="loginPromptOpen">

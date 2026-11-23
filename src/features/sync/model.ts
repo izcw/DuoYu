@@ -103,6 +103,35 @@ export function rowChanges(
         ];
   });
 }
+export function editedFields(change: Change) {
+  const fields = new Set(
+    Object.keys({ ...change.base, ...change.value }).filter(
+      (key) => !same(change.base?.[key], change.value?.[key]),
+    ),
+  );
+  if (change.table === 'memos') {
+    const content = ['title', 'body', 'html'];
+    if (content.some((key) => fields.has(key)))
+      content.forEach((key) => fields.add(key));
+  }
+  return fields;
+}
+/** Timestamps describe a write; they are not an independent user edit. */
+export function sameSyncContent(a: Row | null, b: Row | null) {
+  if (!a || !b) return a === b;
+  return Object.keys({ ...a, ...b }).every(k => k === 'updatedAt' || same(a[k], b[k]));
+}
+
+export function cloudHasChange(change: Change, current: Row | null) {
+  if (!current || !change.value || !change.base)
+    return sameSyncContent(change.value, current);
+  const fields = editedFields(change);
+  const location = ['x', 'y', 'pageId', 'parent', 'order', 'gridX', 'gridY', 'width',
+    'height', 'collectionId', 'position', 'spaceId'];
+  if (location.some(k => fields.has(k))) location.forEach(k => fields.add(k));
+  return [...fields].every(k =>
+    k === 'updatedAt' || same(current[k], change.value?.[k]));
+}
 export function overlay(remote: Map<string, Entity>, changes: Change[]) {
   for (const c of changes) {
     const k = c.table + ':' + c.id;
@@ -111,11 +140,10 @@ export function overlay(remote: Map<string, Entity>, changes: Change[]) {
       continue;
     }
     const payload = { ...(remote.get(k)?.payload ?? c.base ?? {}) };
-    for (const field of Object.keys({ ...c.base, ...c.value }))
-      if (!same(c.base?.[field], c.value[field])) {
-        if (field in c.value) payload[field] = c.value[field];
-        else delete payload[field];
-      }
+    for (const field of editedFields(c)) {
+      if (field in c.value) payload[field] = c.value[field];
+      else delete payload[field];
+    }
     payload.id = c.id;
     remote.set(k, {
       table: c.table,
@@ -154,12 +182,8 @@ export function preserveLocalConflict(
       continue;
     }
     const payload = { ...remote.payload };
-    for (const field of Object.keys({ ...c.base, ...c.value })) {
-      if (
-        same(c.base?.[field], c.value[field]) ||
-        !same(local[field], c.value[field])
-      )
-        continue;
+    for (const field of editedFields(c)) {
+      if (!same(local[field], c.value[field])) continue;
       if (field in local) payload[field] = local[field];
       else delete payload[field];
     }
@@ -223,26 +247,33 @@ export function denormalized(entities: Entity[]): Record<string, Row[]> {
     shortcuts: [],
     preferences: [],
     wallpapers: [],
+    memoPages: [],
+    memos: [],
   };
   const live = entities.filter((e) => !e.deleted);
+  const tabsByCollection = new Map<string, Entity[]>();
+  const itemsByGroup = new Map<string, Entity[]>();
+  for (const entity of live) {
+    if (entity.table !== 'savedTabs' && entity.table !== 'shortcutItems') continue;
+    const isTab = entity.table === 'savedTabs';
+    const groups = isTab ? tabsByCollection : itemsByGroup;
+    const parent = isTab ? entity.payload.collectionId : entity.payload.groupId;
+    const children = groups.get(parent);
+    if (children) children.push(entity);
+    else groups.set(parent, [entity]);
+  }
   for (const e of live) {
     if (e.table === 'savedTabs' || e.table === 'shortcutItems') continue;
     const p = { ...e.payload };
     if (e.table === 'tabCollections')
-      p.tabs = live
-        .filter(
-          (t) => t.table === 'savedTabs' && t.payload.collectionId === e.id,
-        )
+      p.tabs = (tabsByCollection.get(e.id) ?? [])
         .sort((a, b) => a.payload.position - b.payload.position)
         .map((t) => {
           const { collectionId, position, ...tab } = t.payload;
           return tab;
         });
     if (e.table === 'shortcuts')
-      p.items = live
-        .filter(
-          (t) => t.table === 'shortcutItems' && t.payload.groupId === e.id,
-        )
+      p.items = (itemsByGroup.get(e.id) ?? [])
         .sort((a, b) => a.payload.position - b.payload.position)
         .map((t) => {
           const { groupId, position, ...item } = t.payload;

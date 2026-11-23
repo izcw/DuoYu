@@ -1,3 +1,4 @@
+import { prepareEditableDesktop } from './fixtures/editable-desktop.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir } from 'node:fs/promises';
@@ -19,6 +20,7 @@ const context = await chromium.launchPersistentContext(
   },
 );
 try {
+  await prepareEditableDesktop(context);
   await context.route('https://api.bimg.cc/**', (r) =>
     r.fulfill({
       contentType: 'image/svg+xml',
@@ -103,11 +105,18 @@ try {
   await page.locator('.clock-action').focus();
   const from = page.locator('[data-library-id="demo-link-11"]'),
     to = page.locator('[data-library-id="demo-link-10"]');
-  await from.dragTo(to, { targetPosition: { x: 5, y: 40 } });
+  async function dragLink(xRatio, yRatio) {
+    const a = await from.boundingBox(), b = await to.boundingBox();
+    await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b.x + b.width * xRatio, b.y + b.height * yRatio, { steps: 18 });
+    await page.mouse.up();
+  }
+  await dragLink(0.1, 0.4);
   await expect(
     page.locator('.grid-stack-item[data-library-id^="demo-link"]'),
   ).toHaveCount(2);
-  await from.dragTo(to, { targetPosition: { x: 48, y: 85 } });
+  await dragLink(0.6, 0.8);
   await expect(
     page.locator('.grid-stack-item[data-library-id^="demo-link"]'),
   ).toHaveCount(0);
@@ -203,7 +212,7 @@ try {
   await page.screenshot({ path: 'work/library-grid.png' });
   await page.evaluate(async () => {
     await new Promise((resolve, reject) => {
-      const open = indexedDB.open('duoyu');
+      const open = indexedDB.open('duoyu-account-' + localStorage.getItem('duoyu-sync-account'));
       open.onerror = () => reject(open.error);
       open.onsuccess = () => {
         const db = open.result;

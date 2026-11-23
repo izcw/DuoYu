@@ -77,6 +77,7 @@ function escapeOutside(event: KeyboardEvent) {
   if (
     props.open &&
     event.key === 'Escape' &&
+    !document.querySelector('dialog:modal') &&
     !panel.value?.contains(event.target as Node) &&
     [...document.querySelectorAll<HTMLElement>('.base-dialog-backdrop')]
       .sort(

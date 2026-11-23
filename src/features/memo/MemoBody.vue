@@ -1,190 +1,166 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import Bold from '@icon-park/vue-next/es/icons/TextBold';
-import Underline from '@icon-park/vue-next/es/icons/TextUnderline';
-import Strike from '@icon-park/vue-next/es/icons/Strikethrough';
-import Tag from '@icon-park/vue-next/es/icons/Tag';
-import Bullets from '@icon-park/vue-next/es/icons/UnorderedList';
-import Numbers from '@icon-park/vue-next/es/icons/OrderedList';
-import { cleanMemoHtml } from './markup';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import type { Memo } from '../../shared/storage/database';
+import { renderMemo } from './markdown';
+import { memoNeedsRetry, readMemoDraft, writeMemoDraft } from './memo-draft';
 
-const props = defineProps<{ body: string; html?: string; readonly: boolean }>();
-const emit = defineEmits<{ save: [text: string, html: string] }>();
+const props = defineProps<{
+  note: Memo;
+  saveBody: (source: string) => Promise<boolean>;
+  readonly: boolean;
+}>();
+const source = computed(() => readMemoDraft(props.note));
+const html = computed(() => renderMemo(source.value));
 const field = ref<HTMLElement>();
-const tagInput = ref<HTMLInputElement>();
-const tagging = ref(false);
-const tag = ref('');
-let selection: Range | undefined;
-const tools = [
-  { title: '加粗', icon: Bold, command: 'bold' },
-  { title: '标签', icon: Tag, command: 'tag' },
-  { title: '无序列表', icon: Bullets, command: 'insertUnorderedList' },
-  { title: '有序列表', icon: Numbers, command: 'insertOrderedList' },
-  { title: '下划线', icon: Underline, command: 'underline' },
-  { title: '删除线', icon: Strike, command: 'strikeThrough' },
-];
-const safeHtml = computed(() =>
-  props.html === undefined ? undefined : cleanMemoHtml(props.html),
-);
-function render() {
-  const el = field.value;
-  if (!el || document.activeElement === el || tagging.value) return;
-  if (safeHtml.value === undefined) el.textContent = props.body;
-  else if (el.innerHTML !== safeHtml.value) el.innerHTML = safeHtml.value;
-}
-onMounted(render);
-watch([safeHtml, () => props.body, () => props.readonly], render, {
-  flush: 'post',
-});
+const preview = ref<HTMLElement>();
+const editing = ref(false);
+let toEditorHtml = renderMemo;
+let editor: import('@tiptap/core').Editor | undefined;
+let lastSaved = '';
+let modified = false;
+let composing = false;
+let opening = 0;
+
 function save() {
-  if (field.value && !props.readonly)
-    emit('save', field.value.innerText, cleanMemoHtml(field.value.innerHTML));
+  if (!editor || composing || (!modified && !memoNeedsRetry(props.note.id)))
+    return;
+  const value = editor.getMarkdown();
+  if (value === lastSaved && !memoNeedsRetry(props.note.id)) return;
+  lastSaved = value;
+  void writeMemoDraft(props.note, value, props.saveBody);
 }
-function remember() {
-  const sel = window.getSelection();
-  if (
-    sel?.rangeCount &&
-    field.value?.contains(sel.getRangeAt(0).commonAncestorContainer)
-  )
-    selection = sel.getRangeAt(0).cloneRange();
+async function focus(point?: { left: number; top: number }) {
+  if (props.readonly || editing.value) return;
+  editing.value = true;
+  const token = ++opening;
+  const { createMemoEditor, editableMemoHtml } = await import('./rich-editor');
+  toEditorHtml = editableMemoHtml;
+  await nextTick();
+  if (token !== opening || !field.value) return;
+  modified = composing = false;
+  lastSaved = source.value;
+  editor = createMemoEditor(field.value, source.value, () => {
+    modified = true;
+    save();
+  });
+  const position = point && editor.view.posAtCoords(point)?.pos;
+  if (position !== undefined) editor.commands.setTextSelection(position);
+  editor.view.focus();
+  window.addEventListener('pagehide', endComposition, true);
 }
-function focus() {
-  field.value?.focus({ preventScroll: true });
+function openEditor(event: MouseEvent) {
+  if (!(event.target as Element).closest('a'))
+    void focus({ left: event.clientX, top: event.clientY });
 }
-function restore() {
-  focus();
-  if (selection && field.value?.contains(selection.commonAncestorContainer)) {
-    const sel = window.getSelection();
-    sel?.removeAllRanges();
-    sel?.addRange(selection);
-  }
+function endComposition() {
+  composing = false;
+  // A page can close before ProseMirror's DOM observer receives the last input.
+  if (editor)
+    (
+      editor.view as unknown as { domObserver: { flush(): void } }
+    ).domObserver.flush();
+  save();
 }
-function format(command: string) {
-  if (props.readonly) return;
-  restore();
-  if (command === 'tag') {
-    remember();
-    tag.value = selection?.toString() || '';
-    tagging.value = true;
-    nextTick(() => tagInput.value?.select());
-  } else {
-    document.execCommand('styleWithCSS', false, 'false');
-    if (['p', 'h1', 'h2', 'h3'].includes(command)) {
-      const block = document.queryCommandValue('formatBlock').toLowerCase();
-      document.execCommand(
-        'formatBlock',
-        false,
-        block === command ? 'p' : command,
-      );
-    } else document.execCommand(command);
-    remember();
-  }
+function finish() {
+  ++opening;
+  endComposition();
+  editor?.destroy();
+  editor = undefined;
+  editing.value = false;
+  window.removeEventListener('pagehide', endComposition, true);
 }
-function closeTag(insert: boolean) {
-  const value = tag.value.trim().replace(/^#+/, '');
-  tagging.value = false;
-  restore();
-  if (insert && value) {
-    const chip = document.createElement('mark');
-    chip.textContent = '#' + value;
-    document.execCommand('insertHTML', false, chip.outerHTML + '&nbsp;');
-  }
-  remember();
-}
-function leave(event: FocusEvent) {
-  if (
-    tagging.value &&
-    !(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node)
-  )
-    tagging.value = false;
-}
-function paste(event: ClipboardEvent) {
+onBeforeUnmount(finish);
+function escape(event: KeyboardEvent) {
+  if (event.isComposing || composing || event.keyCode === 229) return;
   event.preventDefault();
-  if (props.readonly || !event.clipboardData) return;
-  const html = event.clipboardData.getData('text/html');
-  if (html) document.execCommand('insertHTML', false, cleanMemoHtml(html));
-  else
-    document.execCommand(
-      'insertText',
-      false,
-      event.clipboardData.getData('text/plain'),
-    );
+  event.stopPropagation();
+  finish();
+  void nextTick(() => preview.value?.focus({ preventScroll: true }));
 }
-defineExpose({ focus });
+watch(source, (value) => {
+  if (editor && !modified && !composing && value !== lastSaved) {
+    lastSaved = value;
+    editor.commands.setContent(toEditorHtml(value), { emitUpdate: false });
+  }
+});
+defineExpose({ focus: () => focus() });
 </script>
+
 <template>
-  <div class="memo-body" @focusout="leave">
+  <div class="memo-body">
     <div
+      v-if="editing && !readonly"
       ref="field"
-      class="memo-text"
-      :contenteditable="!readonly"
-      :role="readonly ? undefined : 'textbox'"
-      :aria-label="readonly ? undefined : '便签正文'"
-      :aria-multiline="readonly ? undefined : true"
-      @input="save"
-      @mouseup="remember"
-      @keyup="remember"
-      @blur="remember"
-      @paste="paste"
-      @drop.prevent
-    />
+      class="memo-text memo-preview memo-writing"
+      @compositionstart="composing = true"
+      @compositionend="endComposition"
+      @keydown.tab.capture.stop
+      @keydown.esc.capture="escape"
+      @focusout="!field?.contains($event.relatedTarget as Node) && finish()"
+    ></div>
     <div
-      v-if="!readonly"
-      class="memo-format-bar"
-      role="toolbar"
-      aria-label="便签格式"
-    >
-      <template v-if="tagging">
-        <input
-          ref="tagInput"
-          v-model="tag"
-          maxlength="80"
-          aria-label="标签名称"
-          placeholder="标签名称"
-          @keydown.enter.prevent="closeTag(true)"
-          @keydown.esc.stop.prevent="closeTag(false)"
-        />
-        <button
-          type="button"
-          aria-label="插入标签"
-          @mousedown.prevent
-          @click="closeTag(true)"
-        >
-          ✓
-        </button>
-      </template>
-      <template v-else>
-        <button
-          type="button"
-          title="普通文字"
-          @mousedown.prevent="remember"
-          @click="format('p')"
-        >
-          普通文字
-        </button>
-        <button
-          v-for="level in 3"
-          :key="level"
-          type="button"
-          :aria-label="level + '级标题'"
-          :title="level + '级标题'"
-          @mousedown.prevent="remember"
-          @click="format('h' + level)"
-        >
-          H{{ level }}
-        </button>
-        <button
-          v-for="tool in tools"
-          :key="tool.command"
-          type="button"
-          :aria-label="tool.title"
-          :title="tool.title"
-          @mousedown.prevent="remember"
-          @click="format(tool.command)"
-        >
-          <component :is="tool.icon" :size="15" fill="currentColor" />
-        </button>
-      </template>
-    </div>
+      v-else
+      ref="preview"
+      class="memo-text memo-preview"
+      :tabindex="readonly ? undefined : 0"
+      :aria-label="readonly ? undefined : '编辑便签正文'"
+      :data-placeholder="readonly ? '' : '写点什么…'"
+      @click="openEditor"
+      @keydown.enter.self.stop.prevent="focus()"
+      v-html="html"
+    ></div>
   </div>
 </template>
+
+<style scoped>
+.memo-writing :deep(.memo-document) {
+  min-height: 100%;
+  outline: none;
+  white-space: pre-wrap;
+}
+.memo-preview {
+  white-space: normal;
+}
+.memo-preview[tabindex] {
+  cursor: text;
+}
+.memo-preview
+  :deep(:is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, table)) {
+  margin-block: 0 0.4em;
+}
+.memo-preview :deep(:last-child) {
+  margin-bottom: 0;
+}
+.memo-preview :deep(blockquote) {
+  margin-inline: 0;
+  border-inline-start: 2px solid currentColor;
+  padding-inline-start: 0.65em;
+}
+.memo-preview :deep(code) {
+  background: color-mix(in srgb, currentColor 9%, transparent);
+  border-radius: 3px;
+  padding-inline: 0.18em;
+}
+.memo-preview :deep(pre) {
+  overflow-x: auto;
+  white-space: pre;
+}
+.memo-preview :deep(a) {
+  color: inherit;
+  text-decoration: underline;
+}
+.memo-preview :deep(img) {
+  max-width: 100%;
+  height: auto;
+}
+.memo-preview :deep(input[type='checkbox']) {
+  margin: 0 0.35em 0 0;
+}
+.memo-preview :deep(table) {
+  border-collapse: collapse;
+}
+.memo-preview :deep(:is(th, td)) {
+  padding: 0.12em 0.4em;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+}
+</style>

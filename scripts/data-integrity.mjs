@@ -61,8 +61,11 @@ db.version(1).stores({
   widgetLayouts: 'id',
 });
 globalThis.__auditDb = db;
-let account = '';
-globalThis.localStorage = { getItem: () => account };
+const originalAccount = 'data-audit-account';
+let account = originalAccount;
+globalThis.localStorage = {
+  getItem: (key) => key === 'duoyu-sync-account' ? account : null,
+};
 const { guardAccountWrites } = await import('../work/data-audit/account.mjs');
 guardAccountWrites(db);
 const api = await import('../work/data-audit/library.mjs');
@@ -98,7 +101,7 @@ try {
   );
   account = 'another-account';
   await assert.rejects(api.saveLibraryItem(draft), /账号已切换/);
-  account = '';
+  account = originalAccount;
   await assert.rejects(
     db.transaction('rw', db.libraryPages, async () => {
       await db.libraryPages.add({ id: 'first' });
@@ -106,7 +109,7 @@ try {
       await db.libraryPages.add({ id: 'second' });
     }),
   );
-  account = '';
+  account = originalAccount;
   assert.equal(await db.libraryPages.get('first'), undefined);
   await assert.rejects(
     api.saveLibraryItem({ ...draft, pageId: 'deleted' }),

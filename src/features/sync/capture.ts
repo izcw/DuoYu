@@ -7,7 +7,12 @@ export const SYNC_TABLES = [
   'shortcuts',
   'preferences',
   'wallpapers',
+  'memoPages',
+  'memos',
 ];
+export type WorkspaceUndo =
+  | { collection: string; spaceId?: string }
+  | { tab: string; position: number };
 export interface CapturedOperation {
   id: string;
   createdAt: number;
@@ -17,6 +22,7 @@ export interface CapturedOperation {
   >;
   prepared?: unknown;
   resolutionOf?: string;
+  workspaceUndo?: WorkspaceUndo;
 }
 export interface SyncConflict {
   id: string;
@@ -113,7 +119,7 @@ export function installSyncCapture(database: Dexie, enabled: boolean) {
           return {
             ...table,
             mutate(req) {
-              const tx = req.trans as IDBTransaction & { syncRemote?: boolean };
+              const tx = req.trans as IDBTransaction & { syncRemote?: boolean; workspaceUndo?: WorkspaceUndo };
               if (tx.syncRemote) return table.mutate(req);
               let state = states.get(tx);
               if (!state) {
@@ -122,6 +128,7 @@ export function installSyncCapture(database: Dexie, enabled: boolean) {
                     id: crypto.randomUUID(),
                     createdAt: Date.now(),
                     rows: {},
+                    ...(tx.workspaceUndo && { workspaceUndo: tx.workspaceUndo }),
                   },
                   tail: Promise.resolve(),
                 };

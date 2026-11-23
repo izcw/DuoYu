@@ -20,6 +20,15 @@ export function useMouseSort() {
       return;
     stop?.();
     let started = false;
+    const frameLimited = !!owner.closest('.workspace-board');
+    if (frameLimited) {
+      // This gesture is sorted locally. Prevent Chromium from starting its
+      // own drag-image capture alongside our pointer-following preview.
+      event.preventDefault();
+      event.target.closest<HTMLElement>('button, a[href], [tabindex]')?.focus({ preventScroll: true });
+    }
+    let frame = 0;
+    let latest: MouseEvent;
     const transfer = new DataTransfer();
     function send(type: string, el: Element, e: MouseEvent) {
       return !el.dispatchEvent(
@@ -49,6 +58,15 @@ export function useMouseSort() {
         document.documentElement.classList.add('mouse-sorting');
       }
       e.preventDefault();
+      if (frameLimited) {
+        latest = e;
+        if (!frame) frame = requestAnimationFrame(() => {
+          frame = 0;
+          hover(latest);
+        });
+      } else hover(e);
+    }
+    function hover(e: MouseEvent) {
       const hit = document.elementFromPoint(e.clientX, e.clientY);
       if (hit && owner.contains(hit)) {
         const scroll = hit.closest<HTMLElement>(
@@ -56,8 +74,8 @@ export function useMouseSort() {
         );
         if (scroll) {
           const r = scroll.getBoundingClientRect();
-          scroll.scrollTop +=
-            e.clientY < r.top + 24 ? -12 : e.clientY > r.bottom - 24 ? 12 : 0;
+          const delta = e.clientY < r.top + 24 ? -12 : e.clientY > r.bottom - 24 ? 12 : 0;
+          if (delta) scroll.scrollTop += delta;
         }
         send('dragover', hit, e);
       }
@@ -88,6 +106,7 @@ export function useMouseSort() {
       cleanup();
     }
     function cleanup() {
+      cancelAnimationFrame(frame);
       document.documentElement.classList.remove('mouse-sorting');
       window.removeEventListener('mousemove', move, true);
       window.removeEventListener('mouseup', release, true);

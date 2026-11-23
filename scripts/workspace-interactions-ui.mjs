@@ -1,5 +1,6 @@
 import { selectGlassMode } from './ui-helpers.mjs';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { mkdtemp, mkdir, readFile } from 'node:fs/promises';
 import { chromium, expect } from '@playwright/test';
@@ -16,15 +17,40 @@ const context = await chromium.launchPersistentContext(
   },
 );
 try {
+  const worker =
+    context.serviceWorkers()[0] ||
+    (await context.waitForEvent('serviceworker'));
+  await context.route(/^https?:/, (route) => route.abort());
   const image = await readFile('public/images/duoyu.png');
   await context.route('https://api.bimg.cc/**', (r) =>
     r.fulfill({ contentType: 'image/png', body: image }),
   );
-  await context.route('https://api.bing.com/**', (r) => r.abort());
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto('chrome://newtab');
+  const account = {
+    issuer: 'https://fixture.invalid',
+    sub: 'workspace-interactions',
+    name: '工作区测试',
+  };
+  const owner = createHash('sha256')
+    .update(account.issuer + '\0' + account.sub)
+    .digest('hex');
+  // Glass preferences are writable only in an account-scoped desktop.
+  await page.addInitScript(
+    ({ account, owner }) => {
+      localStorage.setItem('duoyu-sync-account', owner);
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      chrome.runtime.sendMessage = (message) =>
+        message.type === 'duoyu-auth' && message.action === 'status'
+          ? Promise.resolve({ view: { account } })
+          : send(message);
+    },
+    { account, owner },
+  );
+  await page.goto(
+    'chrome-extension://' + new URL(worker.url()).host + '/newtab.html',
+  );
   const input = page.locator('#search-input');
   await input.fill('保留搜索内容');
   const workspace = page.locator('.workspace-overlay');
@@ -32,6 +58,7 @@ try {
     .getByRole('navigation', { name: '快捷 Dock' })
     .getByRole('button', { name: '标签工作区', exact: true });
   await selectGlassMode(page, '柔和');
+  await expect(page.getByRole('dialog', { name: '设置' })).toHaveCount(0);
   await expect(workspace).toHaveCount(0);
   // Current renderer uses CSS glass; the old WebGL canvas is not mounted.
   async function recordMotion() {

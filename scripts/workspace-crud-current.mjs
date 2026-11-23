@@ -1,3 +1,4 @@
+import { prepareEditableDesktop } from './fixtures/editable-desktop.mjs';
 import { chromium, expect } from '@playwright/test';
 import { mkdtemp, mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -19,7 +20,9 @@ const context = await chromium.launchPersistentContext(
   },
 );
 try {
-  await context.route('https://api.bimg.cc/**', (r) => r.abort());
+  const whiteWallpaper = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFUlEQVR4nGP8//8/AzbAhFV00EoAAFbUAw037MyjAAAAAElFTkSuQmCC', 'base64');
+  await context.route('https://api.bimg.cc/**', route => route.fulfill({ contentType: 'image/png', body: whiteWallpaper }));
+  await prepareEditableDesktop(context);
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -82,24 +85,30 @@ try {
     .toBe(true);
   await expect(page.locator('.newtab')).toHaveCSS('visibility', 'hidden');
   await expect(page.locator('.workspace-overlay')).toHaveCSS('opacity', '1');
-  // On the brightest possible wallpaper, the focus layer must retain enough
-  // contrast for the workspace's white primary text (WCAG relative luminance).
-  const contrast = await page.locator('.workspace-overlay').evaluate((el) => {
-    const parts = getComputedStyle(el)
-      .backgroundColor.match(/[\d.]+/g)
-      .map(Number);
-    const alpha = parts[3] ?? 1;
-    const linear = parts
-      .slice(0, 3)
-      .map((v) => (v * alpha + 255 * (1 - alpha)) / 255)
-      .map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
-    return (
-      1.05 /
-      (linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722 + 0.05)
-    );
+  // Sample the rendered wallpaper, shade and glass behind the heading.
+  await expect(page.locator('.wallpaper img.loaded').first()).toBeAttached();
+  const heading = board.locator('h1');
+  const rect = await heading.boundingBox();
+  const sample = await page.screenshot({
+    clip: { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2), width: 1, height: 1 },
+    style: '.workspace-board h1 { visibility: hidden !important }',
   });
-  if (contrast < 4.5)
-    throw new Error('Workspace primary text loses contrast on white wallpaper');
+  const contrast = await heading.evaluate(async (el, png) => {
+    const bitmap = await createImageBitmap(new Blob([Uint8Array.from(atob(png), c => c.charCodeAt(0))], {type: 'image/png'}));
+    const ctx = new OffscreenCanvas(1, 1).getContext('2d');
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const background = [...ctx.getImageData(0,0,1,1).data].slice(0,3);
+    const foreground = getComputedStyle(el).color.match(/[\d.]+/g).map(Number);
+    const luminance = rgb => rgb.map(v => v/255)
+      .map(v => v <= 0.04045 ? v/12.92 : ((v+0.055)/1.055)**2.4)
+      .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+    const alpha = foreground[3] ?? 1;
+    const text = foreground.slice(0,3).map((v,i) => v*alpha + background[i]*(1-alpha));
+    const [dark, light] = [luminance(background), luminance(text)].sort((a,b) => a-b);
+    return (light + 0.05) / (dark + 0.05);
+  }, sample.toString('base64'));
+  console.log('Workspace heading contrast on white wallpaper:', contrast);
   await page.screenshot({ path: 'work/workspace-current-mobile.png' });
   await saved.getByRole('button', { name: '更多集合操作' }).click();
   await saved.getByRole('button', { name: '删除集合', exact: true }).click();
@@ -116,7 +125,7 @@ try {
   await page.evaluate(
     () =>
       new Promise((resolve, reject) => {
-        const open = indexedDB.open('duoyu');
+        const open = indexedDB.open('duoyu-account-' + localStorage.getItem('duoyu-sync-account'));
         open.onerror = () => reject(open.error);
         open.onsuccess = () => {
           const db = open.result;
@@ -154,6 +163,8 @@ try {
     board.locator('[data-saved-id="invalid-url"] .workspace-favicon'),
   ).toHaveText('旧');
   await expect.poll(() => errors).toEqual([]);
+  if (contrast < 4.5)
+    throw new Error('Workspace primary text loses contrast on white wallpaper');
   console.log(
     'PASS current Dock entry, collection create/rename/persistence, 320/390px layout, white-wallpaper primary text contrast, search clear, delete cancel/confirm/undo and Escape',
   );

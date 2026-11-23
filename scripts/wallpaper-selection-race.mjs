@@ -30,6 +30,7 @@ const cloud = compile(
   cloudSource,
   {
     ref: (value) => ({ value }),
+    requireAccount: () => true,
     watch: () => {},
     onUnmounted: () => {},
     defineProps: () => ({ kind: 'wallpapers' }),

@@ -1,3 +1,4 @@
+import { prepareEditableDesktop } from './fixtures/editable-desktop.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir, readFile } from 'node:fs/promises';
@@ -20,6 +21,7 @@ const context = await chromium.launchPersistentContext(
   },
 );
 try {
+  await prepareEditableDesktop(context);
   await context.route('https://api.bimg.cc/**', (r) =>
     r.fulfill({
       contentType: 'image/svg+xml',
@@ -38,19 +40,17 @@ try {
   await expect(page.locator('[data-library-id="home-widget-1"]')).toBeVisible();
   await page.waitForTimeout(800);
 
-  const rect = await grid.boundingBox();
-  const cellWidth = await grid.evaluate(
-    (el) => el.getBoundingClientRect().width / el.gridstack.getColumn(),
-  );
-  async function menu(x, y) {
-    if (x === undefined) {
+  async function menu(column) {
+    if (column === undefined) {
       await openGridMenu(page, grid);
       return;
     }
-    await page.mouse.click(x, y, { button: 'right' });
+    const rect = await grid.boundingBox();
+    const cellWidth = rect.width / await grid.evaluate(el => el.gridstack.getColumn());
+    await grid.click({ button: 'right', position: { x: (column + 0.5) * cellWidth, y: 20 } });
     await expect(page.getByRole('menu', { name: '收藏页菜单' })).toBeVisible();
   }
-  await menu(rect.x + 6 * cellWidth + 20, rect.y + 20);
+  await menu(6);
   await expect(page.getByRole('menu', { name: '收藏页菜单' }).getByRole('menuitem')).toHaveText([
     '添加网址', '新建文件夹', '图标搜索', '组件商店', '壁纸商店', '自动布局', '设置',
   ]);
@@ -80,7 +80,7 @@ try {
     .locator('.base-dialog-backdrop')
     .click({ position: { x: 8, y: 8 } });
   await expect(page.locator('.folder-dialog')).toHaveCount(0);
-  await menu(rect.x + 10 * cellWidth + 20, rect.y + 20);
+  await menu(10);
   await page.getByRole('menuitem', { name: '添加网址' }).click();
   await expect(
     page.getByRole('dialog', { name: '添加网址', exact: true }),
@@ -97,7 +97,7 @@ try {
     .filter({ has: page.locator('.tile-caption', { hasText: '位置测试' }) });
   await expect(link).toHaveAttribute('gs-x', '10');
   await expect(link).toHaveAttribute('gs-y', '0');
-  await menu(rect.x + 12 * cellWidth + 20, rect.y + 20);
+  await menu(12);
   await page.getByRole('menuitem', { name: '组件商店', exact: true }).click();
   await page.getByRole('button', { name: '日历' }).click();
   const calendar = page
@@ -146,10 +146,23 @@ try {
   await expect(
     page.getByRole('button', { name: '删除上传图片', exact: true }),
   ).toBeVisible();
-  assert.equal(
-    await page.evaluate(() => localStorage.getItem('duoyu-wallpaper-mode')),
-    'custom',
-  );
+  async function savedWallpaper() {
+    return page.evaluate(async () => {
+      const db = await new Promise((resolve, reject) => {
+        const open = indexedDB.open('duoyu-account-' + localStorage.getItem('duoyu-sync-account'));
+        open.onsuccess = () => resolve(open.result);
+        open.onerror = () => reject(open.error);
+      });
+      try {
+        return await new Promise((resolve, reject) => {
+          const request = db.transaction('preferences').objectStore('preferences').get('wallpaperDesktop:default');
+          request.onsuccess = () => resolve(request.result?.value.selection);
+          request.onerror = () => reject(request.error);
+        });
+      } finally { db.close(); }
+    });
+  }
+  await expect.poll(savedWallpaper).toBe('upload');
   await page.keyboard.press('Escape');
   await menu();
   await page
@@ -162,15 +175,13 @@ try {
   await expect
     .poll(() => grid.evaluate((el) => el.gridstack.engine.mode))
     .toBe('top');
-  assert.equal(
-    await page.evaluate(() => localStorage.getItem('duoyu-wallpaper-mode')),
-    'custom',
-  );
+  await expect.poll(savedWallpaper).toBe('upload');
   await menu();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await expect(
     page.getByRole('dialog', { name: '设置', exact: true }),
   ).toBeVisible();
+  await page.getByRole('button', { name: '常规设置', exact: true }).click();
   await page
     .getByRole('combobox', { name: '当前页面布局', exact: true })
     .click();

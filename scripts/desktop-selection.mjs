@@ -1,3 +1,4 @@
+import { prepareEditableDesktop } from './fixtures/editable-desktop.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir } from 'node:fs/promises';
@@ -19,6 +20,7 @@ const context = await chromium.launchPersistentContext(
   },
 );
 try {
+  await prepareEditableDesktop(context);
   await context.route('https://api.bimg.cc/**', (r) =>
     r.fulfill({
       contentType: 'image/svg+xml',
@@ -44,7 +46,7 @@ try {
   // evolving default home layout. All writes stay in this temporary profile.
   await page.evaluate(async () => {
     const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('duoyu');
+      const request = indexedDB.open('duoyu-account-' + localStorage.getItem('duoyu-sync-account'));
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });

@@ -13,6 +13,7 @@ import {
 } from '../../shared/storage/database';
 import { addTabs, createCollection, removeCollection, restoreCollection, webUrl } from './collections';
 import { ensureDefaultSpace } from './spaces';
+import type { WorkspaceUndo } from '../sync/capture';
 
 export type BrowserTab = Browser.tabs.Tab;
 
@@ -36,6 +37,14 @@ export function useWorkspace() {
       : spaces.value.find((s) => s.id === activeSpace.value),
   );
   const tabs = ref<BrowserTab[]>([]);
+  const openTabUrls = computed<Set<string>>(previous => {
+    const urls = new Set<string>();
+    for (const tab of tabs.value) {
+      const url = webUrl(tab.pendingUrl || tab.url || '');
+      if (url) urls.add(url);
+    }
+    return previous && previous.size === urls.size && [...urls].every(url => previous.has(url)) ? previous : urls;
+  });
   const loading = ref(true);
   const tabsLoading = ref(true);
   const needsTabPermission = ref(false);
@@ -91,7 +100,7 @@ export function useWorkspace() {
     noticeTimer = setTimeout(dismissNotice, 3000);
   }
   const busy = ref(false);
-  const undo = ref<(() => Promise<void>) | null>(null);
+  const undo = ref<{ intent: WorkspaceUndo; apply: () => Promise<void> } | null>(null);
   let owner: BrowserTab | undefined;
   let disposed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -158,10 +167,13 @@ export function useWorkspace() {
   const savedCount = computed(() =>
     collections.value.reduce((n, c) => n + c.tabs.length, 0),
   );
-  async function syncAfterDrop() {
+  async function syncCollections() {
     allCollections.value = await database.tabCollections
       .orderBy('order')
       .toArray();
+  }
+  async function syncAfterDrop() {
+    await syncCollections();
     await refresh();
   }
   async function run(action: () => Promise<void>) {
@@ -297,7 +309,7 @@ export function useWorkspace() {
     }
     if (!entries.length) throw new Error('此群组没有可保存的网页');
     const name = id === -1 ? '未分组' : group?.title?.trim() || '未命名群组';
-    const collectionId = await createCollection(name, entries, targetSpace);
+    const collectionId = await createCollection(name, entries, targetSpace, group ? collectionColor(group.color) : undefined);
     activeSpace.value = targetSpace;
     query.value = '';
     let closed = 0;
@@ -365,7 +377,10 @@ export function useWorkspace() {
   }
   async function removeGroup(id: string) {
     const previous = await removeCollection(id);
-    undo.value = () => restoreCollection(previous);
+    undo.value = {
+      intent: { collection: id, spaceId: previous.spaceId },
+      apply: () => restoreCollection(previous),
+    };
     showNotice(`已删除「${previous.name}」`);
   }
   async function removeTab(group: string, id: string) {
@@ -382,19 +397,25 @@ export function useWorkspace() {
     });
     if (!previous) return;
     const saved = previous;
-    undo.value = async () => {
-      await database.transaction('rw', database.tabCollections, async () => {
+    undo.value = {
+      intent: { tab: id, position: index },
+      apply: async () => {
         const c = await database.tabCollections.get(group);
         if (!c) throw new Error('原集合已被删除，无法撤销');
         if (!c.tabs.some((t) => t.id === saved.id))
           c.tabs.splice(Math.min(index, c.tabs.length), 0, saved);
         await database.tabCollections.put(c);
-      });
+      },
     };
     showNotice('已移除收藏');
   }
   async function undoDelete() {
-    await undo.value?.();
+    const action = undo.value;
+    if (!action) return;
+    await database.transaction('rw', database.tabCollections, database.workspaceSpaces, async tx => {
+      Object.assign(tx.idbtrans!, { workspaceUndo: { ...action.intent } });
+      await action.apply();
+    });
     undo.value = null;
     showNotice('已恢复');
   }
@@ -468,11 +489,13 @@ export function useWorkspace() {
   return {
     spaces,
     syncAfterDrop,
+    syncCollections,
     isMarkedSpace,
     activeSpace,
     currentSpace,
     collections,
     visibleCollections,
+    openTabUrls,
     visibleTabs,
     windowOptions,
     tabGroups,

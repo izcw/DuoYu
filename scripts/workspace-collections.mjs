@@ -1,3 +1,5 @@
+import { createServer } from 'node:http';
+import { prepareEditableDesktop } from './fixtures/editable-desktop.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir } from 'node:fs/promises';
@@ -18,17 +20,19 @@ const context = await chromium.launchPersistentContext(
     ],
   },
 );
+const fixtureServer = createServer((req, res) => {
+  const name = /^\/workspace-fixture\/([A-Za-z0-9]+)$/.exec(req.url)?.[1];
+  res.writeHead(name ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(name ? '<title>' + name + '</title><p>Fixture</p>' : '');
+});
+await new Promise((resolve, reject) => fixtureServer.once('error', reject).listen(0, '127.0.0.1', resolve));
+const fixtures = 'http://127.0.0.1:' + fixtureServer.address().port + '/workspace-fixture';
 try {
+  await prepareEditableDesktop(context);
   await context.route('https://api.bimg.cc/**', (r) =>
     r.fulfill({
       contentType: 'image/svg+xml',
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080"><defs><linearGradient id="a" x2="1" y2="1"><stop stop-color="#33495d"/><stop offset="1" stop-color="#796461"/></linearGradient></defs><path fill="url(#a)" d="M0 0h1920v1080H0z"/></svg>',
-    }),
-  );
-  await context.route('https://example.com/workspace-fixture/**', (r) =>
-    r.fulfill({
-      contentType: 'text/html',
-      body: `<title>${r.request().url().split('/').at(-1)}</title><p>Fixture</p>`,
     }),
   );
   const page = await context.newPage();
@@ -79,7 +83,7 @@ try {
   const tabs = [];
   for (const name of ['Alpha', 'Beta', 'Gamma']) {
     const fixture = await context.newPage();
-    const url = `https://example.com/workspace-fixture/${name}`;
+    const url = `${fixtures}/${name}`;
     await fixture.goto(url);
     tabs.push(
       await page.evaluate(
@@ -106,7 +110,7 @@ try {
     await group.getByRole('button', { name: action, exact: true }).click();
   }
   await expect(board).toBeVisible();
-  await expect(board.locator('.workspace-tabs .workspace-icon')).toHaveCount(0);
+  await expect(board.getByRole('complementary', { name: '浏览器打开的标签页' })).toBeVisible();
   await expect(board.locator('.workspace-save-controls')).toHaveCount(0);
   const alphaTab = board.locator(`[data-browser-tab-id="${tabs[0].id}"]`);
   await expect(alphaTab.locator('strong')).toHaveText('Alpha');
@@ -199,12 +203,12 @@ try {
     has: page.getByRole('button', { name: '稍后阅读', exact: true }),
   });
   const secondId = await second.getAttribute('data-collection-id');
-  await first
-    .locator('.workspace-saved-tab')
-    .filter({ hasText: 'Alpha' })
-    .hover();
-  await first.getByRole('button', { name: '更多 Alpha', exact: true }).click();
-  await first.getByLabel('移动收藏 Alpha').selectOption(secondId);
+  const alphaCard = first.locator('.workspace-saved-tab').filter({ hasText: 'Alpha' });
+  await alphaCard.click({ button: 'right' });
+  await expect(alphaCard.getByRole('button', { name: '修改', exact: true })).toBeVisible();
+  await expect(alphaCard.getByRole('combobox')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await alphaCard.dragTo(second.locator('.workspace-collection-heading'));
   await expect(second.locator('.workspace-saved-tab')).toHaveCount(1);
   await second
     .locator('.workspace-saved-tab')
@@ -237,7 +241,7 @@ try {
   ]);
   await second
     .getByRole('button', { name: '拖动集合 稍后阅读', exact: true })
-    .dragTo(first);
+    .dragTo(first.locator('.workspace-collection-heading'), { targetPosition: { x: 12, y: 4 } });
   await expect(page.locator('.drag-landing-preview')).toHaveCount(0);
   await expect(page.locator('.workspace-collection').first()).toHaveAttribute(
     'data-collection-id',
@@ -326,7 +330,7 @@ try {
     .click();
   assert.equal(
     await page.evaluate(() => window.copiedLinks),
-    'https://example.com/workspace-fixture/Alpha',
+    fixtures + '/Alpha',
   );
   await first
     .locator('.workspace-saved-tab')
@@ -357,7 +361,7 @@ try {
   await editor.getByLabel('名称', { exact: true }).fill('Alpha');
   await editor
     .getByLabel('网址', { exact: true })
-    .fill('https://example.com/workspace-fixture/Alpha');
+    .fill(fixtures + '/Alpha');
   await editor.getByRole('button', { name: '保存修改' }).click();
   await expect(editor).toHaveCount(0);
 
@@ -426,13 +430,13 @@ try {
   await peer.close();
   // External browser events update the visible list without reopening the workspace.
   const otherPage = await context.newPage();
-  await otherPage.goto('https://example.com/workspace-fixture/OtherWindow');
-  const remote = await page.evaluate(async () => {
+  await otherPage.goto(fixtures + '/OtherWindow');
+  const remote = await page.evaluate(async (fixtures) => {
     const [tab] = await chrome.tabs.query({
-      url: 'https://example.com/workspace-fixture/OtherWindow',
+      url: fixtures + '/OtherWindow',
     });
     return chrome.windows.create({ tabId: tab.id, focused: false });
-  });
+  }, fixtures);
   await page.bringToFront();
   const scope = board.locator('.workspace-tab-scope');
   await expect(scope.locator('button')).toHaveCount(2);
@@ -511,15 +515,15 @@ try {
     )
     .toEqual([...beforeMemberOrder].reverse());
   const sortingPage = await context.newPage();
-  await sortingPage.goto('https://example.com/workspace-fixture/SortGroup');
-  const sortingGroup = await page.evaluate(async () => {
+  await sortingPage.goto(fixtures + '/SortGroup');
+  const sortingGroup = await page.evaluate(async (fixtures) => {
     const [tab] = await chrome.tabs.query({
-      url: 'https://example.com/workspace-fixture/SortGroup',
+      url: fixtures + '/SortGroup',
     });
     const id = await chrome.tabs.group({ tabIds: [tab.id] });
     await chrome.tabGroups.update(id, { title: '排序测试', color: 'red' });
     return id;
-  });
+  }, fixtures);
   await page.bringToFront();
   const sortingSection = board.locator(`[data-group-id="${sortingGroup}"]`);
   await sortingSection
@@ -566,7 +570,7 @@ try {
   const loosePages = [];
   for (const name of ['LooseA', 'LooseB']) {
     const fixture = await context.newPage();
-    await fixture.goto(`https://example.com/workspace-fixture/${name}`);
+    await fixture.goto(`${fixtures}/${name}`);
     loosePages.push(fixture);
   }
   await page.bringToFront();
@@ -580,9 +584,21 @@ try {
   await expect(looseRow).toBeVisible();
   await expect(page.locator('.drag-landing-preview')).toHaveCount(0);
   await page.waitForTimeout(250);
-  await sortingSection
-    .getByRole('button', { name: '拖动群组 排序测试' })
-    .dragTo(looseRow, { targetPosition: { x: 40, y: 28 } });
+  async function dropAfterLoose(row) {
+    const handle = sortingSection.getByRole('button', { name: '拖动群组 排序测试' });
+    await handle.scrollIntoViewIfNeeded();
+    const start = await handle.boundingBox();
+    const x = start.x + start.width / 2, y = start.y + start.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 7, y);
+    await expect(sortingSection).toHaveAttribute('data-drag-folded', '');
+    await row.scrollIntoViewIfNeeded();
+    const end = await row.boundingBox();
+    await page.mouse.move(end.x + 40, end.y + end.height - 4);
+    await page.mouse.up();
+  }
+  await dropAfterLoose(looseRow);
   await expect(page.locator('.drag-landing-preview')).toHaveCount(0);
   await expect
     .poll(() =>
@@ -610,9 +626,7 @@ try {
   const lastLooseRow = board.locator(
     `[data-browser-tab-id="${looseTabs[1].id}"]`,
   );
-  await sortingSection
-    .getByRole('button', { name: '拖动群组 排序测试' })
-    .dragTo(lastLooseRow, { targetPosition: { x: 40, y: 28 } });
+  await dropAfterLoose(lastLooseRow);
   await expect(page.locator('.drag-landing-preview')).toHaveCount(0);
   await expect
     .poll(() =>
@@ -667,9 +681,11 @@ try {
   assert.equal(await page.evaluate(async ids =>
     (await chrome.tabs.query({})).some(tab => ids.includes(tab.id)), originalIds), false);
   await savedNativeGroup.getByRole('button', { name: '打开集合 项目调研 的全部标签页' }).click();
-  const restored = board.locator('.workspace-browser-group[aria-label="项目调研"]');
-  await expect(restored.locator('.workspace-open-tab')).toHaveCount(2);
-  const restoredId = Number(await restored.getAttribute('data-group-id'));
+  const reopened = board.locator('.workspace-browser-group[aria-label="项目调研"]');
+  await expect(reopened.locator('.workspace-open-tab')).toHaveCount(2);
+  const restoredId = Number(await reopened.getAttribute('data-group-id'));
+  const restored = board.locator(`[data-group-id="${restoredId}"]`);
+  await expect(restored).toHaveAttribute('data-group-color', 'blue');
   [tabs[2], tabs[0]] = await page.evaluate(id => chrome.tabs.query({ groupId: id }), restoredId);
   await groupAction('项目调研', '删除集合');
   await board.getByRole('button', { name: '确认删除', exact: true }).click();
@@ -731,7 +747,7 @@ try {
   const closing = [];
   for (const name of ['CloseOne', 'CloseTwo']) {
     const fixture = await context.newPage();
-    await fixture.goto(`https://example.com/workspace-fixture/${name}`);
+    await fixture.goto(`${fixtures}/${name}`);
     closing.push(fixture);
   }
   await page.bringToFront();
@@ -969,4 +985,5 @@ try {
   );
 } finally {
   await context.close();
+  await new Promise(resolve => fixtureServer.close(resolve));
 }

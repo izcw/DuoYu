@@ -1,22 +1,34 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue';
 import { liveQuery } from 'dexie';
 import { database, type Memo } from '../../shared/storage/database';
 import { guestMode } from '../../shared/storage/account';
+import { syncState } from '../sync/client';
 import { requireAccount } from '../auth/edit-access';
 import DesktopMenu from '../../shared/components/base/DesktopMenu.vue';
+import PageIcon from '../../shared/components/base/PageIcon.vue';
 import MenuEditorDialog from '../../shared/components/base/MenuEditorDialog.vue';
 import ReorderTransition from '../../shared/components/base/ReorderTransition.vue';
 import { createDragLanding } from '../../shared/drag-landing';
 import BaseDialog from '../../shared/components/base/BaseDialog.vue';
 import Archive from '@icon-park/vue-next/es/icons/FolderDownload';
-import Delete from '@icon-park/vue-next/es/icons/Delete';
-import { useMemoCanvas } from './useMemoCanvas';
+import Search from '@icon-park/vue-next/es/icons/Search';
+import NotesIcon from '@icon-park/vue-next/es/icons/Notes';
+import { minZoom, useMemoCanvas } from './useMemoCanvas';
 import MemoOverview from './MemoOverview.vue';
 import MemoCard from './MemoCard.vue';
+import { memoSearchText } from './markdown';
 import {
   archiveMemos,
-  archiveSort,
+  readMemoView,
   bringToFront,
   createMemo,
   memoColors,
@@ -38,8 +50,8 @@ const pageName = ref('');
 const pageIcon = ref('Notes');
 const pageBusy = ref(false);
 const pageError = ref('');
-const title = computed(
-  () => [...views, ...pages.value].find((item) => item.id === view.value)?.name,
+const activeMenu = computed(() =>
+  [...views, ...pages.value].find((item) => item.id === view.value),
 );
 const pageSubscription = liveQuery(() =>
   database.memoPages.orderBy('order').toArray(),
@@ -104,19 +116,56 @@ const dates = new Intl.DateTimeFormat('zh-CN', {
   minute: '2-digit',
   hour12: false,
 });
-const notes = ref<Memo[]>([]);
-const visibleNotes = computed(() =>
-  view.value !== 'archive'
-    ? notes.value.filter(
-        (note) =>
-          note.archivedAt === null && (note.pageId || 'wall') === view.value,
-      )
-    : notes.value.filter((note) => note.archivedAt !== null).sort(archiveSort),
+const visibleNotes = shallowRef<Memo[]>([]);
+const loaded = ref(false);
+const query = ref('');
+const pending = ref(false);
+const queueSubscription = guestMode
+  ? undefined
+  : liveQuery(() => database.syncOutbox.count()).subscribe((count) => {
+      pending.value = count > 0;
+    });
+const syncLabel = computed(() => {
+  if (guestMode) return '访客只读';
+  const { status } = syncState.value;
+  if (status === '正在同步') return status;
+  if (pending.value || status === '待同步' || status === '有更改待处理')
+    return '';
+  return status === '未登录' ? '等待同步' : status;
+});
+const searchField = ref<HTMLInputElement>();
+const searchResults = ref<HTMLElement>();
+const needle = computed(() => query.value.trim().toLowerCase());
+const searchEntries = computed(() =>
+  visibleNotes.value.map((note) => {
+    const text = note.html ? note.body : memoSearchText(note.body);
+    const heading = note.title || text.split('\n', 1)[0] || '空白便签';
+    return { note, text, heading, lowercase: text.toLowerCase() };
+  }),
+);
+const matches = computed(() =>
+  searchEntries.value.flatMap(({ note, text, heading, lowercase }) => {
+    const index = lowercase.indexOf(needle.value);
+    if (index < 0 && !heading.toLowerCase().includes(needle.value)) return [];
+    const start = Math.max(0, index - 20);
+    const snippet =
+      heading === text && !start
+        ? ''
+        : (start ? '…' : '') + text.slice(start, start + 120);
+    return [{ note, heading, snippet }];
+  }),
 );
 const viewport = ref<HTMLElement>();
 const menuEl = ref<HTMLElement>();
 const canvas = useMemoCanvas(view, viewport, visibleNotes);
 const { ids, camera, spaceHeld, rectangle } = canvas;
+const gridStep = computed(() => {
+  const spacing = 24 * camera.value.scale;
+  return spacing * 2 ** Math.ceil(Math.log2(16 / spacing));
+});
+const distantView = computed(
+  () => view.value !== 'archive' && camera.value.scale < minZoom,
+);
 const deleting = ref<string[]>();
 const selectedIds = computed(() =>
   visibleNotes.value
@@ -125,21 +174,33 @@ const selectedIds = computed(() =>
 );
 const error = ref('');
 const cardRefs = new Map<string, InstanceType<typeof MemoCard>>();
-const subscription = liveQuery(() => database.memos.toArray()).subscribe({
-  next: (value) => {
-    notes.value = value;
+watch(
+  view,
+  (page, _, cleanup) => {
+    visibleNotes.value = [];
+    loaded.value = false;
+    const subscription = liveQuery(() => readMemoView(page)).subscribe({
+      next(value) {
+        visibleNotes.value = value;
+        loaded.value = true;
+      },
+      error() {
+        error.value = '便签读取失败';
+      },
+    });
+    cleanup(() => subscription.unsubscribe());
   },
-  error: () => {
-    error.value = '便签读取失败';
-  },
-});
+  { immediate: true, flush: 'sync' },
+);
 async function run(action: () => Promise<unknown>) {
-  if (!requireAccount()) return;
+  if (!requireAccount()) return false;
   try {
     error.value = '';
     await action();
+    return true;
   } catch (e) {
     error.value = e instanceof Error ? e.message : '便签保存失败';
+    return false;
   }
 }
 const menu = ref<{
@@ -150,7 +211,7 @@ const menu = ref<{
   y: number;
 }>();
 const selected = computed(() =>
-  notes.value.find((note) => note.id === menu.value?.id),
+  visibleNotes.value.find((note) => note.id === menu.value?.id),
 );
 function openMenu(event: MouseEvent, note?: Memo) {
   if (!viewport.value || (view.value === 'archive' && !note)) return;
@@ -183,7 +244,12 @@ function closeOutside(event: PointerEvent) {
 function menuKeys(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     event.stopPropagation();
+    const card = menu.value?.id && cardRefs.get(menu.value.id);
+    const origin = card
+      ? (card.$el.querySelector('.memo-options') ?? card.$el)
+      : viewport.value;
     menu.value = undefined;
+    origin?.focus({ preventScroll: true });
     return;
   }
   if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(event.key))
@@ -202,31 +268,81 @@ function menuKeys(event: KeyboardEvent) {
 let pendingFocus = '';
 async function add() {
   const space = viewport.value;
-  if (!space) return;
+  const point = menu.value;
+  if (!space || !point) return;
+  menu.value = undefined;
   const width = Math.max(180, Math.min(264, space.clientWidth - 20));
-  const cascade = 16 + (visibleNotes.value.length % 6) * 18;
-  const near = canvas.world({ x: cascade, y: cascade });
   const edge = canvas.world({ x: space.clientWidth, y: space.clientHeight });
-  const point = menu.value ?? near;
-  const x = Math.min(point.x, edge.x - width);
-  const y = Math.min(point.y, edge.y - 212);
+  const origin = canvas.world({ x: 0, y: 0 });
+  const x = Math.max(origin.x, Math.min(point.x, edge.x - width));
+  const y = Math.max(origin.y, Math.min(point.y, edge.y - 212));
   const page = view.value;
   ids.value = new Set();
-  menu.value = undefined;
   await run(async () => {
     pendingFocus = await createMemo(x, y, width, page);
     await nextTick();
     focusNew();
   });
 }
-function focusNew() {
-  const card = cardRefs.get(pendingFocus);
-  if (card) {
-    pendingFocus = '';
-    card.focusBody();
+async function focusNew() {
+  if (!pendingFocus) return;
+  const note = visibleNotes.value.find((item) => item.id === pendingFocus);
+  if (!note) return;
+  pendingFocus = '';
+  if (distantView.value || !cardRefs.has(note.id)) {
+    canvas.revealNote(note);
+    await nextTick();
   }
+  cardRefs.get(note.id)?.focusBody();
 }
-watch(notes, () => nextTick(focusNew));
+watch(visibleNotes, () => nextTick(focusNew));
+async function locate(note: Memo) {
+  query.value = '';
+  ids.value = new Set([note.id]);
+  await nextTick();
+  if (view.value === 'archive') {
+    cardRefs.get(note.id)?.$el.scrollIntoView({ block: 'nearest' });
+  } else {
+    canvas.revealNote(note);
+  }
+  viewport.value?.focus({ preventScroll: true });
+}
+function searchKeys(event: KeyboardEvent, index = -1) {
+  if (
+    event.isComposing ||
+    event.keyCode === 229 ||
+    event.altKey ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.shiftKey
+  )
+    return;
+  const key = event.key;
+  if (key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    if (index >= 0) searchField.value?.focus();
+    else if (query.value) query.value = '';
+    else viewport.value?.focus({ preventScroll: true });
+    return;
+  }
+  if (!needle.value || !matches.value.length) return;
+  if (index === -1 && key === 'Enter') {
+    event.preventDefault();
+    void locate(matches.value[0]!.note);
+    return;
+  }
+  const count = matches.value.length;
+  let next: number;
+  if (key === 'ArrowDown') next = (index + 1) % count;
+  else if (key === 'ArrowUp') next = index <= 0 ? count - 1 : index - 1;
+  else if (index >= 0 && key === 'Home') next = 0;
+  else if (index >= 0 && key === 'End') next = count - 1;
+  else return;
+  event.preventDefault();
+  event.stopPropagation();
+  searchResults.value?.getElementsByTagName('button').item(next)?.focus();
+}
 function changeColor(color: Memo['color']) {
   const targets = selectedIds.value;
   menu.value = undefined;
@@ -269,17 +385,72 @@ type Gesture = {
   y: number;
   width: number;
   height: number;
-  members: string[];
+  members: Set<string>;
   target: string;
   after: boolean;
 };
 const drag = ref<Gesture>();
+const viewportSize = ref({ width: 0, height: 0 });
+watch(viewport, (el, _, cleanup) => {
+  if (!el) return;
+  const measure = () => {
+    const old = viewportSize.value;
+    const size = { width: el.clientWidth, height: el.clientHeight };
+    viewportSize.value = size;
+    if (
+      view.value === 'archive' ||
+      !old.width ||
+      !size.width ||
+      (size.width >= old.width && size.height >= old.height)
+    )
+      return;
+    const { x, y, scale } = camera.value;
+    const inside = (n: Memo, area: typeof size) =>
+      (n.x + n.width) * scale + x > 0 &&
+      n.x * scale + x < area.width &&
+      (n.y + n.height) * scale + y > 0 &&
+      n.y * scale + y < area.height;
+    const only =
+      visibleNotes.value.length === 1 ? visibleNotes.value[0] : undefined;
+    if (
+      only &&
+      inside(only, old) &&
+      (only.width * scale > size.width - 16 ||
+        only.height * scale > size.height - 16)
+    ) {
+      canvas.revealNote(only);
+      return;
+    }
+    if (visibleNotes.value.some((n) => inside(n, size))) return;
+    const note = visibleNotes.value.find((n) => inside(n, old));
+    if (note) canvas.revealNote(note);
+  };
+  const observer = new ResizeObserver(measure);
+  observer.observe(el);
+  measure();
+  cleanup(() => observer.disconnect());
+});
+const focusedNote = ref('');
 const landing = createDragLanding();
 let slots: { id: string; rect: DOMRect }[] = [];
 let scrollY = 0;
 const displayedNotes = computed(() => {
   const d = drag.value;
   const notes = visibleNotes.value;
+  if (view.value !== 'archive') {
+    const { x, y, scale } = camera.value;
+    const { width, height } = viewportSize.value;
+    const pad = 120;
+    return notes.filter(
+      (n) =>
+        n.id === focusedNote.value ||
+        d?.members.has(n.id) ||
+        ((n.x + n.width) * scale + x >= -pad &&
+          n.x * scale + x <= width + pad &&
+          (n.y + n.height) * scale + y >= -pad &&
+          n.y * scale + y <= height + pad),
+    );
+  }
   if (d?.action !== 'sort' || !d.target) return notes;
   const moved = notes.find((n) => n.id === d.id);
   const rest = notes.filter((n) => n.id !== d.id);
@@ -296,13 +467,25 @@ function cancelDrag() {
 }
 function cancelKey(event: KeyboardEvent) {
   const target = event.target as Element | null;
+  if (event.isComposing || event.keyCode === 229) return;
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    event.key.toLowerCase() === 'f' &&
+    !document.querySelector('dialog[open],.base-dialog-backdrop') &&
+    !menu.value
+  ) {
+    event.preventDefault();
+    searchField.value?.focus();
+    searchField.value?.select();
+    return;
+  }
   if (
     pageForm.value ||
     deleting.value ||
     menu.value ||
     document.querySelector('dialog[open],.base-dialog-backdrop') ||
     target?.closest(
-      'input,textarea,select,[contenteditable="true"],[role="menu"]',
+      'input,textarea,select,[contenteditable="true"],[role="menu"],.memo-results',
     )
   )
     return;
@@ -339,9 +522,10 @@ function blurWindow() {
 function cardPress(event: PointerEvent, note: Memo) {
   if (event.button !== 0 || !event.isPrimary) return;
   const el = event.target as Element;
+  if (el.matches('.memo-distant-card')) return;
   if (
     (event.shiftKey || event.metaKey || event.ctrlKey) &&
-    !el.closest('button') &&
+    !el.closest('button, a[href], textarea, [contenteditable=true]') &&
     document.activeElement !== el
   ) {
     const next = new Set(ids.value);
@@ -354,14 +538,22 @@ function cardPress(event: PointerEvent, note: Memo) {
   }
   if (!ids.value.has(note.id)) ids.value = new Set([note.id]);
   if (view.value === 'archive') return;
-  if (ids.value.size > 1 && !el.closest('button,.memo-resize,input')) {
+  if (
+    ids.value.size > 1 &&
+    !el.closest(
+      'button, a[href], .memo-resize, input, textarea, [contenteditable=true]',
+    )
+  ) {
     event.stopPropagation();
     start(event, note, 'move');
   } else if (!guestMode) void run(() => bringToFront(note.id));
 }
 function wheel(event: WheelEvent) {
   if (view.value === 'archive' || drag.value || canvas.gesture.value) return;
-  if (!event.ctrlKey && (event.target as Element).closest('.memo-text:focus'))
+  if (
+    !event.ctrlKey &&
+    (event.target as Element).closest('.memo-text:focus-within')
+  )
     return;
   event.preventDefault();
   const pixels =
@@ -384,7 +576,9 @@ function start(event: PointerEvent, note: Memo, action: Gesture['action']) {
     !event.isPrimary ||
     drag.value ||
     landing.committing ||
-    (event.target as HTMLElement).closest('input, textarea, button') ||
+    (event.target as Element).closest(
+      'input, textarea, button, a[href], [contenteditable=true]',
+    ) ||
     !requireAccount()
   )
     return;
@@ -405,7 +599,7 @@ function start(event: PointerEvent, note: Memo, action: Gesture['action']) {
     startX: event.clientX + space.scrollLeft,
     startY: event.clientY + space.scrollTop,
     moved: false,
-    members: action === 'move' ? [...selectedIds.value] : [note.id],
+    members: new Set(action === 'move' ? selectedIds.value : [note.id]),
     target: '',
     after: false,
   };
@@ -501,7 +695,7 @@ async function end(event: PointerEvent) {
           drag.value = undefined;
         },
         async () => {
-          notes.value = await database.memos.toArray();
+          visibleNotes.value = await readMemoView('archive');
           await nextTick();
         },
       ),
@@ -515,7 +709,7 @@ async function end(event: PointerEvent) {
       await run(() =>
         database.memos
           .where('id')
-          .anyOf(d.members)
+          .anyOf([...d.members])
           .modify((note) => {
             if (note.archivedAt === null && (note.pageId || 'wall') === page) {
               note.x += d.x - d.origin.x;
@@ -529,7 +723,7 @@ async function end(event: PointerEvent) {
 }
 function noteBox(note: Memo) {
   const d = drag.value;
-  const moving = d?.action === 'move' && d.members.includes(note.id);
+  const moving = d?.action === 'move' && d.members.has(note.id);
   const box = d?.id === note.id ? d : note;
   return {
     x: note.x + (moving ? d.x - d.origin.x : 0),
@@ -538,15 +732,16 @@ function noteBox(note: Memo) {
     height: box.height,
   };
 }
+const layerOrder = computed(() =>
+  [...visibleNotes.value].sort((a, b) => a.layer - b.layer),
+);
 const mapNotes = computed(() =>
-  visibleNotes.value
-    .map((note) => ({
-      id: note.id,
-      color: note.color,
-      layer: note.layer,
-      ...noteBox(note),
-    }))
-    .sort((a, b) => a.layer - b.layer),
+  layerOrder.value.map((note) => ({
+    id: note.id,
+    color: note.color,
+    layer: note.layer,
+    ...noteBox(note),
+  })),
 );
 function cardStyle(note: Memo) {
   if (view.value === 'archive') return;
@@ -567,6 +762,8 @@ function changeView(id: string) {
   ids.value = new Set();
   menu.value = undefined;
   pendingFocus = '';
+  query.value = '';
+  focusedNote.value = '';
   view.value = id;
   canvas.restoreCamera();
   nextTick(() =>
@@ -601,7 +798,7 @@ onMounted(() => {
 onUnmounted(() => {
   landing.dispose();
   pageSubscription.unsubscribe();
-  subscription.unsubscribe();
+  queueSubscription?.unsubscribe();
   window.removeEventListener('blur', blurWindow);
   document.removeEventListener('keyup', releaseSpace);
   document.removeEventListener('keydown', cancelKey, true);
@@ -637,54 +834,93 @@ onUnmounted(() => {
     />
     <section class="memo-main">
       <header class="memo-toolbar">
-        <h2>{{ title }}</h2>
-        <button
-          v-if="view !== 'archive'"
-          class="memo-add glass-control glass-interactive"
-          aria-label="新建便签"
-          title="新建便签"
-          @click="add"
-        >
-          ＋
-        </button>
-        <template v-if="selectedIds.length">
-          <span class="memo-selection-count">{{ selectedIds.length }}</span>
+        <div class="memo-heading">
+          <div class="workspace-heading-copy">
+            <PageIcon :name="activeMenu?.icon || 'Notes'" active :size="24" />
+            <h2>{{ activeMenu?.name }}</h2>
+          </div>
+          <span class="memo-meta">
+            <span v-if="loaded" class="memo-total"
+              >{{ visibleNotes.length }} 张</span
+            >
+            <span
+              v-if="syncLabel"
+              class="memo-status"
+              :title="syncState.error || '账号同步状态'"
+              >{{ syncLabel }}</span
+            >
+          </span>
+        </div>
+        <label class="workspace-search memo-search glass-surface">
+          <Search :size="18" aria-hidden="true" />
+          <input
+            ref="searchField"
+            v-model="query"
+            type="search"
+            aria-label="搜索当前页便签"
+            placeholder="搜索当前页"
+            @keydown="searchKeys($event)"
+          />
+          <kbd v-if="!query" aria-hidden="true">⌘ / Ctrl F</kbd>
           <button
-            class="memo-control"
-            :aria-label="view === 'archive' ? '还原选中便签' : '归档选中便签'"
-            :title="view === 'archive' ? '还原选中便签' : '归档选中便签'"
-            @click="archive"
+            v-else
+            type="button"
+            class="workspace-icon glass-control glass-interactive"
+            aria-label="清空便签搜索"
+            @click="
+              query = '';
+              searchField?.focus();
+            "
           >
-            <Archive />
+            ×
           </button>
-          <button
-            class="memo-control"
-            aria-label="删除选中便签"
-            title="删除选中便签"
-            @click="askDelete"
-          >
-            <Delete />
-          </button>
-        </template>
+        </label>
       </header>
+      <section
+        v-if="needle"
+        ref="searchResults"
+        class="memo-results"
+        aria-label="便签搜索结果"
+      >
+        <p role="status">
+          {{
+            matches.length
+              ? '找到 ' + matches.length + ' 张便签'
+              : '没有找到匹配的便签'
+          }}
+        </p>
+        <button
+          v-for="({ note, heading, snippet }, index) in matches"
+          class="glass-surface glass-interactive"
+          :key="note.id"
+          :data-color="note.color"
+          @keydown="searchKeys($event, index)"
+          @click="locate(note)"
+        >
+          <span class="memo-result-dot" aria-hidden="true"></span>
+          <span
+            >{{ heading }}<small v-if="snippet">{{ snippet }}</small></span
+          >
+          <span aria-hidden="true">↗</span>
+        </button>
+      </section>
       <div
+        v-show="!needle"
         ref="viewport"
         class="memo-viewport"
+        :style="{
+          '--memo-grid-step': gridStep + 'px',
+          '--memo-grid-x': (camera.x % gridStep) + 'px',
+          '--memo-grid-y': (camera.y % gridStep) + 'px',
+        }"
+        role="region"
+        :aria-label="view === 'archive' ? '归档便签' : '便签画布'"
         :class="{
           'is-archive': view === 'archive',
           'is-hand':
             view !== 'archive' && (spaceHeld || canvas.gesture.value?.pan),
         }"
-        tabindex="-1"
-        :style="
-          view === 'archive'
-            ? undefined
-            : {
-                backgroundPosition: camera.x + 'px ' + camera.y + 'px',
-                backgroundSize:
-                  18 * camera.scale + 'px ' + 18 * camera.scale + 'px',
-              }
-        "
+        :tabindex="view === 'archive' ? -1 : 0"
         @pointerdown.capture="
           !drag && !landing.committing && canvas.start($event)
         "
@@ -695,6 +931,21 @@ onUnmounted(() => {
         @pointercancel="cancelDrag"
         @lostpointercapture="cancelDrag"
       >
+        <div v-if="loaded && !visibleNotes.length" class="memo-empty">
+          <component
+            :is="view === 'archive' ? Archive : NotesIcon"
+            :size="38"
+            aria-hidden="true"
+          />
+          <strong>{{
+            view === 'archive' ? '还没有归档便签' : '这面便签墙还是空的'
+          }}</strong>
+          <span>{{
+            view === 'archive'
+              ? '归档后，可以在这里查看和还原。'
+              : '右键点击空白处，选择「新建便签」。'
+          }}</span>
+        </div>
         <component
           :is="view === 'archive' ? ReorderTransition : 'div'"
           class="memo-surface"
@@ -702,6 +953,7 @@ onUnmounted(() => {
             view === 'archive'
               ? undefined
               : {
+                  '--memo-camera-scale': camera.scale,
                   transform:
                     'translate(' +
                     camera.x +
@@ -724,6 +976,12 @@ onUnmounted(() => {
               }
             "
             :note="note"
+            :compact="distantView && focusedNote !== note.id"
+            @focusin="
+              $event.target !== $event.currentTarget && (focusedNote = note.id)
+            "
+            @focusout="focusedNote = ''"
+            @reveal="locate(note)"
             :style="cardStyle(note)"
             :class="{
               'is-selected': ids.has(note.id),
@@ -733,9 +991,11 @@ onUnmounted(() => {
             @pointerdown.capture="cardPress($event, note)"
             @gesture="(event, action) => start(event, note, action)"
             @menu="openMenu($event, note)"
-            @body="
-              (body, html) =>
-                run(() => updateMemo(note.id, { title: '', body, html }))
+            :save-body="
+              (body) =>
+                run(() =>
+                  updateMemo(note.id, { title: '', body, html: undefined }),
+                )
             "
           />
         </component>
@@ -753,13 +1013,15 @@ onUnmounted(() => {
       </div>
       <MemoOverview
         :key="view"
-        v-if="view !== 'archive'"
+        v-if="view !== 'archive' && !needle && visibleNotes.length"
         :viewport="viewport"
         :notes="mapNotes"
         :camera="camera"
+        :minimum-scale="canvas.minimumScale.value"
         :selected="ids"
         @zoom="canvas.zoom($event)"
         @navigate="canvas.centerOn"
+        @fit="canvas.fitNotes"
       />
     </section>
     <div
@@ -776,7 +1038,7 @@ onUnmounted(() => {
         <div v-if="selectedIds.length === 1" class="memo-dates">
           <span>创建 {{ dates.format(selected.createdAt) }}</span>
           <span>修改 {{ dates.format(selected.updatedAt) }}</span>
-          <span v-if="selected.archivedAt"
+          <span v-if="selected.archivedAt !== null"
             >归档 {{ dates.format(selected.archivedAt) }}</span
           >
         </div>
@@ -793,7 +1055,7 @@ onUnmounted(() => {
           />
         </div>
         <button role="menuitem" @click="archive()">
-          {{ selected.archivedAt ? '移回便签墙' : '归档' }}
+          {{ selected.archivedAt !== null ? '移回便签墙' : '归档' }}
         </button>
         <button role="menuitem" class="memo-danger" @click="askDelete()">
           删除

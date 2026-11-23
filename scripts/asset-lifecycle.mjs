@@ -16,7 +16,7 @@ globalThis.__assetTest = db;
 const source = (await readFile('src/features/sync/assets.ts', 'utf8')).replace(
   "import { database } from '../../shared/storage/database';",
   'const database=globalThis.__assetTest;',
-);
+).replace("import { guestMode } from '../../shared/storage/account';", 'const guestMode = false;');
 await writeFile(
   'work/asset-test/assets.mjs',
   ts.transpileModule(source, {
@@ -28,15 +28,20 @@ await writeFile(
 );
 const assets = await import('../work/asset-test/assets.mjs');
 let uploads = 0;
+let failUpload = false;
 assets.connectAssetTransport(async (path, method) => {
   assert.equal(method, 'POST');
   uploads++;
+  if (failUpload) throw Object.assign(Error('offline fixture'), { status: 503 });
   return {};
 });
 try {
   const image =
     'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jF7sAAAAASUVORK5CYII=';
   const icon = 'duoyu-icon:' + JSON.stringify({ mode: 'upload', image });
+  const note = { table: 'memos', id: 'a', base: null, value: { id: 'a', body: image }, revision: '0' };
+  assert.deepEqual(await assets.encodeChanges([note], 'epoch'), [note]);
+  assert.equal(uploads, 0);
   const encoded = await assets.encodeAssets(
     { base: { icon }, value: { icon } },
     'epoch',
@@ -52,6 +57,42 @@ try {
   assert.equal(uploads, 2);
   assert(!clean.value.icon.includes(image));
   assert(clean.base.icon.includes('duoyu-asset:'), 'base changed before merge');
+  const svg = 'data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22/%3E';
+  const tab = { id: 'tab', collectionId: 'g', url: 'https://example.test', title: svg, icon: svg };
+  const tabChange = { table: 'savedTabs', id: tab.id, base: tab, value: { ...tab, position: 2 }, revision: '0' };
+  const [saved] = await assets.encodeChanges([tabChange], 'epoch');
+  assert.deepEqual(saved.base, { ...tab, icon: '' });
+  assert.deepEqual(saved.value, { ...tabChange.value, icon: '' });
+  assert.equal(tab.icon, svg, 'conflict preview and original operation must stay intact');
+  assert.equal(uploads, 2);
+  const [png] = await assets.encodeChanges([{ ...tabChange, base: null, value: { ...tab, icon: image } }], 'epoch');
+  assert.match(png.value.icon, /^duoyu-asset:[a-f0-9]{64}$/);
+  assert.equal(png.value.title, svg);
+  const batch = Array.from({ length: 64 }, (_, index) => ({
+    ...tabChange, id: 'shared-' + index, base: null,
+    value: { ...tab, id: 'shared-' + index, icon: image, position: index },
+  }));
+  const beforeBatch = uploads;
+  const batchResult = await assets.encodeChanges(batch, 'fresh-epoch');
+  console.log('Uploads for 64 links sharing one PNG:', uploads - beforeBatch);
+  assert.equal(uploads - beforeBatch, 1);
+  assert.ok(batchResult.every(c => c.value.icon === png.value.icon));
+  const aliases = batch.map((c, i) => i % 2 === 0 ? c : {
+    ...c, value: { ...c.value, icon: image.replace('image/png;', 'image/png;charset=utf-8;') },
+  });
+  failUpload = true;
+  await assert.rejects(assets.encodeChanges(aliases, 'after-reconnect'), { status: 503 });
+  failUpload = false;
+  const beforeRetry = uploads;
+  const retried = await assets.encodeChanges(aliases, 'after-reconnect');
+  assert.equal(uploads - beforeRetry, 1);
+  assert.deepEqual(retried, batchResult);
+  const wrongType = { ...tab, icon: 'data:image/png;base64,AAABAA==' };
+  const [malformed] = await assets.encodeChanges([{ ...tabChange, base: wrongType, value: wrongType }], 'epoch');
+  assert.equal(malformed.base.icon, '');
+  assert.equal(malformed.value.icon, '');
+  await assert.rejects(assets.encodeChanges([{ ...tabChange, value: { ...tab,
+    icon: 'duoyu-icon:' + JSON.stringify({ mode: 'upload', image: svg }) } }], 'epoch'), { status: 415 });
   assert.deepEqual(
     assets.collectAssets(
       'duoyu-icon:' +

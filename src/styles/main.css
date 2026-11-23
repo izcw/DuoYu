@@ -403,7 +403,7 @@ html[data-wallpaper-preview='ready'] .wallpaper-shade,
 input:not([type='checkbox']):not([type='radio']):not(
     .workspace-search input
   ):not(.search-form input):not(.floating-editor input),
-textarea {
+textarea:not(.memo-text) {
   border: 1px solid #c9c9c9 !important;
 }
 input:focus,
@@ -485,13 +485,13 @@ select,
 }
 html.mouse-sorting,
 html.mouse-sorting *,
-html:has(
+html:not(.mouse-sorting):has(
   .drag-landing-preview,
   .ui-draggable-dragging,
   .grid-selection-dragging,
   .desktop-transfer-preview
 ),
-html:has(
+html:not(.mouse-sorting):has(
     .drag-landing-preview,
     .ui-draggable-dragging,
     .grid-selection-dragging,

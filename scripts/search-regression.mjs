@@ -91,7 +91,7 @@ try {
     async (p) => {
       const text = '你好 & hello # /';
       await p.locator('#search-input').fill(text);
-      await expect(p.getByRole('option')).toHaveCount(10);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(10);
       await expect(p.locator('.translation-option')).toBeVisible();
       assert.equal(
         await p
@@ -117,7 +117,7 @@ try {
       await p.locator('#search-input').fill('   ');
       await p.locator('#search-input').press('Enter');
       assert.equal(requests.length, 0);
-      await expect(p.getByRole('option')).toHaveCount(0);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(0);
     },
   );
   await run(
@@ -128,10 +128,10 @@ try {
     },
     async (p) => {
       await p.locator('#search-input').fill('fast');
-      await expect(p.getByRole('option')).toHaveCount(1);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(1);
       await p.locator('#search-input').press('ArrowDown');
-      await expect(p.getByRole('option')).toHaveCount(10);
-      await expect(p.getByRole('option').first()).toHaveAttribute(
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(10);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option').first()).toHaveAttribute(
         'aria-selected',
         'true',
       );
@@ -148,8 +148,8 @@ try {
       }),
     async (p) => {
       await p.locator('#search-input').fill('a');
-      await expect(p.getByRole('option')).toHaveCount(2);
-      await expect(p.getByRole('option').nth(1)).toContainText(
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(2);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option').nth(1)).toContainText(
         '<img src=x onerror=alert(1)>',
       );
       assert.equal(await p.locator('.suggestion-list img').count(), 2);
@@ -165,9 +165,9 @@ try {
       await p.locator('#search-input').fill('old');
       await expect.poll(() => requests.includes('old')).toBe(true);
       await p.locator('#search-input').fill('new');
-      await expect(p.getByRole('option')).toHaveCount(10);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(10);
       await delay(400);
-      await expect(p.getByRole('option').nth(1)).toContainText(
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option').nth(1)).toContainText(
         'new suggestion',
       );
     },
@@ -184,7 +184,7 @@ try {
       await expect(p.locator('#search-input')).toBeFocused();
       await expect(p.locator('#search-input')).toHaveValue('');
       await delay(300);
-      await expect(p.getByRole('option')).toHaveCount(0);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(0);
     },
   );
   await run(
@@ -198,7 +198,7 @@ try {
       assert.equal(requests.length, 0);
       assert.ok(p.url().startsWith('chrome-extension:'));
       await input.dispatchEvent('compositionend');
-      await expect(p.getByRole('option')).toHaveCount(10);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(10);
       await input.press('Enter');
       await waitForSearch(p);
       assert.equal(
@@ -236,7 +236,7 @@ try {
         p.getByRole('status').filter({ hasText: '暂无更多建议' }),
       ).toBeVisible();
       assert.equal(requests.length, 3);
-      await expect(p.getByRole('option')).toHaveCount(1);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(1);
     },
   );
   await run(
@@ -255,7 +255,7 @@ try {
     async (p) => {
       await p.locator('#search-input').fill('bad');
       await expect(p.getByText('联想暂不可用，仍可直接搜索')).toBeVisible();
-      await expect(p.getByRole('option')).toHaveCount(1);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(1);
     },
   );
   await run(
@@ -269,7 +269,7 @@ try {
       await input.fill('oversized');
       await expect(p.getByText('联想暂不可用，仍可直接搜索')).toBeVisible();
       await input.fill('recovered');
-      await expect(p.getByRole('option')).toHaveCount(10);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(10);
     },
   );
   await run(
@@ -283,7 +283,7 @@ try {
       await expect(p.getByText('联想暂不可用，仍可直接搜索')).toBeVisible({
         timeout: 6000,
       });
-      await expect(p.getByRole('option')).toHaveCount(1);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(1);
     },
   );
   await run(
@@ -292,11 +292,11 @@ try {
     async (p) => {
       await p.setViewportSize({ width: 390, height: 700 });
       await p.locator('#search-input').fill('keyboard');
-      await expect(p.getByRole('option')).toHaveCount(10);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(10);
       await p.locator('#search-input').press('Escape');
-      await expect(p.getByRole('option')).toHaveCount(0);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(0);
       await p.locator('#search-input').press('ArrowUp');
-      await expect(p.getByRole('option').last()).toHaveAttribute(
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option').last()).toHaveAttribute(
         'aria-selected',
         'true',
       );
@@ -316,7 +316,7 @@ try {
     reply,
     async (p) => {
       await p.locator('#search-input').fill('typed');
-      await expect(p.getByRole('option')).toHaveCount(10);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(10);
       await p.locator('#search-input').press('ArrowUp');
       await p.getByRole('button', { name: '开始搜索' }).click();
       await waitForSearch(p);
@@ -332,18 +332,18 @@ try {
     async (p) => {
       await p.setViewportSize({ width: 320, height: 740 });
       await p.locator('#search-input').fill('touch');
-      await expect(p.getByRole('option')).toHaveCount(10);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(10);
       await p.locator('.clock-time').click();
-      await expect(p.getByRole('option')).toHaveCount(0);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(0);
       await p.locator('#search-input').click();
-      await expect(p.getByRole('option')).toHaveCount(10);
+      await expect(p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option')).toHaveCount(10);
       assert.ok(
         await p.evaluate(
           () => document.documentElement.scrollWidth <= innerWidth,
         ),
       );
       await p.screenshot({ path: 'work/search-mobile-regression.png' });
-      await p.getByRole('option').nth(2).tap();
+      await p.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option').nth(2).tap();
       await waitForSearch(p);
       assert.equal(
         new URL(p.searchResult.url()).searchParams.get('q'),

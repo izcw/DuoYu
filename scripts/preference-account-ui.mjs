@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium, expect } from '@playwright/test';
@@ -8,8 +9,9 @@ const extension = path.resolve(
 );
 const dir = await mkdtemp(path.resolve('work/preference-account-'));
 const results = [];
-const alice = 'a'.repeat(64),
-  bob = 'b'.repeat(64);
+const issuer = 'https://fixture.invalid';
+const key = sub => createHash('sha256').update(issuer + '\0' + sub).digest('hex');
+const alice = key('alice'), bob = key('bob');
 async function storedGlass(page, owner) {
   return page.evaluate(async (owner) => {
     const result = (request) =>
@@ -18,7 +20,7 @@ async function storedGlass(page, owner) {
         request.onerror = () => reject(request.error);
       });
     const db = await result(
-      indexedDB.open(owner ? 'duoyu-account-' + owner : 'duoyu'),
+      indexedDB.open(owner ? 'duoyu-account-' + owner : 'duoyu-guest-template-v1'),
     );
     try {
       const row = await result(
@@ -59,20 +61,19 @@ try {
     ['', ''],
   ]) {
     const page = await context.newPage();
-    // Hold the startup status request so the boundary between a marker change
-    // and reload is deterministic. Storage, settings and mutations are real.
-    await page.addInitScript((owner) => {
+    // Establish the page identity before simulating another tab's marker write.
+    await page.addInitScript(({owner, issuer}) => {
       localStorage.clear();
       localStorage.setItem('duoyu-sync-account', owner);
       const original = chrome.runtime.sendMessage.bind(chrome.runtime);
       chrome.runtime.sendMessage = (message) =>
         message.type === 'duoyu-auth' && message.action === 'status'
-          ? new Promise(() => {})
-          : original(message);
-    }, owner);
+          ? Promise.resolve({ view: { account: owner ? { issuer, sub: 'alice', name: 'Alice' } : null } })
+          : message.action === 'sync' ? Promise.resolve({ status: 503, error: 'Offline UI fixture' }) : original(message);
+    }, { owner, issuer });
     await page.goto(origin + '/newtab.html');
     await page
-      .getByRole('button', { name: /^(登录多鱼账号|我的账号)$/ })
+      .locator('.account-entry')
       .click();
     await page.getByRole('button', { name: '常规设置', exact: true }).click();
     const previousGlass = await storedGlass(page, owner);
@@ -86,6 +87,11 @@ try {
         localStorage.setItem('duoyu-sync-account', next);
         el.click();
       }, next);
+    if (!owner) {
+      const login = page.getByRole('dialog', { name: '登录后编辑' });
+      await expect(login).toBeVisible();
+      await login.getByRole('button', { name: '继续浏览' }).click();
+    }
     const layout = await page.evaluate(() =>
       Object.entries(localStorage)
         .filter(
@@ -95,6 +101,11 @@ try {
     );
     await page.getByRole('combobox', { name: '玻璃效果' }).click();
     await page.getByRole('option', { name: '柔和' }).click();
+    if (!owner) {
+      const login = page.getByRole('dialog', { name: '登录后编辑' });
+      await expect(login).toBeVisible();
+      await login.getByRole('button', { name: '继续浏览' }).click();
+    }
     await expect(
       page.getByRole('combobox', { name: '玻璃效果' }),
     ).toBeEnabled();
@@ -124,7 +135,11 @@ try {
   );
   console.log('Evidence:', dir);
   for (const row of results) {
-    if (row.owner !== row.next) {
+    if (!row.owner) {
+      assert.deepEqual(row.layout, []);
+      assert.equal(row.guestGlass, 'natural');
+      assert.equal(row.databaseGlass, row.previousGlass);
+    } else if (row.owner !== row.next) {
       assert.deepEqual(row.layout, [], 'Stale page wrote layout preferences');
       assert.equal(
         row.guestGlass,

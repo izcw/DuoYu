@@ -226,20 +226,21 @@ watch(
   },
 );
 
+function cellAt(x: number, y: number) {
+  const rect = gridElement.value?.getBoundingClientRect();
+  if (!rect || x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) return;
+  return {
+    column: Math.floor((x - rect.left) * DESKTOP_GRID_COLUMNS / rect.width),
+    row: Math.floor((y - rect.top) * props.rows / rect.height),
+  };
+}
 function placement(
-  point: { x: number; y: number } | undefined,
+  cell: { column: number; row: number } | undefined,
   width: number,
   height: number,
 ) {
   const grid = getGrid();
-  const rect = gridElement.value?.getBoundingClientRect();
-  if (!grid || !rect) throw new Error('网格尚未准备好');
-  const inside =
-    point &&
-    point.x >= rect.left &&
-    point.x < rect.right &&
-    point.y >= rect.top &&
-    point.y < rect.bottom;
+  if (!grid) throw new Error('网格尚未准备好');
   const fits = (x: number, y: number) =>
     x + width <= DESKTOP_GRID_COLUMNS &&
     y + height <= props.rows &&
@@ -250,16 +251,9 @@ function placement(
         y + height <= n.y! ||
         y >= n.y! + n.h!,
     );
-  let start = inside
-    ? Math.min(
-        props.rows - height,
-        Math.floor((point.y - rect.top) / (rect.height / props.rows)),
-      ) *
-        DESKTOP_GRID_COLUMNS +
-      Math.min(
-        DESKTOP_GRID_COLUMNS - width,
-        Math.floor((point.x - rect.left) / (rect.width / DESKTOP_GRID_COLUMNS)),
-      )
+  let start = cell
+    ? Math.min(props.rows - height, cell.row) * DESKTOP_GRID_COLUMNS +
+      Math.min(DESKTOP_GRID_COLUMNS - width, cell.column)
     : Math.max(
         -1,
         ...grid.engine.nodes.map(
@@ -270,7 +264,7 @@ function placement(
     { length: DESKTOP_GRID_COLUMNS * props.rows },
     (_, i) => i,
   );
-  if (inside)
+  if (cell)
     slots.sort(
       (a, b) =>
         Math.abs((a % DESKTOP_GRID_COLUMNS) - (start % DESKTOP_GRID_COLUMNS)) +
@@ -286,7 +280,7 @@ function placement(
     );
   const slot = slots.find(
     (i) =>
-      (inside || i >= start) &&
+      (cell || i >= start) &&
       fits(i % DESKTOP_GRID_COLUMNS, Math.floor(i / DESKTOP_GRID_COLUMNS)),
   );
   if (slot == null)
@@ -298,7 +292,7 @@ function placement(
     height,
   };
 }
-defineExpose({ placement });
+defineExpose({ placement, cellAt });
 watch(
   () => props.automatic,
   (automatic) => {

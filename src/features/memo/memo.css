@@ -4,12 +4,19 @@
   display: grid;
   grid-template-columns: 90px minmax(0, 1fr);
   gap: clamp(12px, 2vw, 28px);
-  color: var(--theme-text);
+  color: var(--memo-wall-ink, var(--theme-text));
+  text-shadow: var(--memo-wall-shadow, none);
+}
+:root:is([data-wallpaper-preview='ready'], [data-desktop-wallpaper='ready'])
+  .memo-board {
+  --memo-wall-ink: white;
+  --memo-wall-shadow: 0 1px 3px rgb(0 0 0 / 65%);
 }
 .memo-board .side-menu {
   color: inherit;
 }
 .memo-main {
+  position: relative;
   grid-column: 2;
   min-height: 0;
   min-width: 0;
@@ -18,36 +25,26 @@
   gap: 12px;
 }
 .memo-toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) min(340px, 45%);
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  padding-inline: 8px;
   min-height: 42px;
 }
 .memo-toolbar h2 {
   margin: 0;
   font-size: 22px;
   font-weight: 600;
-}
-.memo-add {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  font-size: 21px;
+  letter-spacing: 1px;
 }
 .memo-viewport {
   overflow: auto;
   overscroll-behavior: contain;
   position: relative;
   isolation: isolate;
-  border-radius: 20px;
-  background-image: radial-gradient(
-    circle,
-    color-mix(in srgb, var(--theme-text) 15%, transparent) 1px,
-    transparent 1.2px
-  );
-  background-size: 18px 18px;
-  background-position: 8px 8px;
   scrollbar-width: thin;
+  outline: none;
 }
 .memo-surface {
   position: relative;
@@ -88,8 +85,9 @@
   position: absolute;
   display: flex;
   flex-direction: column;
-  padding: 12px 16px 12px;
-  border-radius: 5px 5px 14px 5px;
+  padding: 0 16px 12px;
+  border: 1px solid color-mix(in srgb, var(--paper) 85%, #372e22);
+  border-radius: 12px;
   color: var(--memo-ink, #332f2b);
   background: linear-gradient(155deg, #ffffff18, transparent 55%), var(--paper);
   box-shadow:
@@ -97,8 +95,6 @@
     0 2px 4px #17152119,
     0 9px 20px -8px #1715214d;
   text-shadow: none;
-}
-.memo-card {
   cursor: grab;
 }
 .memo-card:active {
@@ -113,14 +109,14 @@
 }
 .memo-options {
   position: absolute;
-  inset: 9px 9px auto auto;
+  inset: 3px 9px auto auto;
   z-index: 1;
   font: bold 18px/1 var(--font-sans);
   padding: 0;
   width: 26px;
   height: 24px;
   border-radius: 6px;
-  opacity: 0;
+  opacity: 0.55;
 }
 .memo-card:is(:hover, :focus-within) .memo-options {
   opacity: 0.8;
@@ -139,7 +135,7 @@
   flex: 1;
   min-height: 0;
   margin: 0;
-  padding: 0 23px 4px 0;
+  padding: 0 0 4px;
   overflow: auto;
   font: 14px/1.55 var(--font-sans);
   color: inherit;
@@ -161,38 +157,6 @@
   border-radius: 5px;
   padding: 0 3px;
   font-weight: 600;
-}
-.memo-format-bar {
-  flex-wrap: wrap;
-  display: none;
-  align-items: center;
-  gap: 2px;
-  flex: none;
-  padding-top: 4px;
-}
-.memo-body:focus-within .memo-format-bar {
-  flex-wrap: wrap;
-  display: flex;
-}
-.memo-format-bar button {
-  border: 0;
-  background: transparent;
-  color: inherit;
-  display: grid;
-  place-items: center;
-  padding: 3px;
-  font: 600 11px/16px var(--font-sans);
-  border-radius: 4px;
-  cursor: pointer;
-}
-.memo-format-bar button:hover {
-  background: #8883;
-}
-.memo-format-bar input {
-  min-width: 0;
-  flex: 1;
-  color: inherit;
-  background: #fff2;
 }
 .memo-dates {
   display: grid;
@@ -225,9 +189,6 @@
   clip-path: polygon(100% 0, 100% 100%, 0 100%);
   opacity: 0.42;
 }
-.memo-viewport.is-archive {
-  background: none;
-}
 .is-archive .memo-surface {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(205px, 100%), 1fr));
@@ -248,6 +209,7 @@
   opacity: 0;
 }
 .memo-menu {
+  text-shadow: none;
   position: fixed;
   z-index: 10;
   width: 176px;
@@ -308,6 +270,8 @@
 }
 .memo-error {
   position: absolute;
+  color: var(--theme-text);
+  text-shadow: none;
   right: 12px;
   bottom: 0;
   padding: 8px 12px;
@@ -333,7 +297,10 @@
   --memo-ink: #fff7ee;
   --memo-danger: #ff9c97;
 }
-:root[data-fallback-theme='light']:has(.memo-board) {
+:root[data-fallback-theme='light']:not([data-wallpaper-preview='ready']):not(
+    [data-desktop-wallpaper='ready']
+  ):has(.memo-board) {
+  .account-entry img[src='/images/user.png'],
   .desktop-switch-entry img,
   .dock-entry[data-dock-id^='duoyu-'] .dock-tile > img {
     filter: brightness(0);
@@ -347,17 +314,21 @@
 }
 
 .memo-viewport:not(.is-archive) {
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    color-mix(in srgb, currentColor 25%, transparent) 0.85px,
+    transparent 1.2px
+  );
+  background-size: var(--memo-grid-step) var(--memo-grid-step);
+  background-position: var(--memo-grid-x) var(--memo-grid-y);
   overflow: clip;
   touch-action: none;
-  outline: none;
+  cursor: crosshair;
 }
 .memo-viewport:not(.is-archive) .memo-surface {
   transform-origin: 0 0;
 }
-.memo-viewport:not(.is-archive) {
-  cursor: crosshair;
-}
-.memo-viewport .memo-text[contenteditable='true'] {
+.memo-viewport textarea.memo-text {
   cursor: text;
 }
 .memo-viewport.is-hand,
@@ -369,14 +340,14 @@
   cursor: grabbing;
 }
 .memo-card.is-selected {
-  outline: 2px solid var(--memo-selection, #568bba);
+  outline: 2px solid currentColor;
   outline-offset: 1px;
 }
 .memo-marquee {
   position: absolute;
   pointer-events: none;
-  border: 1px solid #568bba;
-  background: #568bba26;
+  border: 1px solid currentColor;
+  background: color-mix(in srgb, currentColor 14%, transparent);
 }
 .memo-text :is(h1, h2, h3) {
   margin: 0.15em 0;
@@ -406,16 +377,155 @@
 }
 .memo-control:hover,
 .memo-control[aria-pressed='true'] {
-  background: var(--theme-hover);
+  background: var(--glass-interaction-fill);
 }
-.memo-scale,
-.memo-selection-count {
+.memo-scale {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
-.memo-toolbar {
-  flex-wrap: wrap;
+.memo-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
-.memo-main {
-  position: relative;
+.memo-heading .workspace-heading-copy {
+  min-width: 0;
+  max-width: 100%;
+}
+.memo-heading h2 {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.memo-total {
+  flex: none;
+  font-size: 12px;
+}
+.memo-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  opacity: 0.8;
+  font-size: 12px;
+}
+.memo-total + .memo-status::before {
+  content: '·';
+  margin-inline-end: 6px;
+}
+.memo-search {
+  min-width: 0;
+  width: 100%;
+  padding-inline: 16px;
+  border-radius: 24px;
+}
+.memo-search input {
+  appearance: none;
+  box-shadow: none;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  text-shadow: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+.memo-search input::placeholder {
+  color: color-mix(in srgb, currentColor 75%, transparent);
+}
+.memo-search input::-webkit-search-cancel-button {
+  appearance: none;
+}
+.memo-search:focus-within,
+.memo-main button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+.memo-toolbar button,
+.memo-results button {
+  color: inherit;
+  text-shadow: inherit;
+}
+.memo-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  text-align: center;
+  pointer-events: none;
+}
+.memo-empty > span:last-child,
+.memo-results p,
+.memo-results small {
+  font-size: 13px;
+  opacity: 0.85;
+}
+.memo-results {
+  overflow: auto;
+  padding: 8px clamp(12px, 2vw, 24px) 20px;
+}
+.memo-results button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  gap: 12px;
+  text-align: start;
+  padding: 12px;
+  margin-bottom: 6px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.memo-result-dot {
+  width: 11px;
+  height: 22px;
+  border-radius: 4px;
+  background: var(--paper);
+}
+.memo-results button span:nth-child(2),
+.memo-results small {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.memo-grip {
+  flex: 0 0 26px;
+  cursor: grab;
+  touch-action: none;
+}
+.memo-text:empty::before {
+  content: attr(data-placeholder);
+  opacity: 0.56;
+  pointer-events: none;
+}
+.is-archive .memo-surface {
+  padding: 16px;
+}
+@media (max-width: 680px) {
+  .memo-board {
+    bottom: 118px;
+  }
+  .memo-heading {
+    flex-wrap: wrap;
+    gap: 1px 6px;
+  }
+  .memo-toolbar {
+    grid-template-columns: minmax(0, 1fr) min(230px, 54%);
+    padding-inline: 0;
+    gap: 6px;
+  }
+  .memo-search {
+    padding-inline: 10px;
+    gap: 6px;
+  }
+  .memo-total {
+    font-size: 11px;
+  }
 }

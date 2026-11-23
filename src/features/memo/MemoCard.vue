@@ -4,40 +4,64 @@ import MemoBody from './MemoBody.vue';
 import { guestMode } from '../../shared/storage/account';
 import type { Memo } from '../../shared/storage/database';
 
-const props = defineProps<{ note: Memo }>();
+const props = defineProps<{
+  note: Memo;
+  compact?: boolean;
+  saveBody: (source: string) => Promise<boolean>;
+}>();
 const emit = defineEmits<{
-  body: [value: string, html: string];
   menu: [event: MouseEvent];
+  reveal: [];
   gesture: [event: PointerEvent, action: 'move' | 'resize' | 'sort'];
 }>();
 const field = ref<InstanceType<typeof MemoBody>>();
 const archived = computed(() => props.note.archivedAt !== null);
-// Preserve named notes created before headings moved into the body.
-const content = computed(() => {
-  const { title, html, body } = props.note;
-  if (!title || title === '新便签') return html;
-  const heading = document.createElement('h1');
-  heading.textContent = title;
-  const plain = document.createElement('div');
-  plain.textContent = body;
-  return heading.outerHTML + (html ?? plain.outerHTML);
-});
+const label = computed(
+  () =>
+    props.note.title ||
+    props.note.body.slice(0, 120).split('\n', 1)[0] ||
+    '便签',
+);
 function press(event: PointerEvent) {
+  if ((event.target as Element).closest('a')) return;
   if (archived.value) emit('gesture', event, 'sort');
-  else if (event.target === event.currentTarget) emit('gesture', event, 'move');
+  else if (
+    event.target === event.currentTarget ||
+    (event.target as Element).closest('.memo-grip')
+  )
+    emit('gesture', event, 'move');
 }
 defineExpose({ focusBody: () => field.value?.focus() });
 </script>
 <template>
+  <button
+    v-if="compact"
+    type="button"
+    class="memo-card memo-distant-card"
+    :data-color="note.color"
+    :data-memo-id="note.id"
+    :aria-label="'查看便签：' + label"
+    :title="label"
+    @click="
+      !$event.shiftKey && !$event.ctrlKey && !$event.metaKey && emit('reveal')
+    "
+    @contextmenu.prevent.stop="emit('menu', $event)"
+  />
   <article
+    v-else
     class="memo-card"
     :data-color="note.color"
     :data-memo-id="note.id"
     :class="{ archived }"
-    :aria-label="note.title || note.body.split('\n')[0] || '便签'"
+    :aria-label="label"
     @contextmenu.prevent.stop="emit('menu', $event)"
     @pointerdown="press"
   >
+    <div
+      class="memo-grip"
+      :title="archived ? '拖动排序' : '拖动便签'"
+      aria-hidden="true"
+    ></div>
     <button
       type="button"
       class="memo-options"
@@ -49,10 +73,9 @@ defineExpose({ focusBody: () => field.value?.focus() });
     </button>
     <MemoBody
       ref="field"
-      :body="note.body"
-      :html="content"
+      :note="note"
+      :save-body="saveBody"
       :readonly="archived || guestMode"
-      @save="(text, html) => emit('body', text, html)"
     />
     <span
       v-if="!archived"
@@ -63,3 +86,16 @@ defineExpose({ focusBody: () => field.value?.focus() });
     />
   </article>
 </template>
+
+<style scoped>
+.memo-distant-card {
+  padding: 0;
+  background: var(--paper);
+  box-shadow: none;
+  cursor: zoom-in;
+}
+.memo-distant-card:is(:focus-visible, .is-selected) {
+  outline: calc(2px / var(--memo-camera-scale)) solid currentColor;
+  outline-offset: calc(1px / var(--memo-camera-scale));
+}
+</style>

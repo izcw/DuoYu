@@ -91,7 +91,8 @@ function over(event: DragEvent) {
   const y = event.clientY + scrollTop() - startScroll;
   const next = ids.map((slot) => slot.id);
   next.splice(ids.filter((slot) => y > slot.center).length, 0, dragged.value);
-  preview.value = next;
+  if (!preview.value || next.some((id, i) => id !== preview.value?.[i]))
+    preview.value = next;
 }
 function end() {
   dragPreview.dispose();

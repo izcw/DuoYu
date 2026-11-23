@@ -37,6 +37,7 @@ const dispose = [];
 const rpc = (path) =>
   new Promise((resolve, reject) => requests.push({ path, resolve, reject }));
 const state = new Function(
+  'requireAccount',
   'ref',
   'watch',
   'onUnmounted',
@@ -49,6 +50,7 @@ const state = new Function(
   'commitJsonImport',
   compiled + '\nreturn {load,apply,rows,busy,error,message,chosen};',
 )(
+  () => true,
   (value) => ({ value }),
   () => {},
   (callback) => dispose.push(callback),

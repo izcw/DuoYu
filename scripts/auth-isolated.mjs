@@ -442,6 +442,30 @@ try {
   );
   await expect(saved).toBeVisible();
   const account = accountId(origin, userId);
+  const openMemoWall = async () => {
+    await page.getByRole('navigation', { name: '快捷 Dock' })
+      .getByRole('button', { name: '便签', exact: true }).click();
+    return page.getByRole('region', { name: '便签画布' });
+  };
+  const leaveMemoWall = () => page.locator('.dock-entry[data-dock-id="duoyu-home"]').click();
+  const originalMarkdown = '# 双端便签\n\n- **第一台设备**';
+  const revisedMarkdown = originalMarkdown + '\n- 第二台设备补充';
+  const memoWall = await openMemoWall();
+  await memoWall.focus();
+  await page.keyboard.press('Shift+F10');
+  await page.getByRole('menuitem', { name: /新建便签/ }).click();
+  const memoEditor = memoWall.getByRole('textbox', { name: '便签正文' });
+  await memoEditor.pressSequentially('# 双端便签');
+  await memoEditor.press('Enter');
+  await memoEditor.pressSequentially('- **第一台设备**');
+  await memoEditor.press('Escape');
+  const memoId = await memoWall.locator('.memo-card').filter({ hasText: '双端便签' }).getAttribute('data-memo-id');
+  const cloudMemoBody = async () => (await syncPool.query(
+    "SELECT payload->>'body' AS body FROM sync_entities WHERE account_id=$1 AND entity_type='memos' AND entity_id=$2 AND NOT deleted",
+    [account, memoId],
+  )).rows[0]?.body;
+  await expect.poll(cloudMemoBody, { timeout: 30_000 }).toBe(originalMarkdown);
+  await leaveMemoWall();
   // A clean second profile has neither the selected desktop nor its image cache.
   const wallpaperBytes = await readFile('public/icons/128.png');
   await context.route('https://api.bimg.cc/all?**', (route) => route.fulfill({
@@ -739,8 +763,21 @@ try {
   console.log(
     'PASS fresh browser profile pulls actual cloud data after real login',
   );
+  const incoming = (await openMemoWall()).locator(`[data-memo-id="${memoId}"]`);
+  await expect(incoming.locator('strong')).toHaveText('第一台设备');
+  await incoming.locator('.memo-preview').click();
+  const peerEditor = incoming.getByRole('textbox', { name: '便签正文' });
+  await expect(peerEditor.locator('strong')).toHaveText('第一台设备');
+  await peerEditor.press('Control+End');
+  await peerEditor.press('Enter');
+  await peerEditor.press('Control+b');
+  await page.keyboard.insertText('第二台设备补充');
+  await peerEditor.press('Escape');
+  await expect.poll(cloudMemoBody, { timeout: 30_000 }).toBe(revisedMarkdown);
+  await leaveMemoWall();
   await page.getByRole('button', { name: '切换桌面', exact: true }).click();
-  await expect(page.locator('[data-desktop="' + chosenDesktop + '"]')).toHaveAttribute('aria-pressed', 'true');
+  const desktopButton = (id) => page.locator(`[data-desktop="${id}"] .desktop-preview`);
+  await expect(desktopButton(chosenDesktop)).toHaveAttribute('aria-pressed', 'true');
   const displayedWallpaper = page.locator('.wallpaper:not(.wallpaper-contained) img.loaded').first();
   await expect.poll(async () => displayedWallpaper.evaluate(async img => {
     const bytes = await (await fetch(img.src)).arrayBuffer();
@@ -759,7 +796,7 @@ try {
   console.log('PASS fresh installation restores the selected desktop and byte-identical Bing wallpaper');
   // Another device can set its own default without switching this open device.
   await page.getByRole('button', { name: '切换桌面', exact: true }).click();
-  await page.locator('[data-desktop="default"]').click();
+  await desktopButton('default').click();
   await expect.poll(resumeDesktop, { timeout: 30000 }).toBe('default');
   await context.close();
   context = await chromium.launchPersistentContext(path.join(evidence, 'profile'), {
@@ -772,9 +809,13 @@ try {
   await page.goto(`chrome-extension://${extensionId}/newtab.html`);
   await signIn(context, page, origin);
   await page.getByRole('button', { name: '切换桌面', exact: true }).click();
-  await expect(page.locator('[data-desktop="' + chosenDesktop + '"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(desktopButton(chosenDesktop)).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('Escape');
   console.log('PASS existing device retains its own desktop after a different device selects default');
+  const returned = (await openMemoWall()).locator(`[data-memo-id="${memoId}"]`);
+  await expect(returned.getByText('第二台设备补充', { exact: true })).toBeVisible({ timeout: 30_000 });
+  await leaveMemoWall();
+  console.log('PASS Markdown round trip across two signed-in extension profiles and PostgreSQL');
   // Project suspension is enforced at the Go entry, before the Node engine.
   await syncPool.query(
     'UPDATE backend_users SET disabled=true WHERE account_id=$1',

@@ -1,4 +1,10 @@
-import { same, type Entity, type Change, type Row } from './model';
+import {
+  same,
+  editedFields,
+  type Entity,
+  type Change,
+  type Row,
+} from './model';
 import type { LibraryItem } from '../../shared/storage/database';
 import { layoutLibraryItems } from '../library/grid-layout';
 import { HOME_GRID_ROWS, LIBRARY_GRID_ROWS } from '../library/grid-config';
@@ -110,9 +116,12 @@ export function previewPages(versions: Entity[][]) {
   const pages = new Map<string, string>([
     ['page:home', '首页'],
     ['page:__dock', 'Dock'],
+    ['memo:wall', '便签墙'],
   ]);
   for (const entities of versions)
     for (const e of entities) {
+      if (e.table === 'memoPages')
+        pages.set('memo:' + e.id, '便签 · ' + e.payload.name);
       if (e.table === 'libraryPages')
         pages.set('page:' + e.id, e.payload.name || '收藏页');
       if (e.table === 'libraryItems' && e.payload.kind === 'folder')
@@ -284,6 +293,8 @@ export const previewPreference = (entities: Entity[], id: string) =>
 export function previewDefaultPage(changes: Change[]) {
   for (const c of changes) {
     const p: Row = c.value ?? c.base ?? {};
+    if (c.table === 'memos') return 'memo:' + (p.pageId || 'wall');
+    if (c.table === 'memoPages') return 'memo:' + c.id;
     if (c.table === 'libraryItems')
       return p.parent ? 'folder:' + p.parent : 'page:' + (p.pageId || 'home');
     if (c.table === 'libraryPages') return 'page:' + c.id;
@@ -354,8 +365,7 @@ export function mergePreviewChanges(groups: Change[][]): Change[] {
         continue;
       }
       const value = { ...previous.value };
-      for (const field of Object.keys({ ...change.base, ...change.value })) {
-        if (same(change.base?.[field], change.value[field])) continue;
+      for (const field of editedFields(change)) {
         if (field in change.value) value[field] = change.value[field];
         else delete value[field];
       }

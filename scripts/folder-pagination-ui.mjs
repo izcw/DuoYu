@@ -1,3 +1,4 @@
+import { prepareEditableDesktop } from './fixtures/editable-desktop.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdtemp, mkdir } from 'node:fs/promises';
@@ -20,6 +21,7 @@ const context = await chromium.launchPersistentContext(
 );
 context.setDefaultTimeout(12000);
 try {
+  await prepareEditableDesktop(context);
   await context.route('https://api.bimg.cc/**', (r) => r.abort());
   const page = await context.newPage();
   const errors = [];
@@ -30,7 +32,7 @@ try {
   // exercise the rendered folder and its normal deletion transaction.
   await page.evaluate(async () => {
     const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('duoyu');
+      const request = indexedDB.open('duoyu-account-' + localStorage.getItem('duoyu-sync-account'));
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });

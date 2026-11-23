@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import Fit from '@icon-park/vue-next/es/icons/FullScreen';
+import Minus from '@icon-park/vue-next/es/icons/Minus';
+import Plus from '@icon-park/vue-next/es/icons/Plus';
 import type { Memo } from '../../shared/storage/database';
-import { minZoom, maxZoom } from './useMemoCanvas';
+import { maxZoom, noteBounds } from './useMemoCanvas';
 
 const props = defineProps<{
   viewport?: HTMLElement;
+  minimumScale: number;
   camera: { x: number; y: number; scale: number };
   notes: Pick<
     Memo,
@@ -16,7 +20,9 @@ type Point = { x: number; y: number };
 const emit = defineEmits<{
   zoom: [value: number];
   navigate: [center: Point, commit: boolean];
+  fit: [overlay: DOMRectReadOnly];
 }>();
+const overview = ref<HTMLElement>();
 const size = ref({ width: 1, height: 1 });
 watch(
   () => props.viewport,
@@ -41,18 +47,13 @@ const frame = computed(() => {
     height: size.value.height / scale,
   };
 });
+const extent = computed(() => noteBounds(props.notes));
 const bounds = computed(() => {
   const f = frame.value;
-  let left = f.x,
-    top = f.y,
-    right = f.x + f.width,
-    bottom = f.y + f.height;
-  for (const n of props.notes) {
-    left = Math.min(left, n.x);
-    top = Math.min(top, n.y);
-    right = Math.max(right, n.x + n.width);
-    bottom = Math.max(bottom, n.y + n.height);
-  }
+  const left = Math.min(f.x, extent.value.left);
+  const top = Math.min(f.y, extent.value.top);
+  const right = Math.max(f.x + f.width, extent.value.right);
+  const bottom = Math.max(f.y + f.height, extent.value.bottom);
   const pad = Math.max(1, Math.max(right - left, bottom - top) * 0.05);
   return [
     left - pad,
@@ -148,11 +149,31 @@ function keyPan(event: KeyboardEvent) {
     true,
   );
 }
-const percent = computed(() => Math.round(props.camera.scale * 100));
+function wheel(event: WheelEvent) {
+  if (drag || !event.deltaY) return;
+  const unit =
+    event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? size.value.height : 1;
+  emit('zoom', props.camera.scale * Math.exp(-event.deltaY * unit * 0.002));
+}
+function fit() {
+  if (overview.value) emit('fit', overview.value.getBoundingClientRect());
+}
+const percent = computed(() => props.camera.scale * 100);
+const scaleText = computed(() =>
+  percent.value < 0.01
+    ? '<0.01%'
+    : Number(percent.value.toFixed(percent.value < 10 ? 2 : 0)) + '%',
+);
 </script>
 <template>
-  <aside class="memo-overview glass-surface" aria-label="画布导航">
+  <aside
+    ref="overview"
+    class="memo-overview"
+    aria-label="画布导航"
+    @wheel.stop.prevent="wheel"
+  >
     <svg
+      class="memo-map"
       role="group"
       aria-label="便签缩略地图"
       tabindex="0"
@@ -164,58 +185,73 @@ const percent = computed(() => Math.round(props.camera.scale * 100));
       @lostpointercapture="cancel"
       @keydown="keyPan"
     >
-      <title>点击定位，拖动视野框移动画布</title>
-      <rect
-        v-for="note in notes"
-        :key="note.id"
-        :data-color="note.color"
-        :class="{ 'map-selected': selected.has(note.id) }"
-        :x="note.x"
-        :y="note.y"
-        :width="note.width"
-        :height="note.height"
-        rx="5"
-        vector-effect="non-scaling-stroke"
-      />
-      <rect
-        class="map-frame"
-        v-bind="frame"
-        vector-effect="non-scaling-stroke"
-      />
+      <title>点击定位，拖动平移，滚轮缩放</title>
+      <rect class="map-frame" v-bind="frame" />
+      <g v-memo="[notes, selected]">
+        <rect
+          v-for="note in notes"
+          :key="note.id"
+          :data-color="note.color"
+          :class="{ 'map-selected': selected.has(note.id) }"
+          :x="note.x"
+          :y="note.y"
+          :width="note.width"
+          :height="note.height"
+          rx="5"
+          vector-effect="non-scaling-stroke"
+        />
+      </g>
     </svg>
     <div class="memo-zoom-controls">
       <button
-        class="memo-control"
+        class="memo-control glass-control glass-interactive"
         aria-label="缩小"
+        title="缩小"
+        :disabled="camera.scale <= minimumScale"
         @click="emit('zoom', camera.scale / 1.2)"
       >
-        −
+        <Minus size="14" aria-hidden="true" />
       </button>
       <input
         type="range"
         aria-label="画布缩放"
-        :min="minZoom * 100"
+        :min="minimumScale * 100"
         :max="maxZoom * 100"
         :value="percent"
-        :aria-valuetext="percent + '%'"
+        step="any"
+        :aria-valuetext="scaleText"
         @input="
           emit('zoom', ($event.target as HTMLInputElement).valueAsNumber / 100)
         "
       />
       <button
-        class="memo-control"
+        class="memo-control glass-control glass-interactive"
         aria-label="放大"
+        title="放大"
+        :disabled="camera.scale >= maxZoom"
         @click="emit('zoom', camera.scale * 1.2)"
       >
-        ＋
+        <Plus size="14" aria-hidden="true" />
       </button>
+      <output class="memo-scale" aria-label="当前缩放">{{ scaleText }}</output>
+    </div>
+    <div class="memo-map-actions">
       <button
-        class="memo-control memo-scale"
-        aria-label="恢复原始缩放"
-        title="恢复原始缩放"
+        class="memo-control glass-control glass-interactive"
+        aria-label="恢复到 100%"
+        title="恢复到 100%"
         @click="emit('zoom', 1)"
       >
-        {{ percent }}%
+        恢复 100%
+      </button>
+      <button
+        class="memo-control glass-control glass-interactive"
+        aria-label="查看全部便签"
+        title="查看全部便签"
+        :disabled="!notes.length"
+        @click="fit"
+      >
+        <Fit size="14" aria-hidden="true" /> 查看全部
       </button>
     </div>
   </aside>
@@ -225,22 +261,24 @@ const percent = computed(() => Math.round(props.camera.scale * 100));
   position: absolute;
   right: 8px;
   bottom: 8px;
-  width: min(190px, 65%);
-  padding: 8px;
-  border-radius: 14px;
-  color: var(--theme-text);
-  background-color: var(--theme-panel);
+  width: min(190px, calc(100% - 16px));
+  padding: 3px;
+  color: inherit;
   z-index: 1;
 }
-svg {
+.memo-map {
   touch-action: none;
   user-select: none;
   cursor: crosshair;
   display: block;
   width: 100%;
   height: clamp(52px, 9vh, 86px);
-  border-radius: 7px;
-  background: var(--theme-hover);
+  outline: none;
+  border: 0;
+  box-shadow: none;
+}
+.memo-map:focus-visible {
+  background: var(--glass-interaction-fill);
 }
 rect[data-color] {
   fill: var(--paper);
@@ -248,35 +286,51 @@ rect[data-color] {
   stroke-width: 0.7;
 }
 rect.map-selected {
-  stroke: #568bba;
+  stroke: currentColor;
   stroke-width: 1.5;
 }
 .map-frame {
   cursor: grab;
-  fill: #568bba12;
-  stroke: #568bba;
-  stroke-width: 1.4;
+  fill: color-mix(in srgb, currentColor 12%, transparent);
+  stroke: none;
 }
-svg:active,
-svg:active .map-frame {
+.memo-map:active,
+.memo-map:active .map-frame {
   cursor: grabbing;
 }
-.memo-zoom-controls {
+.memo-zoom-controls,
+.memo-map-actions {
   display: flex;
   align-items: center;
-  margin-top: 4px;
+  gap: 3px;
+  margin-top: 2px;
 }
 .memo-zoom-controls input {
   flex: 1;
   min-width: 0;
   width: 100%;
-  accent-color: #5285ad;
+  color: inherit;
+  accent-color: currentColor;
   cursor: pointer;
 }
-.memo-zoom-controls button {
-  min-width: 22px;
+.memo-map-actions {
+  justify-content: flex-end;
+}
+.memo-map-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding-inline: 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.memo-zoom-controls :is(input, button):focus-visible,
+.memo-map-actions button:focus-visible {
+  outline: 2px solid currentColor !important;
+  outline-offset: 1px;
 }
 .memo-scale {
-  width: 40px;
+  min-width: 36px;
+  text-align: end;
 }
 </style>

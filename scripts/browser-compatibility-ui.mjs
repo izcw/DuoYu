@@ -1,6 +1,7 @@
 import { chromium, expect } from '@playwright/test';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { prepareEditableDesktop } from './fixtures/editable-desktop.mjs';
 
 await mkdir('work', { recursive: true });
 const evidence = await mkdtemp(path.resolve('work/browser-compatibility-'));
@@ -8,8 +9,8 @@ const extension = path.resolve(
     process.env.TEST_EXTENSION_PATH || '.output/chrome-mv3',
   ),
   results = [];
-async function checkBackupKeyboard(page) {
-  const entry = page.getByRole('button', { name: '登录多鱼账号', exact: true });
+async function checkBackupKeyboard(page, signedIn = false) {
+  const entry = page.locator('.account-entry');
   await entry.focus();
   await page.keyboard.press('Enter');
   const parent = page.getByRole('dialog', { name: '设置', exact: true });
@@ -25,34 +26,28 @@ async function checkBackupKeyboard(page) {
   const opener = parent.getByRole('button', { name: '导入备份', exact: true });
   await tabTo(opener);
   await page.keyboard.press('Enter');
-  const dialog = page.getByRole('dialog', {
-    name: '导入JSON文件',
-    exact: true,
-  });
-  const close = dialog.getByRole('button', { name: '关闭', exact: true });
-  await expect(close).toBeFocused();
-  await page.keyboard.press('Shift+Tab');
-  await expect(
-    dialog.getByRole('button', { name: '取消', exact: true }),
-  ).toBeFocused();
-  await page.keyboard.press('Tab');
-  await expect(close).toBeFocused();
-  const option = dialog.getByRole('checkbox', {
-    name: '同时导入设置和自定义壁纸',
-    exact: true,
-  });
-  await tabTo(option);
-  await page.keyboard.press('Space');
-  await expect(option).toBeChecked();
-  await expect(
-    dialog.getByRole('button', { name: '导入数据', exact: true }),
-  ).toBeDisabled();
+  const dialog = page.getByRole('dialog', { name: signedIn ? '导入JSON文件' : '登录后编辑', exact: true });
+  if (signedIn) {
+    const close = dialog.getByRole('button', { name: '关闭', exact: true });
+    await expect(close).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(dialog.getByRole('button', { name: '取消', exact: true })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(close).toBeFocused();
+    const option = dialog.getByRole('checkbox', { name: '同时导入设置和自定义壁纸' });
+    await tabTo(option);
+    await page.keyboard.press('Space');
+    await expect(option).toBeChecked();
+    await expect(dialog.getByRole('button', { name: '导入数据', exact: true })).toBeDisabled();
+  } else {
+    await expect(dialog.getByRole('button', { name: '继续浏览' })).toBeFocused();
+  }
   const bounds = await dialog.boundingBox(),
     viewport = page.viewportSize();
   expect(bounds.x).toBeGreaterThanOrEqual(0);
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width + 1);
   await page.keyboard.press('Escape');
-  await expect(dialog).toHaveCount(0);
+  await expect(dialog).not.toBeVisible();
   await expect(opener).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(parent).toHaveCount(0);
@@ -108,8 +103,12 @@ for (const channel of ['msedge', 'chrome']) {
       await page.setViewportSize({ width, height: 1000 });
       await page.goto(`chrome-extension://${id}/newtab.html`);
       await expect(page.locator('#search-input')).toBeVisible();
+      const clock = page.locator('.clock-time');
+      await expect(clock).toHaveText(/^\d{2}:\d{2}:\d{2}$/);
+      await expect(clock).not.toHaveText(await clock.innerText());
+      await expect(page.locator('.clock-lunar')).toHaveText(/^农历.+/);
       await page.locator('#search-input').fill('compatibility');
-      await expect(page.getByRole('option').first()).toContainText(
+      await expect(page.getByRole('listbox', { name: 'Bing 搜索建议' }).getByRole('option').first()).toContainText(
         'compatibility',
       );
       await expect
@@ -173,6 +172,13 @@ for (const channel of ['msedge', 'chrome']) {
       return messages.length;
     });
     await popup.close();
+    await prepareEditableDesktop(context);
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.goto(`chrome-extension://${id}/newtab.html`);
+      await checkBackupKeyboard(page, true);
+    }
+    expect(errors).toEqual([]);
     results.push({
       channel,
       passed: true,

@@ -81,6 +81,7 @@ async function restore() {
   }
 }
 onMounted(load);
+defineExpose({ load });
 </script>
 <template>
   <section class="account-backups" aria-label="云端备份记录">
@@ -88,7 +89,7 @@ onMounted(load);
       <strong>云端备份</strong
       ><button :disabled="busy" @click="load">刷新</button>
     </header>
-    <p>显示最近 5 份备份。每次成功同步数据变更时保存一份，查看或刷新不会新增备份。</p>
+    <p>显示最近 5 份云端备份。点击“立即同步”会保存一份当前云端数据，即使本次没有修改。</p>
     <ul>
       <li v-for="row in rows" :key="row.id">
         <div>

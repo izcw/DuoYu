@@ -3,6 +3,8 @@ import { activeAccountKey } from '../../shared/storage/account';
 import type { SyncConflict, CapturedOperation } from './capture';
 import {
   rowChanges,
+  editedFields,
+  cloudHasChange,
   same,
   snapshotValue,
   type Change,
@@ -28,7 +30,7 @@ export const conflictReasons: Record<string, string> = {
   field_conflict: '同一内容在其他设备上也被修改了',
   layout_conflict: '位置或大小与其他设备的修改冲突',
   layout_overlap: '这个位置已被其他项目占用',
-  deleted_or_missing: '项目已在其他设备上删除',
+  deleted_or_missing: '云端找不到对应项目，可能已删除或此前未同步成功',
   delete_conflict: '删除前，其他设备更新了这个项目',
   epoch_changed: '云端已恢复数据，需要确认这些本机修改',
   epoch_required: '这项更改来自旧版扩展，请检查后重新应用',
@@ -61,14 +63,26 @@ export async function fetchRemoteConflicts(request: typeof rpc = rpc) {
   let resolvedChanged = false;
   for (const entry of response.conflicts ?? []) {
     const existing = await database.syncConflicts.get(entry.operation_id);
-    if (entry.resolved_at && existing && !existing.resolvedAt) {
+    let resolvedAt = entry.resolved_at;
+    const changes: Change[] = entry.detail.changes ?? [];
+    if (!resolvedAt && !existing?.resolvedAt && existing?.state !== 'resolving' &&
+        ['field_conflict', 'layout_conflict', 'delete_conflict', 'deleted_or_missing', 'base_mismatch'].includes(entry.detail.code) &&
+        changes.length && !changed) {
+      const shadow = await database.syncShadow.bulkGet(changes.map(c => c.table + ':' + c.id));
+      if (changes.every((c, i) => cloudHasChange(c, shadow[i] && !shadow[i]!.deleted ? shadow[i]!.payload as Row : null))) {
+        await request('/api/v1/sync/conflicts/' + entry.operation_id + '/resolve', 'POST', {});
+        assertConflictAccount(owner);
+        resolvedAt = new Date().toISOString();
+      }
+    }
+    if (resolvedAt && existing && !existing.resolvedAt) {
       resolvedChanged = true;
       // A cloud choice also cancels a previously staged local resolution.
       for (const op of await database.syncOutbox.toArray())
         if (op.resolutionOf === existing.id)
           await database.syncOutbox.delete(op.id);
     }
-    await database.syncConflicts.put({
+    const next: SyncConflict = {
       id: entry.operation_id,
       createdAt: existing?.createdAt ?? Date.parse(entry.created_at),
       operation: existing?.operation ?? {
@@ -78,14 +92,19 @@ export async function fetchRemoteConflicts(request: typeof rpc = rpc) {
       reason: entry.detail.code ?? existing?.reason ?? 'field_conflict',
       state: changed ? 'conflict' : (existing?.state ?? 'conflict'),
       server: true,
-      ...(entry.resolved_at
-        ? { resolvedAt: Date.parse(entry.resolved_at) }
+      ...(resolvedAt
+        ? { resolvedAt: Date.parse(resolvedAt) }
         : existing?.resolvedAt
           ? { resolvedAt: existing.resolvedAt }
           : {}),
-    });
+    };
+    // Existing immutable operations are reused. Don't wake live queries for an
+    // unchanged server record every time the background poll runs.
+    if (!existing || !existing.server || existing.reason !== next.reason ||
+        existing.state !== next.state || existing.resolvedAt !== next.resolvedAt)
+      await database.syncConflicts.put(next);
   }
-  if (epoch) await database.syncMeta.put({ id: 'conflictEpoch', value: epoch });
+  if (epoch && changed) await database.syncMeta.put({ id: 'conflictEpoch', value: epoch });
   if (resolvedChanged)
     await applyRemote(
       [],
@@ -196,16 +215,15 @@ export async function retryConflict(
             ? { ...c.value }
             : { ...(base ?? c.base ?? {}) };
         if (!wholeVersion)
-          for (const field of Object.keys({ ...c.base, ...c.value }))
-            if (!same(c.base?.[field], c.value[field])) {
-              if (field in c.value) value[field] = c.value[field];
-              else delete value[field];
-            }
+          for (const field of editedFields(c)) {
+            if (field in c.value) value[field] = c.value[field];
+            else delete value[field];
+          }
         Object.assign(value, overrides[key] ?? {});
         value.id = newId;
         for (const [field, table] of [
           ['parent', 'libraryItems'],
-          ['pageId', 'libraryPages'],
+          ['pageId', c.table === 'memos' ? 'memoPages' : 'libraryPages'],
           ['spaceId', 'workspaceSpaces'],
           ['collectionId', 'tabCollections'],
         ] as const)
@@ -281,6 +299,8 @@ export async function retryConflict(
       }
       const recoveredGroups = new Map<string, string>();
       for (const c of [...changes]) {
+        if (c.table === 'memos' && c.value?.pageId && !live('memoPages', c.value.pageId))
+          c.value.pageId = 'wall';
         if (
           c.table === 'tabCollections' &&
           c.value &&
@@ -366,9 +386,9 @@ export async function retryConflict(
       };
       // Let normal preparation handle binary assets. Saved tabs are already
       // normalized so a prepared changes list is supplied after asset encoding.
-      const { encodeAssets } = await import('./assets');
+      const { encodeChanges } = await import('./assets');
       assertConflictAccount(owner);
-      const encoded = await encodeAssets(changes, epoch);
+      const encoded = await encodeChanges(changes, epoch, shadow);
       operation.prepared = {
         id: operationId,
         deviceId: device,

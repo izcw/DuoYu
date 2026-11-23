@@ -213,3 +213,36 @@ database
 database.version(10).stores({ memos: 'id, layer' });
 
 database.version(11).stores({ memoPages: 'id, order' });
+
+database.version(12).stores({ memos: 'id, layer, pageId, archivedAt' }).upgrade(async (tx) => {
+  if (!pageAccountKey) return;
+  // Stage previously local-only pages before their notes, in the same atomic
+  // upgrade. Pending creations survive the first cloud snapshot and retries.
+  const meta = tx.table('syncMeta');
+  let clock = Math.max(Date.now(), Number((await meta.get('outboxClock'))?.value ?? 0));
+  let rows: CapturedOperation['rows'] = {};
+  let bytes = 0;
+  let count = 0;
+  async function flush() {
+    if (count) await tx.table('syncOutbox').add({ id: crypto.randomUUID(), createdAt: ++clock, rows });
+    rows = {};
+    count = bytes = 0;
+  }
+  (tx.idbtrans as IDBTransaction & { syncRemote: boolean }).syncRemote = true;
+  const encoder = new TextEncoder();
+  for (const table of ['memoPages', 'memos']) {
+    for (const value of await tx.table(table).toArray()) {
+      if (table === 'memos' && !value.pageId) {
+        value.pageId = 'wall';
+        await tx.table(table).put(value);
+      }
+      const size = encoder.encode(JSON.stringify(value)).length;
+      if (count >= 500 || bytes + size > 1024 * 1024) await flush();
+      rows[table + ':' + value.id] = { table, id: value.id, base: null, value };
+      bytes += size;
+      count++;
+    }
+    await flush();
+  }
+  await meta.put({ id: 'outboxClock', value: clock });
+});

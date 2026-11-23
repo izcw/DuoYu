@@ -1,3 +1,4 @@
+import { prepareEditableDesktop } from './fixtures/editable-desktop.mjs';
 import { chromium, expect } from '@playwright/test';
 import { mkdtemp, mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -16,6 +17,7 @@ const c = await chromium.launchPersistentContext(
 );
 c.setDefaultTimeout(12000);
 try {
+  await prepareEditableDesktop(c);
   await c.route('https://example.com/**', (r) =>
     r.fulfill({ contentType: 'text/html', body: '<title>Audit</title>' }),
   );

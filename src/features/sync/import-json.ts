@@ -347,21 +347,10 @@ export async function planJsonImport(
       !(await database.syncAssets.get(ref.slice(ASSET_PREFIX.length)))
     )
       throw Error('备份缺少图片文件，请在原设备重新导出完整备份');
-  const changes = rowChanges(
-    Object.fromEntries(
-      Object.entries(tables).flatMap(([table, rows]) =>
-        rows.map((value) => [
-          table + ':' + value.id,
-          { table, id: value.id, base: null, value },
-        ]),
-      ),
-    ),
-  );
-  if (changes.length > 2000) throw Error('单次导入最多2000条，请拆分备份文件');
   const importedMemoPages = array(raw.memoPages);
   const memoPageIds = ids(importedMemoPages);
   tables.memoPages = importedMemoPages.map((page, index) => ({
-    id: memoPageIds.get(page.id)!, name: text(page.name, 30, '便签'),
+    id: memoPageIds.get(page.id)!, name: text(page.name, 30).trim() || '便签',
     icon: text(page.icon, 80, 'Notes'), order: finite(page.order, index),
   }));
   const importedMemos = array(raw.memos);
@@ -384,6 +373,17 @@ export async function planJsonImport(
       createdAt: note.createdAt, updatedAt: note.updatedAt, archivedAt: note.archivedAt,
     };
   });
+  const changes = rowChanges(
+    Object.fromEntries(
+      Object.entries(tables).flatMap(([table, rows]) =>
+        rows.map((value) => [
+          table + ':' + value.id,
+          { table, id: value.id, base: null, value },
+        ]),
+      ),
+    ),
+  );
+  if (changes.length > 2000) throw Error('单次导入最多2000条，请拆分备份文件');
   const digest = [
     ...new Uint8Array(
       await crypto.subtle.digest(

@@ -52,7 +52,7 @@ const props = withDefaults(
 );
 const board = ref<HTMLElement>();
 const gridView = ref<InstanceType<typeof LibraryGrid>>();
-const insertionPoint = ref<{ x: number; y: number }>();
+const insertionCell = ref<{ column: number; row: number }>();
 const tool = ref<'' | 'widgets' | 'wallpaper' | 'search'>('');
 const automatic = ref(
   accountStorage.getItem('duoyu-layout-' + props.pageId) === 'auto',
@@ -72,7 +72,7 @@ onUnmounted(() =>
   window.removeEventListener('duoyu-sync-preferences', cloudLayout),
 );
 function newPosition(width: number, height: number) {
-  return gridView.value!.placement(insertionPoint.value, width, height);
+  return gridView.value!.placement(insertionCell.value, width, height);
 }
 const context = ref<{ x: number; y: number }>();
 const contextMenu = ref<HTMLElement>();
@@ -84,7 +84,7 @@ async function showContext(event: MouseEvent) {
   event.stopPropagation();
   if ((event.target as Element).closest('input, textarea, select')) return;
   event.preventDefault();
-  insertionPoint.value = { x: event.clientX, y: event.clientY };
+  insertionCell.value = gridView.value?.cellAt(event.clientX, event.clientY);
   context.value = {
     x: Math.max(8, Math.min(event.clientX, innerWidth - 196)),
     y: Math.max(8, Math.min(event.clientY, innerHeight - 390)),

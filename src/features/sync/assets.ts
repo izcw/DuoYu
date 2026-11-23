@@ -1,6 +1,12 @@
+import type { Change, Row } from './model';
 import { guestMode } from '../../shared/storage/account';
 import { database } from '../../shared/storage/database';
 export const ASSET_PREFIX = 'duoyu-asset:';
+const imageSignatures = new Map([
+  ['image/png', '\x89PNG\r\n\x1a\n'], ['image/jpeg', '\xff\xd8'],
+  ['image/webp', 'RIFF'], ['image/gif', 'GIF'],
+]);
+const maxImageBytes = 20 * 1024 * 1024;
 const active = new Map<string, Promise<Blob>>();
 const urls = new Map<string, string>();
 let transport:
@@ -27,11 +33,9 @@ export interface PreparedAsset {
   blob: Blob;
 }
 export async function prepareAsset(blob: Blob): Promise<PreparedAsset> {
-  if (blob.size > 20 * 1024 * 1024)
+  if (blob.size > maxImageBytes)
     throw Object.assign(Error('图片不能超过20MB'), { status: 413 });
-  if (
-    !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(blob.type)
-  )
+  if (!imageSignatures.has(blob.type))
     throw Object.assign(Error('图片格式不支持，请使用PNG、JPEG、WebP或GIF'), {
       status: 415,
     });
@@ -180,6 +184,67 @@ export async function encodeAssets(
   }
   return value;
 }
+async function cacheInlineFavicon(icon: string): Promise<string> {
+  // An inline site favicon is optional. An empty icon uses the page URL on each device.
+  const type = /^data:([^;,]+)/i.exec(icon)?.[1]?.toLowerCase() ?? '';
+  const signature = imageSignatures.get(type);
+  if (!signature) return '';
+  let blob: Blob;
+  try {
+    blob = await (await fetch(icon)).blob();
+  } catch {
+    return ''; // Malformed data URL from the site.
+  }
+  if (blob.size > maxImageBytes) return '';
+  const header = String.fromCharCode(...new Uint8Array(await blob.slice(0, 12).arrayBuffer()));
+  if (!header.startsWith(signature) || (type === 'image/webp' && header.slice(8) !== 'WEBP'))
+    return '';
+  return cacheAsset(blob.type === type ? blob : blob.slice(0, blob.size, type));
+}
+
+function oncePerIcon(task: (key: string) => Promise<string>) {
+  const tasks = new Map<string, Promise<string>>();
+  return (key: string) => {
+    const pending = tasks.get(key);
+    if (pending) return pending;
+    const result = task(key);
+    tasks.set(key, result);
+    return result;
+  };
+}
+
+export function encodeChanges(
+  changes: Change[],
+  epoch: string,
+  shadow?: ReadonlyMap<string, { payload: unknown; deleted: boolean }>,
+): Promise<Change[]> {
+  // Keep shared work within this operation. A later retry must check the upload lease again.
+  const cacheFavicon = oncePerIcon(cacheInlineFavicon);
+  const stageFavicon = oncePerIcon(ref => uploadAsset(ref, epoch));
+  async function encodeSavedTab(row: Row | null, upload: boolean, cloudIcon: unknown) {
+    if (!row?.icon || row.icon === cloudIcon) return row;
+    let icon = row.icon;
+    if (typeof icon === 'string' && /^data:image\//i.test(icon))
+      icon = await cacheFavicon(icon);
+    if (typeof icon === 'string' && icon.startsWith(ASSET_PREFIX))
+      return { ...row, icon: upload ? await stageFavicon(icon) : icon };
+    return { ...row, icon: await encodeAssets(icon, epoch, upload) };
+  }
+  return Promise.all(changes.map(async change => {
+    if (change.table === 'memos' || change.table === 'memoPages') return change;
+    if (change.table === 'savedTabs') {
+      const remote = shadow?.get('savedTabs:' + change.id);
+      const cloudIcon = (remote?.payload as Row | undefined)?.icon;
+      // The server compares against its exact stored value, including legacy inline icons.
+      const base = await encodeSavedTab(change.base, false, cloudIcon);
+      // Inline bytes survive deletion in the cloud row; external assets may need staging again.
+      const inline = typeof cloudIcon === 'string' && /^data:image\//i.test(cloudIcon);
+      const value = await encodeSavedTab(change.value, true, remote?.deleted && !inline ? undefined : cloudIcon);
+      return { ...change, base, value };
+    }
+    return encodeAssets(change, epoch);
+  }));
+}
 export function collectAssets(value: unknown): string[] {
   const refs = new Set<string>();
   function visit(v: unknown) {
@@ -218,7 +283,7 @@ export async function pruneAssetCache() {
         return;
       const refs = new Set(
         collectAssets(
-          (await database.syncShadow.toArray()).filter((e) => !e.deleted),
+          (await database.syncShadow.toArray()).filter((e) => !e.deleted && e.table !== 'memos' && e.table !== 'memoPages'),
         ),
       );
       for (const asset of await database.syncAssets.toArray()) {

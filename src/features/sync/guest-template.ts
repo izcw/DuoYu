@@ -28,9 +28,9 @@ export async function loadGuestTemplate() {
         throw Error();
       if (typeof snapshot.revision !== 'string') throw Error();
       const last = await database.syncMeta.get('guestRevision');
-      const tables = denormalized(snapshot.entities as Entity[]);
       if (last?.value !== snapshot.revision)
         await database.transaction('rw', database.tables, async () => {
+          const tables = denormalized(snapshot.entities as Entity[]);
           (
             Dexie.currentTransaction!.idbtrans as IDBTransaction & {
               guestTemplate: boolean;

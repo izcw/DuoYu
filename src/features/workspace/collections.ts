@@ -25,6 +25,7 @@ export async function createCollection(
   name: string,
   tabs: SavedTab[] = [],
   selectedSpace = 'default',
+  color?: CollectionColor,
 ) {
   const spaceId = selectedSpace || 'default';
   return database.transaction(
@@ -54,6 +55,7 @@ export async function createCollection(
         updatedAt: Date.now(),
         tabs,
         spaceId,
+        ...(color ? { color } : {}),
       };
       await database.tabCollections.add(collection);
       return collection.id;

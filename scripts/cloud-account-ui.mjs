@@ -1,6 +1,6 @@
 import { chromium, expect } from '@playwright/test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFile, mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import pg from '../../DuoYu-Backend/server/sync/node_modules/pg/lib/index.js';
@@ -237,19 +237,21 @@ try {
     0,
   );
   assert.equal(await page.getByText(/导出冲突副本/).count(), 0);
-  // A fresh account initializes its built-in wallpaper wheel before the
-  // preview opens. Do not attribute that expected migration to preview writes.
-  await expect
-    .poll(
-      async () =>
-        (
-          await pool.query(
-            "SELECT 1 FROM sync_entities WHERE account_id=$1 AND entity_type='shortcuts' AND entity_id='wallpaper' AND NOT deleted",
-            [account.id],
-          )
-        ).rowCount,
-    )
-    .toBe(1);
+  assert.equal((await pool.query(
+    "SELECT 1 FROM sync_entities WHERE account_id=$1 AND entity_type='shortcuts' AND entity_id='wallpaper'",
+    [account.id],
+  )).rowCount, 0, 'opening a fresh profile must not upload the display defaults');
+  const syncButton = page.getByRole('button', { name: '立即同步', exact: true });
+  const currentHead = async () => (await pool.query(
+    'SELECT head_revision::text AS revision FROM sync_accounts WHERE id=$1', [account.id],
+  )).rows[0].revision;
+  const previousHead = await currentHead();
+  await syncButton.click();
+  await expect(syncButton).toBeEnabled();
+  const manualHead = await currentHead();
+  assert.equal(BigInt(manualHead), BigInt(previousHead) + 1n);
+  await expect(page.locator('.account-backups li').first()).toContainText('版本 ' + manualHead);
+  console.log('PASS manual sync button adds one cloud backup and refreshes the visible list');
   const previewRevision = (
     await pool.query(
       'SELECT head_revision::text FROM sync_accounts WHERE id=$1',
@@ -533,6 +535,151 @@ try {
     ).rowCount,
   );
   assert.equal(errors.length, 0, errors.join('\n'));
+  const workspacePage = await context.newPage();
+  const linkPage = await context.newPage();
+  try {
+    const svg = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="7"/></svg>');
+    await linkPage.route('https://workspace.example.invalid/link', route =>
+      route.fulfill({ contentType: 'text/html; charset=utf-8',
+        body: '<title>Undo fixture</title><link rel="icon" href="' + svg + '">' }));
+    await linkPage.goto('https://workspace.example.invalid/link');
+    await workspacePage.goto(`chrome-extension://${id}/newtab.html`);
+    await expect.poll(() => workspacePage.evaluate(async () =>
+      (await chrome.tabs.query({ url: 'https://workspace.example.invalid/link' }))[0]?.favIconUrl,
+    )).toMatch(/^data:image\/svg\+xml,/);
+    await workspacePage.bringToFront();
+    const button = (name) => workspacePage.getByRole('button', { name, exact: true }).first();
+    await button('标签工作区').click();
+    const list = workspacePage.locator('.workspace-collections');
+    await expect(list).toHaveAttribute('aria-busy', 'false');
+    const groups = list.locator('[data-collection-id]');
+    await expect(groups).toHaveCount(0);
+    await list.evaluate(list => {
+      const counts = [];
+      let frame;
+      const sample = () => {
+        const count = list.querySelectorAll('[data-collection-id]').length;
+        if (count !== counts.at(-1)) counts.push(count);
+        frame = requestAnimationFrame(sample);
+      };
+      sample();
+      window.finishCollectionCounts = () => { cancelAnimationFrame(frame); return counts; };
+    });
+    await workspacePage.getByRole('searchbox', { name: '搜索工作区' }).fill('无匹配结果');
+    await button('新建集合').click();
+    await expect(groups).toHaveCount(1);
+    const collectionId = await groups.first().getAttribute('data-collection-id');
+    const deletedOnServer = async (type, key) => (await pool.query(
+      'SELECT deleted FROM sync_entities WHERE account_id=$1 AND entity_type=$2 AND entity_id=$3',
+      [account.id, type, key],
+    )).rows[0]?.deleted;
+    const groupDeleted = () => deletedOnServer('tabCollections', collectionId);
+    await expect.poll(groupDeleted, { timeout: 15000 }).toBe(false);
+    await workspacePage.locator('.workspace-open-tab').filter({ hasText: 'Undo fixture' }).dragTo(groups.first());
+    const card = groups.first().locator('[data-saved-id]');
+    await expect(card).toHaveCount(1);
+    const tabId = await card.getAttribute('data-saved-id');
+    const cardDeleted = () => deletedOnServer('savedTabs', tabId);
+    await expect.poll(cardDeleted, { timeout: 15000 }).toBe(false);
+    await button('更多集合操作').click();
+    await button('删除集合').click();
+    await button('确认删除').click();
+    await expect(groups).toHaveCount(0);
+    await expect.poll(groupDeleted, { timeout: 15000 }).toBe(true);
+    await expect.poll(cardDeleted).toBe(true);
+    await button('撤销删除').click();
+    await expect(groups).toHaveCount(1);
+    await expect.poll(groupDeleted, { timeout: 15000 }).toBe(false);
+    await expect.poll(cardDeleted).toBe(false);
+    await expect(card).toHaveAttribute('data-saved-id', tabId);
+    assert.deepEqual(await workspacePage.evaluate(() => window.finishCollectionCounts()), [0, 1, 0, 1]);
+    await card.hover();
+    await button('更多 Undo fixture').click();
+    await button('移除收藏 Undo fixture').click();
+    await expect.poll(cardDeleted, { timeout: 15000 }).toBe(true);
+    await button('撤销删除').click();
+    await expect.poll(cardDeleted, { timeout: 15000 }).toBe(false);
+    await expect(card).toHaveAttribute('data-saved-id', tabId);
+    console.log('PASS synchronized collection and link deletion and undo retain IDs without extra list changes');
+
+    // An older client could store the inline icon directly in the cloud row.
+    const readTab = async () => (await pool.query(
+      "SELECT payload, revision::text FROM sync_entities WHERE account_id=$1 AND entity_type='savedTabs' AND entity_id=$2",
+      [account.id, tabId],
+    )).rows[0];
+    const oldTab = await readTab();
+    const seeded = await applyOperation(pool, account, operation([
+      change('savedTabs', tabId, oldTab.payload, { ...oldTab.payload, icon: svg }, oldTab.revision),
+    ]));
+    assert.equal(seeded.status, 'applied');
+    await workspacePage.reload();
+    await button('标签工作区').click();
+    await expect(card.locator('img[src^="data:image/svg+xml"]')).toHaveCount(1);
+    await button('更多集合操作').click();
+    await button('删除集合').click();
+    await button('确认删除').click();
+    await expect.poll(cardDeleted, { timeout: 15000 }).toBe(true);
+    await button('撤销删除').click();
+    await expect.poll(cardDeleted, { timeout: 15000 }).toBe(false);
+    assert.deepEqual((await readTab()).payload, { ...oldTab.payload, icon: svg });
+
+    // Old clients quarantined the entire captured collection on a single inline favicon.
+    const group = { id: randomUUID(), name: '旧版收藏', spaceId: 'default', order: 2, updatedAt: 1 };
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jF7sAAAAASUVORK5CYII=';
+    const hash = createHash('sha256').update(Buffer.from(png, 'base64')).digest('hex');
+    let iconPosts = 0;
+    server.on('request', req => {
+      if (req.method === 'POST' && req.url === '/api/v1/assets/' + hash) iconPosts++;
+    });
+    const tabs = Array.from({ length: 18 }, (_, i) => ({
+      id: randomUUID(), title: '收藏 ' + i, savedAt: 1, url: 'https://workspace.example.invalid/' + i,
+      icon: i === 1 ? 'data:image/x-icon;base64,AAABAA==' : i === 0 ? svg : 'data:image/png;base64,' + png,
+    }));
+    const later = { ...tabs[0], icon: '', position: 0, collectionId: group.id };
+    const rejected = await applyOperation(pool, account, operation([
+      change('savedTabs', later.id, later, { ...later, starred: true }),
+    ]));
+    assert.equal(rejected.code, 'deleted_or_missing');
+    await workspacePage.evaluate(async ({ group, tabs }) => {
+      const db = await new Promise((resolve, reject) => {
+        const req = indexedDB.open('duoyu-account-' + localStorage.getItem('duoyu-sync-account'));
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      try {
+        const tx = db.transaction('syncConflicts', 'readwrite');
+        const id = crypto.randomUUID();
+        const createdAt = Date.now() - 60000;
+        tx.objectStore('syncConflicts').put({
+          id, createdAt, state: 'blocked', reason: '图片格式不支持，请使用PNG、JPEG、WebP或GIF',
+          operation: { id, createdAt, rows: { ['tabCollections:' + group.id]: {
+            table: 'tabCollections', id: group.id, base: null, value: { ...group, tabs },
+          } } },
+        });
+        await new Promise((resolve, reject) => {
+          tx.oncomplete = resolve;
+          tx.onabort = () => reject(tx.error);
+        });
+      } finally { db.close(); }
+    }, { group, tabs });
+    await workspacePage.reload();
+    await workspacePage.locator('.account-entry').click();
+    await workspacePage.getByRole('button', { name: /处理同步更改/ }).click();
+    await expect(workspacePage.locator('.conflict-list')).toContainText('19 项相关更改');
+    await workspacePage.getByRole('button', { name: '应用本机版本', exact: true }).click();
+    await expect(workspacePage.getByText('没有需要处理的更改。', { exact: true })).toBeVisible();
+    const restored = (await pool.query(
+      "SELECT payload FROM sync_entities WHERE account_id=$1 AND entity_type='savedTabs' AND payload->>'collectionId'=$2 AND NOT deleted",
+      [account.id, group.id],
+    )).rows.map(r => r.payload).sort((a, b) => a.position - b.position);
+    assert.deepEqual(restored, tabs.map((tab, i) => ({ ...tab, position: i, collectionId: group.id, icon: i < 2 ? '' : 'duoyu-asset:' + hash,
+      ...(i === 0 ? { starred: true } : {}) })));
+    assert.equal(iconPosts, 1, '16 links sharing a PNG must cause one asset request');
+    console.log('PASS applying an old 19-change workspace preview preserves all links, order and subsequent edits');
+  } finally {
+    if (!linkPage.isClosed()) await linkPage.close();
+    await workspacePage.close();
+  }
   console.log(
     'PASS real extension UI: shared desktop icon/folder/widgets and wallpaper previews, full local/cloud selection, JSON import and PostgreSQL persistence',
   );

@@ -1,3 +1,4 @@
+import { prepareEditableDesktop } from './fixtures/editable-desktop.mjs';
 import assert from 'node:assert/strict';
 import { chromium, expect } from '@playwright/test';
 import { mkdtemp } from 'node:fs/promises';
@@ -14,6 +15,7 @@ const context = await chromium.launchPersistentContext(
   },
 );
 try {
+  await prepareEditableDesktop(context);
   await context.route('https://api.bimg.cc/**', (r) => r.abort());
   const page = await context.newPage();
   const errors = [];

@@ -40,6 +40,7 @@ process.send({ id: 'ready', state: client.syncState.value });
 process.on('message', async (message) => {
   try {
     if (message.action === 'add') await database.libraryItems.put(message.item);
+    if (message.action === 'editMemo') await database.memos.update(message.memoId, message.changes);
     if (message.action === 'sync') await client.syncNow();
     if (message.action === 'legacy') state.noResponse = true;
     if (message.action === 'offline') state.offline = true;
@@ -62,6 +63,7 @@ process.on('message', async (message) => {
       id: message.id,
       state: client.syncState.value,
       items: await database.libraryItems.toArray(),
+      ...(message.action === 'readMemos' ? { memos: await database.memos.toArray(), pages: await database.memoPages.toArray() } : {}),
       pending: await database.syncOutbox.count(),
     });
   } catch (e) {

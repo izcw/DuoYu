@@ -1,3 +1,4 @@
+import { prepareEditableDesktop } from './fixtures/editable-desktop.mjs';
 import { chromium, expect } from '@playwright/test';
 import { mkdtemp, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -20,6 +21,7 @@ const context = await chromium.launchPersistentContext(
 );
 let page;
 try {
+  await prepareEditableDesktop(context);
   await context.route('https://api.bimg.cc/**', (r) => r.abort());
   const worker =
     context.serviceWorkers()[0] ||

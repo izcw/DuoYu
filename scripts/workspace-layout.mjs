@@ -179,10 +179,7 @@ try {
     const icon = first.locator('.workspace-icon-slot'),
       title = first.locator('strong');
     assert.equal((await first.boundingBox()).y, (await second.boundingBox()).y);
-    assert.ok(
-      (await title.boundingBox()).y >=
-        (await icon.boundingBox()).y + (await icon.boundingBox()).height,
-    );
+    assert.ok((await title.boundingBox()).x >= (await icon.boundingBox()).x + (await icon.boundingBox()).width);
     await list.press('Enter');
     await expect.poll(moving).toBe(true);
     await grid.press('Enter');

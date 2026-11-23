@@ -1,26 +1,25 @@
-// Keep only the formatting offered by the memo editor. Pasted and imported
-// markup passes through an inert template before it can enter the live page.
+const allowed = new Set([
+  'B',
+  'STRONG',
+  'U',
+  'S',
+  'STRIKE',
+  'UL',
+  'OL',
+  'LI',
+  'BR',
+  'DIV',
+  'P',
+  'MARK',
+  'H1',
+  'H2',
+  'H3',
+]);
+// Pasted and imported markup passes through an inert template before display.
 export function cleanMemoHtml(html: string): string {
   const input = document.createElement('template');
   input.innerHTML = html;
   const output = document.createElement('div');
-  const allowed = new Set([
-    'B',
-    'STRONG',
-    'U',
-    'S',
-    'STRIKE',
-    'UL',
-    'OL',
-    'LI',
-    'BR',
-    'DIV',
-    'P',
-    'MARK',
-    'H1',
-    'H2',
-    'H3',
-  ]);
   function copy(source: Node, parent: Node) {
     if (source.nodeType === Node.TEXT_NODE) {
       parent.appendChild(document.createTextNode(source.textContent || ''));
