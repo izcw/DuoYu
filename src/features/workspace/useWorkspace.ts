@@ -17,6 +17,10 @@ import type { WorkspaceUndo } from '../sync/capture';
 
 export type BrowserTab = Browser.tabs.Tab;
 
+function tabWebUrl(tab: BrowserTab) {
+  return webUrl(tab.pendingUrl || tab.url || '');
+}
+
 export function useWorkspace() {
   const allCollections = ref<TabCollection[]>([]);
   const spaces = ref<WorkspaceSpace[]>([]);
@@ -40,7 +44,7 @@ export function useWorkspace() {
   const openTabUrls = computed<Set<string>>(previous => {
     const urls = new Set<string>();
     for (const tab of tabs.value) {
-      const url = webUrl(tab.pendingUrl || tab.url || '');
+      const url = tabWebUrl(tab);
       if (url) urls.add(url);
     }
     return previous && previous.size === urls.size && [...urls].every(url => previous.has(url)) ? previous : urls;
@@ -188,6 +192,14 @@ export function useWorkspace() {
       busy.value = false;
     }
   }
+  async function queryWorkspaceTabs() {
+    const result = await browser.tabs.query({ windowType: 'normal' });
+    const prefix = browser.runtime.getURL('/');
+    return result.filter(tab =>
+      tab.id !== owner?.id && tab.incognito === !!owner?.incognito &&
+      !(tab.url || tab.pendingUrl || '').startsWith(prefix),
+    );
+  }
   async function refresh() {
     const request = ++generation;
     try {
@@ -195,7 +207,7 @@ export function useWorkspace() {
         permissions: ['tabs'],
       });
       const [result, openWindows, groups] = await Promise.all([
-        browser.tabs.query({ windowType: 'normal' }),
+        queryWorkspaceTabs(),
         browser.windows.getAll({ windowTypes: ['normal'] }),
         browser.tabGroups.query({}),
       ]);
@@ -213,15 +225,7 @@ export function useWorkspace() {
         selectedWindow.value =
           windowOptions.value.find((w) => w.id === owner?.windowId)?.id ??
           windowOptions.value[0]?.id;
-      const prefix = browser.runtime.getURL('/');
-      tabs.value = result
-        .filter(
-          (t) =>
-            t.id !== owner?.id &&
-            t.incognito === !!owner?.incognito &&
-            !(t.url || t.pendingUrl || '').startsWith(prefix),
-        )
-        .sort((a, b) => a.windowId - b.windowId || a.index - b.index);
+      tabs.value = result.sort((a, b) => a.windowId - b.windowId || a.index - b.index);
     } catch {
       if (!disposed)
         showNotice('无法读取标签页，请重新加载扩展并允许读取标签页信息。', 'alert');
@@ -334,8 +338,33 @@ export function useWorkspace() {
   }
   async function activate(tab: BrowserTab) {
     if (tab.id === undefined) return;
-    await browser.tabs.update(tab.id, { active: true });
-    await browser.windows.update(tab.windowId, { focused: true });
+    const activeTab = await browser.tabs.update(tab.id, { active: true });
+    await browser.windows.update(activeTab?.windowId ?? tab.windowId, { focused: true });
+  }
+  async function openSavedCard(entry: SavedTab) {
+    const url = webUrl(entry.url);
+    if (!url) throw new Error('无法打开收藏，请检查网页地址');
+
+    // 圆点随浏览器事件异步刷新，点击时重新匹配，避免切换到刚刚跳转的旧标签。
+    const findMatch = async () => {
+      const matches = (await queryWorkspaceTabs()).filter(tab => tabWebUrl(tab) === url);
+      return matches.find(tab => tab.windowId === owner?.windowId) ?? matches[0];
+    };
+    const match = await findMatch();
+    if (match) {
+      try {
+        await activate(match);
+        return;
+      } catch {
+        // 标签可能在激活前关闭；仍有相同页面时优先定位，避免重复打开。
+        const remaining = await findMatch();
+        if (remaining) {
+          await activate(remaining);
+          return;
+        }
+      }
+    }
+    await openSaved([entry]);
   }
   async function close(tab: BrowserTab) {
     if (tab.id !== undefined && tab.id !== owner?.id)
@@ -521,7 +550,7 @@ export function useWorkspace() {
     toggleBrowserGroup,
     saveBrowserGroup,
     close,
-    openSaved,
+    openSavedCard,
     openCollection,
     removeGroup,
     removeTab,

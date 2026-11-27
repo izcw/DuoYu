@@ -67,7 +67,7 @@ const {
   activate,
   toggleBrowserGroup,
   saveBrowserGroup,
-  openSaved,
+  openSavedCard,
   openCollection,
   removeGroup,
   removeTab,
@@ -1337,7 +1337,7 @@ function collapse(id: string) {
                       :url="tab.url"
                       :icon="tab.icon"
                       :open-urls="openTabUrls"
-                      @open="run(() => openSaved([tab]))"
+                      @open="run(() => openSavedCard(tab))"
                       ><template #checkbox>
                         <input
                           class="workspace-card-checkbox"

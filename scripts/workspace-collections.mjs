@@ -204,6 +204,33 @@ try {
   });
   const secondId = await second.getAttribute('data-collection-id');
   const alphaCard = first.locator('.workspace-saved-tab').filter({ hasText: 'Alpha' });
+  // 首次点击应在后台打开；圆点出现后再点击，应激活同一标签。
+  const alphaDot = alphaCard.getByRole('img', { name: '此链接已打开' });
+  const findAlphaTabs = () => page.evaluate(url => chrome.tabs.query({ url }), tabs[0].url);
+  await expect(alphaDot).toHaveCount(0);
+  await alphaCard.click();
+  await expect(alphaDot).toBeVisible();
+  const [localAlpha] = await findAlphaTabs();
+  assert.equal(localAlpha.active, false);
+  const otherWindow = await page.evaluate(url => chrome.windows.create({ url, focused: false }), tabs[0].url);
+  await alphaCard.click();
+  await expect.poll(async () => (await findAlphaTabs()).find(tab => tab.id === localAlpha.id)?.active).toBe(true);
+  assert.equal((await findAlphaTabs()).length, 2);
+
+  // 两个窗口都有同一网址时优先当前窗口；只剩另一个窗口时，卡片也能将其置前。
+  await page.evaluate(async ({ owner, localAlpha, otherWindow }) => {
+    await chrome.tabs.remove(localAlpha.id);
+    await chrome.tabs.create({ windowId: otherWindow.id, url: 'about:blank', active: true });
+    await chrome.tabs.update(owner.id, { active: true });
+    await chrome.windows.update(owner.windowId, { focused: true });
+  }, { owner, localAlpha, otherWindow });
+  await alphaCard.click();
+  await expect.poll(async () => (await findAlphaTabs()).map(tab => [tab.windowId, tab.active]))
+    .toEqual([[otherWindow.id, true]]);
+  await expect.poll(() => page.evaluate(async () => (await chrome.windows.getLastFocused()).id)).toBe(otherWindow.id);
+  await page.evaluate(id => chrome.windows.remove(id), otherWindow.id);
+  await page.bringToFront();
+  await expect(alphaDot).toHaveCount(0);
   await alphaCard.click({ button: 'right' });
   await expect(alphaCard.getByRole('button', { name: '修改', exact: true })).toBeVisible();
   await expect(alphaCard.getByRole('combobox')).toHaveCount(0);
